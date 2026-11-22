@@ -19,6 +19,11 @@ sed -i '/IO_DESC(MM_IO_BASE_NAND, SZ_64K)/d; /IO_DESC(MM_IO_BASE_UMI, SZ_64K)/d'
 # console dies when the boot console hands over
 sed -i 's/\.dev_id = "uarta",/.dev_id = "uartA",/; s/\.dev_id = "uartb",/.dev_id = "uartB",/' arch/arm/mach-bcmring/core.c
 grep -q '.dev_id = "uartA"' arch/arm/mach-bcmring/core.c
+# the UART clock is already running (U-Boot set it up); start its use count at 1 so
+# the AMBA bus's enable/disable around reading the peripheral ID does not gate it off
+# under the boot console
+sed -i 's/^\t.rate_hz = HW_CFG_UART_CLK_HZ,$/\t.rate_hz = HW_CFG_UART_CLK_HZ,\n\t.use_cnt = 1, \/* T48S: on from U-Boot *\//' arch/arm/mach-bcmring/core.c
+grep -q "use_cnt = 1, /\* T48S" arch/arm/mach-bcmring/core.c
 # leave the PLLs exactly as U-Boot set them
 sed -i 's/^\tchipcHw_enableSpreadSpectrum();/\t\/* T48S: chipcHw_enableSpreadSpectrum() skipped *\//' arch/arm/mach-bcmring/arch.c
 grep -q "spreadSpectrum() skipped\|SpreadSpectrum() skipped" arch/arm/mach-bcmring/arch.c

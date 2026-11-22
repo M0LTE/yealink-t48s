@@ -4,6 +4,8 @@ Last updated 2026-11-22.
 
 ## Done
 
+- **Our own kernel runs** (2026-11-22): Linux 3.6.11 for the board, network-booted via recovery mode, busybox shell on the serial console, banner on the screen. See `kernel/README.md`.
+
 - **Network boot of our own userspace** (2026-11-22): recovery mode (Speakerphone at power-on, menu option 1, TFTP from `tools/tftpd.py`) boots `T48S.bin` and our `T48S.rfs`. Serial console works both ways; no watchdog resets. USB recovery hangs with our stick. Details in own-kernel.md.
 
 - Touch test passed (2026-11-22): taps land on the buttons, keys and the handset drop back to Yealink. Linux keycodes are keypad matrix positions (digits 1-9 = 57 58 59 / 49 50 51 / 41 42 43, hook = 89); U-Boot's scan codes use different numbers.
@@ -23,7 +25,7 @@ Last updated 2026-11-22.
 ## Next
 
 1. **More pages and the keypad:** map the keys once Tom has pressed them; more packet views (heard lists, per-port traffic); maybe a page switcher.
-2. **Our own kernel.** The boot route is proven (see own-kernel.md); next is building a kernel for this board (machine 2342) to replace Yealink's `T48S.bin`.
+2. **Our own kernel: drivers.** It boots to a shell (kernel/README.md). Next: a simple framebuffer driver over U-Boot's screen memory (console on the screen), then Ethernet (the on-chip switch; mainline has no driver), keypad and touch.
 3. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
 
 ## How we got root

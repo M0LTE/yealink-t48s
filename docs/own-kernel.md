@@ -112,6 +112,10 @@ So the route for our own kernel is proven: put it in `T48S.bin`, our userspace i
 
 Risk notes: nothing is written to flash except `BOOTMODE` in the userenv partition (by U-Boot, then cleared by our init, as Yealink does every boot). If our init failed to clear it, the next normal boot would run `usbmode.sh`, which reflashes 66.82.0.31 from the stick (the version already installed); our files in `/config` and `/data` survived the earlier web upgrades, so they should survive this too.
 
+## Our own kernel: running (2026-11-22)
+
+Linux 3.6.11 with Broadcom's mainline `mach-bcmring` platform, patched for the board (`kernel/`), boots through recovery option 1 to a busybox shell on the serial console, with a banner on the screen. Six boot attempts; what each one taught is in `kernel/README.md`. Getting back to Yealink afterwards takes two power cycles (the first runs Yealink's resume script, which fails harmlessly because `tftpd.py --rom-once` refuses it the ROM).
+
 ## Paths to our own kernel
 
 1. **Boot from USB via the recovery mode (no flash writes).** Needs: the key for scan code 40/41 (and maybe 50 for USB), a FAT USB stick with the genuine `.rom` plus our `.bin` (legacy image) and `.rfs` (ext2 ramdisk), named after `phonename`. First target: a minimal kernel with serial console and a busybox ramdisk, reaching a shell on CON4. Kernel options: mainline v3.6 `bcmring_defconfig` adapted to machine 2342 and this board's memory map; it covers serial and NAND. Build needs an old toolchain (gcc 4.x era), in a container or on a build box.
