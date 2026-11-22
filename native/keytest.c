@@ -13,6 +13,9 @@
 #include <string.h>
 #include <unistd.h>
 
+/* the kernel's 32-bit layout: musl's struct timeval has a 64-bit time_t */
+struct ev32 { unsigned sec, usec; unsigned short type, code; int value; };
+
 static const char *name(int code)
 {
 	switch (code) {
@@ -77,7 +80,7 @@ int main(void)
 		if (poll(p, p[1].fd >= 0 ? 2 : 1, -1) < 0)
 			return 1;
 		for (i = 0; i < 2; i++) {
-			struct input_event ev;
+			struct ev32 ev;
 			const char *n;
 			int len;
 
