@@ -5,7 +5,7 @@ FREE = clang --target=armv6-linux-gnueabi -march=armv6 -mfloat-abi=soft -marm -O
        -ffreestanding -fno-builtin -nostdlib -fuse-ld=lld
 MUSLCC = $(T)/bin/armcc -Os -Wall
 
-all: fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner cpubench
+all: fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner cpubench keytest
 
 fbtest: fbtest.c
 	$(FREE) -static -Wl,-e,_start -o $@ $<
@@ -14,7 +14,7 @@ fbtest: fbtest.c
 fbswap.so: fbswap.c
 	$(FREE) -O2 -fPIC -shared -Wl,--hash-style=both -Wl,-soname,fbswap.so -o $@ $<
 
-envexec fbinfo tap sertest usbinit: %: %.c
+envexec fbinfo tap sertest usbinit keytest: %: %.c
 	$(MUSLCC) -o $@ $<
 
 gen/fonts.h: ../tools/mkfont.py
