@@ -10,9 +10,14 @@ stty -F /dev/ttyAMA0 115200 raw -echo 2>/dev/null
 exec >/dev/ttyAMA0 2>&1
 echo
 echo "===== T48S rescue ramdisk ====="
-echo "BOOTMODE before: $(userenv -g BOOTMODE)"
+echo "--- userenv before:"; userenv
+# a failed firmware update leaves fwup_mode=safeup and fwup_install=1, and U-Boot
+# then forces BOOTMODE=safemode on every boot; clear all three
 userenv -s BOOTMODE
-echo "BOOTMODE after: $(userenv -g BOOTMODE)"
+userenv -s fwup_mode
+userenv -s fwup_install -v 0
+echo "--- userenv after:"; userenv
+mkdir -p /rfs && mount -t yaffs2 -o ro /dev/mtdblock8 /rfs && { echo "--- /usr/scripts/safemode.sh:"; cat /rfs/usr/scripts/safemode.sh; umount /rfs; }
 mount -t yaffs2 /dev/mtdblock11 /cfg && echo "config partition mounted"
 mount -t yaffs2 /dev/mtdblock12 /dat && echo "data partition mounted"
 echo "--- before:"; ls -la /cfg; ls -la /dat /dat/ssh /dat/custom
