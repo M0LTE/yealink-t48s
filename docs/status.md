@@ -7,14 +7,19 @@ Last updated 2026-11-22.
 - Root shell on the phone, over the network, no hardware needed.
 - Our own compiled program running on the phone and drawing the whole screen.
 - Serial console wired up for watching boots.
+- SSH: static dropbear (musl, built with `native/build-dropbear.sh`) installed in `/data/ssh`, key login as root. `scp` needs `-O` (no SFTP server).
+- Found the boot hook: Yealink's `phone.sh` runs `/config/simulator.sh` *instead of* its normal startup when that file exists.
+
+## Now
+
+**The phone is offline and needs a power cycle (2026-11-22 12:45).** The first boot-hook attempt ran a copy of `phone.sh` from `/tmp`; the network never came up. Likely cause: the copy finds its helpers relative to its own path. The hook disarms itself before doing anything else, so a power cycle should give a normal Yealink boot. After that, root via the web trick, start dropbear by hand, and try the corrected hook (`phone/simulator.sh`, which just runs Yealink's original `phone.sh` after moving itself away).
 
 ## Next
 
-1. **SSH.** Build a static dropbear for the phone, keep its host key on the writable `/config` partition.
-2. **Survive reboots.** Find a boot hook on a writable partition so SSH (and later our UI) starts by itself, without the web trick.
-3. **Our own UI alongside Yealink's.** A launcher that can switch the screen between Yealink's phone UI and ours, so the SIP phone keeps working.
-4. **Packet-radio display.** For example the connections currently open on GB7RDG. Needs a small feed from the node side.
-5. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
+1. **Survive reboots.** Get the corrected boot hook working, so SSH (and later our UI) starts by itself, without the web trick.
+2. **Our own UI alongside Yealink's.** A launcher that can switch the screen between Yealink's phone UI and ours, so the SIP phone keeps working.
+3. **Packet-radio display.** For example the connections currently open on GB7RDG. Needs a small feed from the node side.
+4. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
 
 ## How we got root
 
@@ -69,6 +74,23 @@ Flash partitions (`/proc/mtd`):
 - `/phone/scripts/phoneapp.sh` runs the UI `/phone/bin/t48/dskPhone.exx -qws` (Qt Embedded) in an endless loop.
 - SIP is a separate process, `sipServer.exx`; the web UI is lighttpd plus `fcgiServer.exx`.
 - Pausing `dskPhone.exx` with SIGSTOP makes the phone reboot within a few minutes, so something supervises it. Replacing the UI means changing how it is launched, not just pausing it.
+
+## SSH and the boot hook
+
+Files on the phone:
+
+| Path | What |
+|---|---|
+| `/data/ssh/dropbearmulti` | dropbear, dropbearkey, scp, dbclient (symlinks alongside) |
+| `/data/ssh/dropbear_ed25519_host_key` | host key, fingerprint `SHA256:lIPt4HWHPqX6WiCIdtriaOeP9snbZc8m11q+4YmkdBk` |
+| `/data/ssh/authorized_keys` | keys allowed to log in as root (dropbear `-D /data/ssh`, since root's home `/` is read-only) |
+| `/data/custom/start.sh` | our services, started at boot (from `phone/start.sh`) |
+| `/data/custom/rearm.sh` | puts the boot hook back after 2 minutes if SSH is up (from `phone/rearm.sh`) |
+| `/config/simulator.sh` | the boot hook (from `phone/simulator.sh`); `.armed` suffix while disarmed |
+
+Start SSH by hand: `/data/ssh/dropbear -r /data/ssh/dropbear_ed25519_host_key -D /data/ssh -s -p 22 -P /var/dropbear.pid`
+
+Other boot facts: `/etc/inittab` runs a getty on the serial port, but it gave no response to Enter. `/phone/scripts/TelnetServices.sh` starts Yealink's own telnetd when the config setting `features.temode` is 1. There is also a uid-0 account `toor` in `/etc/passwd`.
 
 ## Building for the phone
 
