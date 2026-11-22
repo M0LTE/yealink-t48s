@@ -1,0 +1,13 @@
+# Yealink firmware images: vendor copyright and large; record their sources in docs instead
+rom-*/
+# Pages and scripts dumped from the phone's web UI (vendor code)
+web/
+# Raw framebuffer dumps
+shots/*.raw
+frames/*.bgra
+# Build output
+native/*
+!native/*.c
+!native/*.h
+!native/Makefile
+__pycache__/
