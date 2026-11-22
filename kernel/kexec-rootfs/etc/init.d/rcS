@@ -3,6 +3,7 @@
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /dev/pts && mount -t devpts devpts /dev/pts   # SSH logins need ptys
 # userspace is up: disarm the SP805 watchdog the loader armed (unlock, control 0, lock)
 devmem 0x80017c00 32 0x1ACCE551; devmem 0x80017808 32 0; devmem 0x80017c00 32 0
 echo
