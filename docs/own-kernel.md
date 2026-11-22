@@ -67,7 +67,9 @@ Still unknown: the exact `phonename` (the code has 'T2x', 'T61', 'T66', 'T41', '
 
 CON4 is `ttyAMA0`. Phone to PC works. PC to phone: the UART's receive counter in `/proc/tty/driver/ttyAMA` counts every byte we send, but neither U-Boot nor Yealink's Linux passes them on. So the hardware path is fine, and our own kernel should get a working two-way console. (Linux's console is silent today only because `bootconsole` is empty.)
 
-## Watchdogs: the main risk
+## Watchdogs
+
+Tested 2026-11-22: with Yealink's kernel and our own init (no Yealink userspace), nothing reset the phone in 5 minutes. Original notes:
 
 - The keypad driver talks to the Holtek chip, which has its own watchdog (`/proc/keypad/watchdog` reads 11; driver functions `holtek_get_watchdog`, `holtek_set_watchdog`). Freezing Yealink's UI rebooted the phone within minutes, so something keeps it fed.
 - The SoC watchdog at 0x80017800.
@@ -96,6 +98,16 @@ The stick (FAT32, plugged into the phone) now holds:
 `native/usbinit.c` (the ramdisk's `/sbin/init`): clears `BOOTMODE` with Yealink's own `userenv`, prints `/proc/cmdline` and `/proc/version`, draws "BOOTED FROM USB" on the screen through `/dev/mem` at 0x07A24000, echoes anything typed on the serial port, and prints `alive N s` every second. Exact files and checksums are in `dumps/usbtest/` (not committed).
 
 To run it (Yealink's documented procedure, "Recovery Mode on Yealink IP Phones", USB section for T41S/T42S/T46S/T48S): hold the **Speakerphone** key and reconnect power, keep holding until the screen shows "1. TFTP / 2: USB", then press **2**. Do not hold OK. Success looks like "BOOTED FROM USB" on the screen and `alive` lines in the serial log on proxmox0. If the counter stops and the phone reboots, that is a watchdog, and the last number is its timeout. Afterwards, power-cycle without holding anything for a normal boot.
+
+### Result (2026-11-22 17:29 UTC): it works, over TFTP
+
+- **USB:** with Speakerphone held at power-on (scan code 40) the menu appeared and USB was chosen, but U-Boot hung at "scanning usb for storage devices..." with our 4 GB stick (Yealink recommends Kingston sticks; old U-Boot USB stacks hang on some). Nothing was written.
+- **TFTP (menu option 1):** entered IP 10.45.0.214, netmask 255.255.255.0, gateway 10.45.0.1, TFTP server 10.45.0.183 (`tools/tftpd.py dumps/usbtest`, run as root). U-Boot fetched only the head of `T48S.rom` (2936 bytes, then aborts the transfer with "File too large" on purpose), printed `Rom check ok`, saved its environment (it erases and rewrites the userenv partition 0x220000-0x300000 several times along the way), then fetched `T48S.bin` and `T48S.rfs` and booted them.
+- **Our init ran** on Yealink's kernel: printed the command line (`initrd=0x02a80000,0x800000 root=/dev/ram0 rw rootfstype=ext2 ... mem=124M fb=0x07A24000:0x005DC000`), cleared `BOOTMODE` (it was `resumemode`), drew its banner, and **echoed serial input** ("hello from proxmox0"): the console works both ways outside Yealink's software.
+- **No watchdog reset** in 5 minutes. Neither the SoC watchdog nor the Holtek one is armed without Yealink's userspace.
+- Lesson for `tftpd.py`: U-Boot repeats its previous ACK when it misses a packet; the server must resend on that, not keep waiting.
+
+So the route for our own kernel is proven: put it in `T48S.bin`, our userspace in `T48S.rfs`, and boot via recovery option 1. No flash writes beyond U-Boot's own environment.
 
 Risk notes: nothing is written to flash except `BOOTMODE` in the userenv partition (by U-Boot, then cleared by our init, as Yealink does every boot). If our init failed to clear it, the next normal boot would run `usbmode.sh`, which reflashes 66.82.0.31 from the stick (the version already installed); our files in `/config` and `/data` survived the earlier web upgrades, so they should survive this too.
 
