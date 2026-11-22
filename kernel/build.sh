@@ -85,6 +85,9 @@ cp ../kernel/drivers/t48s_keypad.c drivers/input/t48s_keypad.c
 grep -q "t48s_keypad.o" drivers/input/Makefile || echo 'obj-$(CONFIG_INPUT) += t48s_keypad.o' >> drivers/input/Makefile
 cp ../kernel/drivers/t48s_holtek.c drivers/misc/t48s_holtek.c
 grep -q "t48s_holtek.o" drivers/misc/Makefile || echo "obj-y += t48s_holtek.o" >> drivers/misc/Makefile
+# our touchscreen driver (TSC2046 on the PL022 SPI host, polled)
+cp ../kernel/drivers/t48s_touch.c drivers/input/t48s_touch.c
+grep -q "t48s_touch.o" drivers/input/Makefile || echo 'obj-$(CONFIG_INPUT) += t48s_touch.o' >> drivers/input/Makefile
 # put the delay loop on an 8-byte boundary. On this ARM1176 the two-instruction loop
 # takes 2 cycles per pass there and 3 at the other word alignment, and where it lands is
 # an accident of the link: unaligned, 3.6 measured 331.77 BogoMIPS against the 498.07
