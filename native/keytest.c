@@ -9,6 +9,7 @@
 #include <linux/input.h>
 #include <poll.h>
 #include <stdio.h>
+#include <sys/ioctl.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -59,6 +60,10 @@ int main(void)
 		perror("/dev/input/event0");
 		return 1;
 	}
+	/* take the keys for ourselves, so the text console does not also echo them */
+	ioctl(p[0].fd, EVIOCGRAB, 1);
+	if (p[1].fd >= 0)
+		ioctl(p[1].fd, EVIOCGRAB, 1);
 	if (tty >= 0) {
 		const char *s = "\033[2J\033[H\n\n   KEY TEST: press any key, or lift the handset\n";
 		write(tty, s, strlen(s));
