@@ -5,7 +5,7 @@ FREE = clang --target=armv6-linux-gnueabi -march=armv6 -mfloat-abi=soft -marm -O
        -ffreestanding -fno-builtin -nostdlib -fuse-ld=lld
 MUSLCC = $(T)/bin/armcc -Os -Wall
 
-all: fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui
+all: fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner
 
 fbtest: fbtest.c
 	$(FREE) -static -Wl,-e,_start -o $@ $<
@@ -24,4 +24,7 @@ t48ui: t48ui.c gen/fonts.h
 	$(MUSLCC) -o $@ t48ui.c
 
 clean:
-	rm -f fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui
+	rm -f fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner
+
+membanner: membanner.c gen/fonts.h
+	$(MUSLCC) -o $@ membanner.c

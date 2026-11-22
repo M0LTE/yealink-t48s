@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""tftpd.py DIR [PORT]: minimal read-only TFTP server for U-Boot's recovery boot.
+"""tftpd.py DIR [PORT] [--rom-once]: minimal read-only TFTP server for U-Boot's recovery boot.
 
 Serves files from DIR (octet mode, RFC 2347/2348/2349 options blksize, tsize,
 timeout). Logs every request, so we can see the exact names U-Boot asks for.
 A request for any *.rom that does not exist is answered with ROM_FALLBACK
 (the recovery mode may name the ROM after an internal board type).
+--rom-once: stop serving *.rom once the *.rfs has been sent. U-Boot needs the
+ROM head before it boots our files, but on the next normal boot Yealink's
+resumemode.sh asks for the same ROM to reflash the phone; refusing it makes
+that attempt fail harmlessly.
 Needs root for port 69.
 """
 import os, socket, struct, sys, threading, time
 
-ROOT = os.path.abspath(sys.argv[1])
-PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 69
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+ROOT = os.path.abspath(ARGS[0])
+PORT = int(ARGS[1]) if len(ARGS) > 1 else 69
+ROM_ONCE = "--rom-once" in sys.argv
+rfs_sent = False
 ROM_FALLBACK = "T48S.rom"
 
 
@@ -21,8 +28,13 @@ def log(*a):
 def serve(client, filename, opts):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("", 0))
+    global rfs_sent
     name = os.path.basename(filename.replace("\\", "/"))
     path = os.path.join(ROOT, name)
+    if ROM_ONCE and rfs_sent and name.lower().endswith(".rom"):
+        log(f"{client[0]}: refusing {name} (ramdisk already served; --rom-once)")
+        s.sendto(struct.pack("!HH", 5, 1) + b"File not found\0", client)
+        return
     if not os.path.isfile(path) and name.lower().endswith(".rom"):
         log(f"{client[0]}: {name} not found, serving {ROM_FALLBACK}")
         path = os.path.join(ROOT, ROM_FALLBACK)
@@ -85,6 +97,8 @@ def serve(client, filename, opts):
         if len(chunk) < blksize:
             break
     log(f"{client[0]}: sent {name} in {time.time() - t0:.1f} s")
+    if name.lower().endswith(".rfs"):
+        rfs_sent = True
 
 
 def main():
