@@ -1,6 +1,6 @@
 # Our kernel for the T48S
 
-**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 498.89, matching Yealink's 498.07 (see "CPU speed" below). Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. The screen, keys and hook switch have drivers too (below); none yet for touch, NAND or audio.
+**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 498.89, matching Yealink's 498.07 (see "CPU speed" below). Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. The screen, keys, hook switch and touchscreen have drivers too (below); none yet for NAND or audio.
 
 Linux 3.6.11 (the last mainline release with Broadcom's `mach-bcmring` platform, the BCM11107 family the phone's BCM11188 belongs to), patched and configured for the phone. Built with gcc 4.7 in an Ubuntu 14.04 container.
 
@@ -65,6 +65,26 @@ tools/ourkernel.sh ssh 'echo 1 > /sys/module/t48s_keypad/parameters/debug'
 ```
 
 then press each key once. Every press and release prints a line on the screen and in `dmesg`, such as `t48s_keypad: row 8 col 0 code 65 down -> key 2` (key 2 is `KEY_1`; `key 0` means the position is not in the table). Lift and replace the handset: expect `hook GPIO29 = 0 (off hook)` then `= 1 (on hook)`; if it is the other way round, flip `HOOK_OFF_LEVEL` in the driver. Note the code printed for Headset, Mute, Message, Hold, Redial, Transfer and each volume key so the table can be finished. With debug off (`echo 0`), digits typed at the `login:` prompt on the screen should appear there.
+
+## Touchscreen (2026-11-22, issue #4)
+
+`drivers/t48s_touch.c` (copied into `drivers/input/`) gives the input device "T48S touchscreen" (`/dev/input/event2`): `BTN_TOUCH`, `ABS_X`, `ABS_Y`, `ABS_PRESSURE`, all raw 12-bit values (0 to 4095), the same as Yealink's own driver reports. The chip is a TI TSC2046 on the SoC's SPI host (an ARM PL022). The driver talks to the PL022 directly and polls: about 50 times a second (it asks for 10 ms, the 100 Hz tick makes that 20) it reads the pen-down pin (GPIO26), and only while that is low does it clock the chip (X ten times, Y ten times, pressure, in one quarter-millisecond transfer). No SPI core, no GPIO interrupts, nothing to configure.
+
+Raw values become pixels in userspace, with a tslib-style `/etc/pointercal`. The kexec root filesystem carries the phone's factory calibration (from U-Boot's `calparam`): `14798 13 -4134128 53 10207 -5441552 65536`, meaning x = (14798 * rawx + 13 * rawy - 4134128) / 65536 and y = (53 * rawx + 10207 * rawy - 5441552) / 65536. To recalibrate later, replace those seven numbers.
+
+Checks without touching anything:
+
+```
+tools/ourkernel.sh ssh 'cat /sys/module/t48s_touch/parameters/diag'
+```
+
+prints the pen pin, the chip's temperature readings (about 37 C on the bench), and counters. To test with a finger:
+
+```
+tools/ourkernel.sh ssh touchtest
+```
+
+(`native/touchtest.c`, built into the root filesystem). Tom ran this on 2026-11-22: taps in the four corners and a drag all landed under the finger with the factory calibration. Each touch prints the raw values and the pixel position, and a white dot is drawn on the screen there; it should land under the finger. `echo 1 > /sys/module/t48s_touch/parameters/debug` logs every reading, including rejected ones, to `dmesg`.
 
 ## CPU speed (2026-11-22, issue #9)
 
