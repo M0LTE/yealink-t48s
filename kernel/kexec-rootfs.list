@@ -18,6 +18,8 @@ slink /init bin/busybox 0777 0 0
 slink /sbin/init ../bin/busybox 0777 0 0
 file /bin/back-to-yealink /w/kexec-rootfs/bin/back-to-yealink 0755 0 0
 file /usr/bin/membanner /w/kexec-rootfs/usr/bin/membanner 0755 0 0
+file /usr/bin/touchtest /w/kexec-rootfs/usr/bin/touchtest 0755 0 0
+file /etc/pointercal /w/kexec-rootfs/etc/pointercal 0644 0 0
 file /etc/inittab /w/kexec-rootfs/etc/inittab 0644 0 0
 file /etc/init.d/rcS /w/kexec-rootfs/etc/init.d/rcS 0755 0 0
 file /etc/profile /w/kexec-rootfs/etc/profile 0644 0 0

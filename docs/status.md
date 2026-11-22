@@ -4,6 +4,7 @@ Last updated 2026-11-22.
 
 ## Done
 
+- **Touchscreen in our kernel** (2026-11-22, issue #4): `kernel/drivers/t48s_touch.c`, a Linux input device with raw 12-bit positions like Yealink's, polled. Tom tapped the corners and dragged: dots land under the finger using the factory calibration (U-Boot's `calparam`, now `/etc/pointercal` in our root filesystem). Test again any time with `tools/ourkernel.sh ssh touchtest`.
 - **Keys, hook switch and the keypad chip's watchdog in our kernel** (2026-11-22, issue #3): `kernel/drivers/t48s_keypad.c` (keys and hook as Linux input devices, polled) and `kernel/drivers/t48s_holtek.c` (reads the chip's version, turns its watchdog off at boot). The drivers load, read "no key pressed", and the watchdog is proven both ways. **No key has been pressed yet**: see the test steps in `kernel/README.md`. Six function keys still need their labels matched.
 - **Screen console in our kernel** (2026-11-22, issue #2): `kernel/drivers/t48s_fb.c` makes the screen U-Boot leaves running into `/dev/fb0`; kernel messages, status and a login prompt show on it (`docs/img/fbcon-2026-11-22.png`). The loader now stops all DMA before jumping: Yealink's audio DMA kept writing into RAM our kernel uses, which crashed one boot and probably caused the earlier network trouble.
 - **Ethernet in our kernel** (2026-11-22, issue #1): our own driver (`kernel/drivers/t48s_eth.c`) for the on-chip switch. Our kernel gets its address by DHCP and runs SSH (dropbear, key login): `tools/ourkernel.sh ssh`. A 4 MB copy over SSH takes 1.5 s and arrives intact.
@@ -31,7 +32,7 @@ Last updated 2026-11-22.
 ## Next
 
 1. **More pages and the keypad:** map the keys once Tom has pressed them; more packet views (heard lists, per-port traffic); maybe a page switcher.
-2. **Our own kernel: drivers.** It boots to a shell (kernel/README.md). Ethernet and SSH work. The screen console works too. Keys and hook have drivers (#3, key presses still to be tried). Next: touch (#4).
+2. **Our own kernel: drivers.** It boots to a shell (kernel/README.md). Ethernet and SSH work. The screen console works too. Keys and hook have drivers (#3), and so does touch (#4).
 3. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
 
 ## How we got root

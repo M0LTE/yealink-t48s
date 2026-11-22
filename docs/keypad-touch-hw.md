@@ -28,6 +28,16 @@ The keypad is **not** read through the Holtek chip. The Holtek event interrupt i
 - GPIO set and direction in Yealink's kernel are plain read-modify-write of +0x000 and +0x400 with interrupts off (0xC0047C7C..0xC0047DAC); there are no set/clear registers.
 - Not checked: any actual key press, the keypad interrupt, hook polarity.
 
+## Checked on the phone (2026-11-22, issue #4, touch)
+
+- **The SPI host is a PL022** as read offline: id bytes at +0xFE0 give 0x00241022 (the offline 0x00041022 plus a revision nibble). Its registers are 16 bits wide and read back doubled into the top half (CR0 reads 0x00070007).
+- **Yealink leaves it set up**, and it is still so after kexec: CR0 0x0007 (8 bits, mode 0), CR1 0x0002 (enabled, master), CPSR 50 (2 MHz from the 100 MHz SPI clock), IMSC 2. Chipc SPIClock (0x80000024) = 0x00010014. Pin mux: GPIO22, 23, 24 function 3; GPIO25 and 26 plain GPIO; GPIO25 output high, GPIO26 input.
+- **The TSC2046 answers.** With its internal 2.5 V reference on (control bytes 0x87 and 0xF7) the two temperature readings are about 944 and 1141 counts, which works out to 36 or 37 C, a believable board temperature. So chip select, clock, both data lines and the 16-clocks-per-conversion framing are right, and the chip does have a working internal reference. The battery input reads 0 (not connected); the aux input floats (500 to 900).
+- **Pen-down pin:** GPIO26 reads high with nothing touching, and goes low on a touch (Tom's taps each gave one down and one up).
+- **Calibration:** the factory numbers are in U-Boot's environment, `calparam=14798 13 -4134128 53 10207 -5441552 65536` (tslib order). Yealink's `/phone/scripts/calibrate.sh` copies them to `/config/data/pointercal` and links `/etc/pointercal` to that at startup. They mean screen x = 0.2258 * raw x - 63 and screen y = 0.1557 * raw y - 83: raw x 280 to 3822 spans the 800 pixels, raw y 533 to 3615 the 480, no axis swapped or reversed.
+- **Touch test with our driver (Tom, 2026-11-22):** corner taps read raw (367, 687) top left, (3685, 658) top right, (3719, 3450) bottom right, (336, 3479) bottom left, which the factory calibration puts at pixels (19, 23), (769, 19), (777, 454) and (12, 458). Dots drew under the finger; the calibration needs no change. Samples within one reading agree to within 4 counts; a 1.2 s drag gave about 50 positions a second with no jumps. Pressure channels: z1 about 400 to 2500 and z2 about 3100 to 4000 while touched. One reading in 91 was thrown out (the first one of a tap, still settling: spread 204).
+- Linux 3.6 trap: `input_set_abs_params()` does not set `EV_ABS` on the device; without setting it by hand every position event is silently dropped.
+
 ### Key table from Yealink's T48.qmap
 
 Code = row*8 + col + 1, as Yealink's driver reports it. Qt key is what Yealink's UI receives.
