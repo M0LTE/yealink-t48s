@@ -33,10 +33,20 @@
 #define MACH_NR     2342
 #define WDT_CLK_HZ  25000000UL   /* measured: 0x0EE6B280 counts per 10 s */
 
+/* Yealink's kernel has RAM from physical 0x00400000 at PAGE_OFFSET. The build tree
+ * (an OMAP config, RAM at 0x80000000) would compile virt_to_phys()/page_to_phys()
+ * with the wrong offset, so convert by hand. page_address() is fine: its offsets
+ * cancel out. */
+#define Y_PHYS_OFFSET 0x00400000UL
+#define y_virt_to_phys(v) ((unsigned long)(v) - PAGE_OFFSET + Y_PHYS_OFFSET)
+#define y_page_to_phys(pg) y_virt_to_phys(page_address(pg))
+
 static char *image = "/tmp/Image";
 static int wdt = 60;
+static int dry;
 module_param(image, charp, 0);
 module_param(wdt, int, 0);
+module_param(dry, int, 0);	/* 1: do everything except arm the watchdog and jump */
 
 extern char t48_stub_start[], t48_stub_end[];
 
@@ -100,12 +110,12 @@ static int __init t48kexec_init(void)
 		stub_virt = __get_free_pages(GFP_KERNEL, STUB_ORDER);
 		if (!stub_virt)
 			goto out_free;
-		if (!in_dest(virt_to_phys((void *)stub_virt), size) &&
-		    !in_dest(virt_to_phys((void *)stub_virt) + (PAGE_SIZE << STUB_ORDER) - PAGE_SIZE, size))
+		if (!in_dest(y_virt_to_phys((void *)stub_virt), size) &&
+		    !in_dest(y_virt_to_phys((void *)stub_virt) + (PAGE_SIZE << STUB_ORDER) - PAGE_SIZE, size))
 			break;
 		/* leak it on purpose: we never come back */
 	}
-	stub_phys = virt_to_phys((void *)stub_virt);
+	stub_phys = y_virt_to_phys((void *)stub_virt);
 
 	/* read the image, page by page, into pages outside the destination */
 	for (i = 0; i < npages; i++) {
@@ -114,7 +124,7 @@ static int __init t48kexec_init(void)
 			pg = alloc_page(GFP_KERNEL);
 			if (!pg)
 				goto out_free;
-			if (!in_dest(page_to_phys(pg), size))
+			if (!in_dest(y_page_to_phys(pg), size))
 				break;
 			if (nrejects < npages + 64)
 				rejects[nrejects++] = pg;
@@ -140,10 +150,46 @@ static int __init t48kexec_init(void)
 	p->npages = npages;
 	for (i = 0; i < npages; i++) {
 		p->pairs[2 * i] = DEST_PHYS + i * PAGE_SIZE;
-		p->pairs[2 * i + 1] = page_to_phys(pages[i]);
+		p->pairs[2 * i + 1] = y_page_to_phys(pages[i]);
 	}
 	printk(KERN_INFO "t48kexec: stub at phys 0x%08lx, %lu pages to 0x%08lx, watchdog %d s; jumping\n",
 	       stub_phys, npages, DEST_PHYS, wdt);
+
+	if (dry) {
+		printk(KERN_INFO "t48kexec: dry run: first pair dest 0x%08lx src 0x%08lx, last dest 0x%08lx; "
+		       "stub code %d bytes, %lu rejected pages; not jumping\n",
+		       p->pairs[0], p->pairs[1], p->pairs[2 * (npages - 1)],
+		       (int)(t48_stub_end - t48_stub_start), nrejects);
+		ret = -EAGAIN;	/* refuse to stay loaded; frees everything below */
+		goto out_free;
+	}
+
+	/* arm the watchdog now, so a failure anywhere from here on still ends in a
+	 * reset (the stub reloads it after copying) */
+	if (p->wdt_load) {
+		void __iomem *wd = ioremap(0x80017000, 0x1000);
+		if (wd) {
+			writel(0x1ACCE551, wd + 0xc00);	/* unlock */
+			writel(p->wdt_load, wd + 0x800);	/* load */
+			writel(3, wd + 0x808);			/* interrupt + reset enable */
+			writel(0, wd + 0xc00);			/* lock */
+			printk(KERN_INFO "t48kexec: watchdog armed\n");
+		}
+	}
+
+	/* Yealink's Linux leaves UARTA at 9600 baud; set 115200 (100 MHz UART clock:
+	 * divisor 54 + 16/64) so the new kernel's early console is readable. Writing
+	 * LCR_H latches the divisor. */
+	{
+		void __iomem *u = ioremap(0x80012000, 0x1000);
+		if (u) {
+			while (readl(u + 0x18) & 0x08)	/* FR.BUSY: let the last printk drain */
+				;
+			writel(54, u + 0x24);		/* IBRD */
+			writel(16, u + 0x28);		/* FBRD */
+			writel(0x70, u + 0x2c);		/* LCR_H: 8N1, FIFOs on */
+		}
+	}
 
 	/* map the stub's megabyte 1:1 in the current page table (a user address, so
 	 * nothing the kernel needs on the way out is disturbed) */

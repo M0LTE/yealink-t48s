@@ -28,6 +28,10 @@ grep -q '.dev_id = "uartA"' arch/arm/mach-bcmring/core.c
 # under the boot console
 sed -i 's/^\t.rate_hz = HW_CFG_UART_CLK_HZ,$/\t.rate_hz = HW_CFG_UART_CLK_HZ,\n\t.use_cnt = 1, \/* T48S: on from U-Boot *\//' arch/arm/mach-bcmring/core.c
 grep -q "use_cnt = 1, /\* T48S" arch/arm/mach-bcmring/core.c
+# skip the DMA controller setup: nothing uses DMA yet, and after Yealink's kernel has
+# run (kexec boot) the DMA block faults on access (its clock is presumably off)
+sed -i 's/^\tdma_init();/\t\/* T48S: dma_init() skipped *\//' arch/arm/mach-bcmring/arch.c
+grep -q "dma_init() skipped" arch/arm/mach-bcmring/arch.c
 # leave the PLLs exactly as U-Boot set them
 sed -i 's/^\tchipcHw_enableSpreadSpectrum();/\t\/* T48S: chipcHw_enableSpreadSpectrum() skipped *\//' arch/arm/mach-bcmring/arch.c
 grep -q "spreadSpectrum() skipped\|SpreadSpectrum() skipped" arch/arm/mach-bcmring/arch.c
