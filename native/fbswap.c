@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /*
  * fbswap.so: LD_PRELOAD shim for Yealink's dskPhone.exx (Qt Embedded).
  *

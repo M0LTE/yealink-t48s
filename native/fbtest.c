@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /*
  * First native program for the Yealink T48S (BCM11188, ARMv6, Linux 2.6.27 EABI).
  * Freestanding: no libc, raw syscalls only, so it runs regardless of the phone's glibc.

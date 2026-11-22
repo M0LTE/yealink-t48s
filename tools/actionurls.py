@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """actionurls.py [show|set]: read or set the phone's Action URLs (66.82 web UI).
 set: calls take the screen back from t48ui; boot completion pings t48ui's /status."""
 import re, sys

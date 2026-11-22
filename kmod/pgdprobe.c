@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* pgdprobe: print the first-level page table entries (Yealink kernel, swapper_pg_dir at
  * PAGE_OFFSET + 0x4000) for the I/O virtual addresses Yealink's drivers use, to learn the
  * physical addresses behind them. Read only. */

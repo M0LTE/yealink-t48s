@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Where the phone is and how to log in. Password lives outside the repo."""
 import os
 HOST = os.environ.get("T48S_HOST", "10.45.0.214")

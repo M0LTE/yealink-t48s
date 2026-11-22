@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* regprobe: print a few registers from kernel mode (insmod regprobe.ko base=0x32000000 offs=...). */
 #include <linux/module.h>
 #include <linux/kernel.h>

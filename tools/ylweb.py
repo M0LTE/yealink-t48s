@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Minimal client for the Yealink T4xS web UI (firmware 66.86.x).
 
 Reproduces the browser login: a random AES-128 key and IV (hex strings) are

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /* sertest DEV: set DEV to 115200 8N1 raw, send a marker, then print what arrives for 10 s. */
 #include <fcntl.h>
 #include <poll.h>

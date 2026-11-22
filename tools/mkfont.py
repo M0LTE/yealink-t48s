@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """mkfont.py OUT.h: render DejaVu fonts into 8-bit alpha glyph tables for native/t48ui.c (ASCII 32-126)."""
 import sys
 from PIL import Image, ImageDraw, ImageFont

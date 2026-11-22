@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /*
  * t48ui: our own screen for the Yealink T48S, alongside Yealink's phone UI.
  *

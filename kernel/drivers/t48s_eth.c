@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * t48s_eth: Ethernet for the Yealink SIP-T48S (Broadcom BCM11188).
  *

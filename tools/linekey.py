@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """linekey.py [show | set N LABEL URL]: read the line keys on page 1, or make key N a URL key (66.82 web UI)."""
 import re, sys
 sys.path.insert(0, __file__.rsplit("/", 1)[0])

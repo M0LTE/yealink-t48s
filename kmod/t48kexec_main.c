@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * t48kexec: boot another kernel from Yealink's running 2.6.27 kernel (no kexec
  * support built in there), with the SoC watchdog armed as a safety net.

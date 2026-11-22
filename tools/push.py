@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """push.py LOCAL REMOTE: copy a file to the phone over the root shell (phone pulls via busybox nc)."""
 import socket, sys, threading
 sys.path.insert(0, __file__.rsplit("/", 1)[0])

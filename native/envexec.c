@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /* envexec ENVFILE [VAR=VAL ...] -- PROG [ARGS...]
  * Run PROG with the NUL-separated environment in ENVFILE (e.g. a copy of
  * /proc/PID/environ), plus or overriding the given VAR=VAL pairs. */

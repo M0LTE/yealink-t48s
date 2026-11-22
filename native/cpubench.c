@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /* cpubench: the same CPU-bound work timed under any kernel, to compare CPU speed
  * between Yealink's kernel and ours (issue #9). Static, plain ASCII output.
  *   delay    the kernel's delay loop (subs/bhi), at four code alignments

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /* fbinfo: print the framebuffer's geometry and test whether it can pan between pages.
  *   fbinfo            print info
  *   fbinfo pan N      show page N (sets yres_virtual to cover 4 pages if needed)

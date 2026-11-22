@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /* devmem ADDR [COUNT]: print 32-bit words of physical memory (read only). */
 #include <fcntl.h>
 #include <stdio.h>

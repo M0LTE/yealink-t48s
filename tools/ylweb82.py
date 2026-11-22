@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Client for the older Yealink T4xS web UI (66.82.x, plain HTTP)."""
 import hashlib, os, random, re, sys
 import requests

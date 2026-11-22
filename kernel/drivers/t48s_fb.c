@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * t48s_fb: the Yealink SIP-T48S screen as a Linux framebuffer.
  *

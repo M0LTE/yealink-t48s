@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """tftpd.py DIR [PORT] [--rom-once]: minimal read-only TFTP server for U-Boot's recovery boot.
 
 Serves files from DIR (octet mode, RFC 2347/2348/2349 options blksize, tsize,

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """shot.py OUT.png [SOURCE]: grab the phone's screen (or SOURCE file, e.g. /tmp/fbswap.shadow) as a PNG, over SSH."""
 import subprocess, sys
 from PIL import Image

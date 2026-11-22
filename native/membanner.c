@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /*
  * membanner LINE...: write lines of text on the T48S screen through /dev/mem.
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/module.h>
 #include <linux/kernel.h>
 static int __init hello_init(void) { printk(KERN_INFO "t48s hello module loaded\n"); return 0; }

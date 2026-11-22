@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 import sys,time; sys.path.insert(0,"tools")
 from ylweb82 import OldPhone
 from phonecfg import HOST, USER, PASSWORD

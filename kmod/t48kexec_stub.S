@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Position-independent stub for t48kexec. Copied to the start of a block that is
  * mapped 1:1, and entered at its physical address with interrupts off and

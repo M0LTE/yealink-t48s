@@ -33,3 +33,7 @@ python3 tsh.py 'id'
 ```
 
 Never upgrade the phone's firmware: 66.84 and later close the hole this relies on.
+
+## Licence
+
+AGPL-3.0-or-later (see `LICENSE`), except code that is built into or loaded into a Linux kernel (`kernel/drivers/`, `kmod/`), which is GPL-2.0 because the kernel is GPLv2-only. Third-party programs we build or bundle (busybox, dropbear, musl, Linux itself) keep their own licences. Vendor firmware and dumps are not in the repository.

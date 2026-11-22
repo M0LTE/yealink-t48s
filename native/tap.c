@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /* tap X Y: inject a touchscreen tap at screen pixel X,Y (for testing without a finger).
  * Writes events into /dev/input/event2, which Linux passes on as if from the hardware.
  * Raw values come from inverting the tslib calibration in /etc/pointercal. */
