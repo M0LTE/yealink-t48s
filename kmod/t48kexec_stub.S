@@ -27,6 +27,24 @@ t48_stub_start:
 
 	add	r11, r12, #1024		/* parameters */
 
+	/* stop every channel on both DMA controllers: Yealink's audio (DMA0) and
+	 * Ethernet (DMA1) rings keep writing into RAM the new kernel will own.
+	 * ChEnReg takes write-enable bits 8-15 alongside the enable bits 0-7. */
+	ldr	r0, =0x302003a0		/* DMA0 ChEnReg */
+	ldr	r1, =0x303003a0		/* DMA1 ChEnReg */
+	mov	r2, #0xff00
+	str	r2, [r0]
+	str	r2, [r1]
+	ldr	r3, =1000000
+5:	ldr	r2, [r0]
+	ldr	r4, [r1]
+	orr	r2, r2, r4
+	ands	r2, r2, #0xff
+	beq	6f
+	subs	r3, r3, #1
+	bne	5b
+6:
+
 	/* copy the pages */
 	ldr	r10, [r11, #12]		/* npages */
 	add	r9, r11, #16		/* pairs */

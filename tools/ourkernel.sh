@@ -18,7 +18,10 @@ ssh)
     shift
     exec ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@$PHONE "$@" ;;
 back)
-    ssh -o BatchMode=yes root@proxmox0 "python3 /root/t48s/sercmd.py back-to-yealink 1" >/dev/null
+    # over SSH if our kernel's network is up, else the serial shell
+    timeout 10 ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+        root@$PHONE 'back-to-yealink >/dev/null 2>&1 &' 2>/dev/null ||
+        ssh -o BatchMode=yes root@proxmox0 "python3 /root/t48s/sercmd.py back-to-yealink 1" >/dev/null
     for i in $(seq 1 30); do
         ssh -o BatchMode=yes -o ConnectTimeout=5 root@$PHONE 'grep -q dropbear /tmp/custom-start.log' 2>/dev/null && { echo "Yealink back with SSH"; exit 0; }
         sleep 5
