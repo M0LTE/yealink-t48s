@@ -1,5 +1,8 @@
 ::sysinit:/etc/init.d/rcS
 ttyAMA0::respawn:-/bin/sh
-# login prompt on the screen console (usable once the keypad has a driver, issue 3)
-tty1::respawn:/sbin/getty 0 tty1
+# the screen: GB7RDG's receive waterfall (issue 13; untested on the phone so far).
+# The binary is copied in by hand: cp native/waterfall kernel/kexec-rootfs/usr/bin/
+tty1::respawn:/usr/bin/waterfall -n GB7RDG ws://10.45.0.37:8099/ 2>/dev/null
+# login prompt on the screen console instead (usable once the keypad has a driver, issue 3)
+#tty1::respawn:/sbin/getty 0 tty1
 ::ctrlaltdel:/sbin/reboot
