@@ -59,6 +59,22 @@ assert s.count(old) == 1, s.count(old)
 open(p, "w").write(s.replace(old, new))
 EOP
 grep -q "controller 0 is the DSP's" arch/arm/mach-bcmring/dma.c
+# the ESW channels (DMA1 2 and 3) belong to drivers/t48s_eth.c, which programs them
+# directly: keep the DMA framework from requesting their interrupts
+python3 - <<'EOP'
+p = "arch/arm/mach-bcmring/dma_device.c"
+s = open(p).read()
+for ch in ("3", "2"):
+    old = "\t .flags = DMA_DEVICE_FLAG_IS_DEDICATED,\n\t .dedicatedController = 1,\n\t .dedicatedChannel = %s," % ch
+    new = "\t .flags = DMA_DEVICE_FLAG_IS_DEDICATED | DMA_DEVICE_FLAG_NO_ISR, /* T48S: t48s_eth */\n\t .dedicatedController = 1,\n\t .dedicatedChannel = %s," % ch
+    assert s.count(old) == 1, ch
+    s = s.replace(old, new)
+open(p, "w").write(s)
+EOP
+grep -c "T48S: t48s_eth" arch/arm/mach-bcmring/dma_device.c | grep -q 2
+# our ethernet driver
+cp ../kernel/drivers/t48s_eth.c drivers/net/ethernet/t48s_eth.c
+grep -q "t48s_eth.o" drivers/net/ethernet/Makefile || echo "obj-y += t48s_eth.o" >> drivers/net/ethernet/Makefile
 # leave the PLLs exactly as U-Boot set them
 sed -i 's/^\tchipcHw_enableSpreadSpectrum();/\t\/* T48S: chipcHw_enableSpreadSpectrum() skipped *\//' arch/arm/mach-bcmring/arch.c
 grep -q "spreadSpectrum() skipped\|SpreadSpectrum() skipped" arch/arm/mach-bcmring/arch.c

@@ -4,6 +4,7 @@ Last updated 2026-11-22.
 
 ## Done
 
+- **Ethernet in our kernel** (2026-11-22, issue #1): our own driver (`kernel/drivers/t48s_eth.c`) for the on-chip switch. Our kernel gets its address by DHCP and runs SSH (dropbear, key login): `tools/ourkernel.sh ssh`. A 4 MB copy over SSH takes 1.5 s and arrives intact.
 - **Hands-off kernel iteration** (2026-11-22): `tools/kexec-boot.sh` starts our kernel from Yealink's running system (module `kmod/t48kexec.ko`), its shell is driven over serial (`sercmd.py` on proxmox0), and `back-to-yealink` returns to Yealink with SSH. No key presses, no flash writes. See `kmod/README.md`.
 - Rescue route if SSH is ever lost: `tools/mkrescue.sh` + recovery mode option 1 (Speakerphone at power-on).
 
@@ -28,7 +29,7 @@ Last updated 2026-11-22.
 ## Next
 
 1. **More pages and the keypad:** map the keys once Tom has pressed them; more packet views (heard lists, per-port traffic); maybe a page switcher.
-2. **Our own kernel: drivers.** It boots to a shell (kernel/README.md). Next: a simple framebuffer driver over U-Boot's screen memory (console on the screen), then Ethernet (the on-chip switch; mainline has no driver), keypad and touch.
+2. **Our own kernel: drivers.** It boots to a shell (kernel/README.md). Ethernet and SSH work. Next: a simple framebuffer driver over U-Boot's screen memory (console on the screen, #2), then keypad (#3) and touch (#4).
 3. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
 
 ## How we got root

@@ -3,7 +3,7 @@
 #include <linux/kernel.h>
 #include <asm/io.h>
 static unsigned long base = 0x32000000;
-static int offs[8] = {0x398, 0x3a0, 0x3a8, 0x3b0, 0x3f8, 0x0, 0x58, 0x5c};
+static int offs[32] = {0x398, 0x3a0, 0x3a8, 0x3b0, 0x3f8, 0x0, 0x58, 0x5c};
 static int noffs = 8;
 module_param(base, ulong, 0);
 module_param_array(offs, int, &noffs, 0);

@@ -1,6 +1,6 @@
 # Our kernel for the T48S
 
-**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 331.77 against Yealink's 498.07, which is the delay-loop measurement, not the clock. No drivers yet for Ethernet, screen, touch, keypad, NAND or audio.
+**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 331.77 against Yealink's 498.07, which is the delay-loop measurement, not the clock. Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. No drivers yet for screen, touch, keypad, NAND or audio.
 
 Linux 3.6.11 (the last mainline release with Broadcom's `mach-bcmring` platform, the BCM11107 family the phone's BCM11188 belongs to), patched and configured for the phone. Built with gcc 4.7 in an Ubuntu 14.04 container.
 
@@ -38,3 +38,13 @@ Userspace for testing: `tools/mkrfs-bb.sh` builds `T48S.rfs` with a static busyb
 Yealink's page tables (`kmod/pgdprobe.c`, output in `dumps/yealink-iomap.txt`) confirm mainline's `mm_addr.h`: AXI blocks at 0x30100000 (ARAM), 0x30200000 (DMA0), 0x30300000 (DMA1), 0x30400000 (Ethernet switch), 0x30500000 (LCD), 0x30600000 (APM), 0x30700000 (SPUM), 0x30800000/0x30A00000 (VPM); chip control at 0x80000000 (ChipId reads 0x111880B0, BCM11188 rev B0). Ignore the addresses in the comments in mainline's `mm.c` (0x32000000 etc.), they are stale.
 
 DMA0 (Synopsys DW AHB DMAC, ID 0x44571110) belongs to the voice DSP, which keeps running across a kexec boot with channels active; our kernel neither initialises its channels nor takes their interrupts. DMA1 carries the Ethernet switch (channel 2 RX, channel 3 TX); its channels are stopped before being reset.
+
+## Ethernet (2026-11-22)
+
+`drivers/t48s_eth.c` (copied into `drivers/net/ethernet/` by `build.sh`) drives the CPU port of the on-chip switch. Frames go through the switch's PTM (receive) and MTP (transmit) FIFOs, fed by DMA1 channel 2 (receive, a ring of 32 linked-list items) and channel 3 (transmit, two items per frame: a config word, then the frame). Every frame on that port carries a 4-byte Broadcom tag after the source address and a 4-byte FCS slot at the end; the driver strips and adds them.
+
+The DMA control and config values are the ones Yealink's kernel was seen using (read live with `kmod/regprobe.c`): RX CTL_LO 0x1a408037, CFG_HI 0x46, status from 0x30480010; TX CTL_LO 0x18901036 (0x...37 on the last item), CFG_HI 0x826, status to 0x30490010. Switch CPU interface: PTM config 0x90040010, MTP config 0x90000013. These match Broadcom's GPL "Island" driver for the same switch IP. Switch page registers are 64 bits wide (accessed with ldrd/strd) at base + ((page << 8) + offset) * 8.
+
+The driver assumes the switch is already set up (it is, after a kexec from Yealink): ports forwarding, a static ARL entry for the phone's MAC on the CPU port. It only re-enables the CPU port, which Yealink's `ifconfig eth0 down` turns off before the jump. It uses the phone's own MAC, so the DHCP reservation gives the usual address. Buffers are DMA-coherent and every frame is copied; one transmit is in flight at a time. Simple, and fast enough for SSH.
+
+`dma_device.c` marks the two ESW channels `NO_ISR` so the DMA framework leaves their interrupts to the driver.

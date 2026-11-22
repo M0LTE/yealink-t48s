@@ -1,6 +1,7 @@
 #!/bin/sh
 # ourkernel.sh boot [IMAGE]   : start our kernel from Yealink and wait for its shell prompt
 # ourkernel.sh cmd "COMMAND" [SECONDS] : run a command in its serial shell, print the output
+# ourkernel.sh ssh ["COMMAND"] : SSH into our kernel (DHCP + dropbear, key login; fresh host key each boot)
 # ourkernel.sh back           : reset to Yealink and wait until SSH answers again
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd); PHONE=${PHONE:-10.45.0.214}
@@ -13,6 +14,9 @@ boot)
     wait $W ;;
 cmd)
     ssh -o BatchMode=yes root@proxmox0 "python3 /root/t48s/sercmd.py \"$2\" ${3:-3}" ;;
+ssh)
+    shift
+    exec ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@$PHONE "$@" ;;
 back)
     ssh -o BatchMode=yes root@proxmox0 "python3 /root/t48s/sercmd.py back-to-yealink 1" >/dev/null
     for i in $(seq 1 30); do
@@ -20,5 +24,5 @@ back)
         sleep 5
     done
     echo "Yealink did not come back with SSH" >&2; exit 1 ;;
-*) echo "usage: $0 boot [IMAGE] | cmd COMMAND [SECONDS] | back" >&2; exit 2 ;;
+*) echo "usage: $0 boot [IMAGE] | cmd COMMAND [SECONDS] | ssh [COMMAND] | back" >&2; exit 2 ;;
 esac

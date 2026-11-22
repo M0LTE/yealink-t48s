@@ -10,3 +10,10 @@ echo "===== T48S: our own kernel is running (started from Yealink's kernel) ====
 uname -a
 free
 /usr/bin/membanner "OUR KERNEL" "$(uname -sr) $(uname -v)" "started from Yealink's kernel, no key presses" "$(grep -m1 MemTotal /proc/meminfo)" "busybox shell on the serial console"
+# network: DHCP on the switch's CPU port, then SSH (key login only)
+hostname t48s
+ifconfig lo 127.0.0.1 up
+ifconfig eth0 up
+udhcpc -b -q -t 10 -i eth0 -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 &
+dropbearkey -t ed25519 -f /etc/dropbear/host_ed25519 >/dev/null 2>&1
+dropbear -s -r /etc/dropbear/host_ed25519 -P /var/run/dropbear.pid
