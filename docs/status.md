@@ -13,10 +13,10 @@ Last updated 2026-11-22.
 
 ## Needs Tom
 
+(Phone address is now fixed at 10.45.0.214 by a DHCP reservation, `yealink-t48s` on the router, 2026-11-22. Tom's RSA key is in `/data/ssh/authorized_keys`.)
+
 - **Touch test:** tap the Phone and Refresh buttons; press keys and lift the handset while the GB7RDG page is up (each key should drop straight back to Yealink and act there). Key codes land in `/tmp/t48ui.log`.
-- **DHCP reservation:** the phone's address moves (10.45.0.217, now 10.45.0.214). MAC `80:5e:c0:03:1c:05`. Until then find it with a ping sweep and `ip neigh`; `tools/phonecfg.py` defaults to .214, override with `T48S_HOST`.
 - **Recovery keys:** power on holding keys to find scan codes 40/41, 50 and 60 (see own-kernel.md).
-- **An SSH public key** to add to `/data/ssh/authorized_keys` (none on github.com/M0LTE.keys).
 
 ## Next
 
