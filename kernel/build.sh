@@ -80,6 +80,12 @@ cp ../kernel/drivers/t48s_fb.c drivers/video/t48s_fb.c
 grep -q "FB_T48S" drivers/video/Kconfig || sed -i 's/^config FB_ARMCLCD$/config FB_T48S\n\tbool "Yealink T48S screen (PL111 left running by U-Boot)"\n\tdepends on FB = y\n\tselect FB_CFB_FILLRECT\n\tselect FB_CFB_COPYAREA\n\tselect FB_CFB_IMAGEBLIT\n\nconfig FB_ARMCLCD/' drivers/video/Kconfig
 grep -q "FB_T48S" drivers/video/Kconfig
 grep -q "t48s_fb.o" drivers/video/Makefile || echo 'obj-$(CONFIG_FB_T48S) += t48s_fb.o' >> drivers/video/Makefile
+# put the delay loop on an 8-byte boundary. On this ARM1176 the two-instruction loop
+# takes 2 cycles per pass there and 3 at the other word alignment, and where it lands is
+# an accident of the link: unaligned, 3.6 measured 331.77 BogoMIPS against the 498.07
+# of Yealink's kernel (whose loop happens to sit at 0xc014bab0) on the same 500 MHz core
+sed -i 's/^ENTRY(__loop_delay)$/\t\t.align\t3\t\t\t@ T48S: see kernel\/build.sh\nENTRY(__loop_delay)/' arch/arm/lib/delay-loop.S
+grep -q "T48S: see kernel/build.sh" arch/arm/lib/delay-loop.S
 # leave the PLLs exactly as U-Boot set them
 sed -i 's/^\tchipcHw_enableSpreadSpectrum();/\t\/* T48S: chipcHw_enableSpreadSpectrum() skipped *\//' arch/arm/mach-bcmring/arch.c
 grep -q "spreadSpectrum() skipped\|SpreadSpectrum() skipped" arch/arm/mach-bcmring/arch.c
