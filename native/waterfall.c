@@ -6,6 +6,17 @@
  *   waterfall [-n NAME] ws://host:port/            draw on /dev/fb0
  *   waterfall [-n NAME] --shot F.ppm --seconds N ws://host:port/
  *                                                  host test: render N seconds into memory, write a PPM
+ *   waterfall http://host:port/                    a pdn-soundmodem monitor (issue #15): pick a
+ *                                                  station from its index, then its waterfall
+ *   waterfall --shot F.ppm --seconds N [--keys K,K,..] http://host:port/
+ *                                                  host test of the same, with keys pressed one a second
+ *
+ * Monitor: GET <base>api/instances is the index (the monitor's own picker page
+ * polls it); each entry's page is <base>r/<slug>/ and its socket
+ * <base>r/<slug>/ws, the same protocol as a station page. The index is read
+ * every 30 s while the list is on screen and not at all behind a waterfall.
+ * Opening a web receiver starts the monitor's session on it, as a browser
+ * would; leaving lets it go after the monitor's linger.
  *
  * Data: the station page WebSocket. Listen only: after the HTTP upgrade we send
  * nothing but what WebSocket itself requires (pong to a ping, close in reply
@@ -38,6 +49,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -620,19 +632,27 @@ static void on_msg(void *ctx, uint8_t op, const uint8_t *p, size_t len)
 
 /* ---------- drawing the parts ---------- */
 
+static int from_index;  /* started from a monitor's list: the header has a way back */
+
 static void draw_header(void)
 {
     char b[96];
     fill(0, 0, W, HDR_H, C_HDR);
     fill(0, HDR_H - 1, W, 1, C_LINE);
-    int x = text(12, 8, &f_head, C_TEXT, st.name);
+    int x = 12;
+    if (from_index) {  /* the way back: X, or a tap anywhere */
+        fill(8, 7, 58, 22, C_LINE);
+        text(15, 9, &f_bold, C_TEXT, "< List");
+        x = 78;
+    }
+    x = text(x, 8, &f_head, C_TEXT, st.name);
     if (st.dial_hz > 0) {
         snprintf(b, sizeof b, "%.3f kHz %s", st.dial_hz / 1000.0, st.lsb ? "LSB" : "USB");
         x = text(x + 16, 11, &f_mono, C_AMBER, b);
     }
     if (st.version[0]) {
         snprintf(b, sizeof b, "pdn-soundmodem %s", st.version);
-        text(x + 16, 12, &f_small, C_FAINT, b);
+        if (x + 16 + text_width(&f_small, b) < W - 290) text(x + 16, 12, &f_small, C_FAINT, b);
     }
     /* right: TX pill, link state, UTC clock */
     time_t now = time(0);
@@ -894,8 +914,11 @@ static void redraw(int force)
 
 static int parse_url(const char *url, char *host, size_t hn, int *port, char *path, size_t pn)
 {
-    if (strncmp(url, "ws://", 5)) return 0;
-    const char *h = url + 5, *slash = strchr(h, '/'), *colon = strchr(h, ':');
+    const char *h;
+    if (!strncmp(url, "ws://", 5)) h = url + 5;
+    else if (!strncmp(url, "http://", 7)) h = url + 7;
+    else return 0;
+    const char *slash = strchr(h, '/'), *colon = strchr(h, ':');
     const char *hend = slash ? slash : h + strlen(h);
     if (colon && colon < hend) { *port = atoi(colon + 1); hend = colon; }
     else *port = 80;
@@ -906,8 +929,7 @@ static int parse_url(const char *url, char *host, size_t hn, int *port, char *pa
     return *port > 0;
 }
 
-/* connect and upgrade; leftover bytes after the HTTP head go to rest */
-static int connect_ws(const char *host, int port, const char *path, uint8_t *rest, size_t cap, size_t *rest_n)
+static int tcp_connect(const char *host, int port)
 {
     char ps[12];
     snprintf(ps, sizeof ps, "%d", port);
@@ -923,6 +945,14 @@ static int connect_ws(const char *host, int port, const char *path, uint8_t *res
     int r = connect(s, res->ai_addr, res->ai_addrlen);
     freeaddrinfo(res);
     if (r) { logf_("connect %s:%d: %s", host, port, strerror(errno)); close(s); return -1; }
+    return s;
+}
+
+/* connect and upgrade; leftover bytes after the HTTP head go to rest */
+static int connect_ws(const char *host, int port, const char *path, uint8_t *rest, size_t cap, size_t *rest_n)
+{
+    int s = tcp_connect(host, port);
+    if (s < 0) return -1;
     uint8_t rnd[16];
     char key[25], req[320];
     for (int i = 0; i < 16; i++) rnd[i] = (uint8_t)rand();
@@ -1013,18 +1043,484 @@ static int write_ppm(const char *path)
     return 0;
 }
 
+/* ---------- a plain HTTP GET (the monitor's index) ---------- */
+
+/* the body, NUL terminated, or NULL; *n its length */
+static char *http_get(const char *host, int port, const char *path, size_t *n)
+{
+    int s = tcp_connect(host, port);
+    if (s < 0) return NULL;
+    char req[320];
+    int k = snprintf(req, sizeof req,
+                     "GET %s HTTP/1.1\r\nHost: %s:%d\r\nAccept: application/json\r\nConnection: close\r\n\r\n", path,
+                     host, port);
+    if (send(s, req, (size_t)k, MSG_NOSIGNAL) != k) { close(s); return NULL; }
+    size_t cap = 64 * 1024, got = 0;
+    char *b = malloc(cap + 1);
+    while (b) {
+        if (got == cap) {
+            if (cap >= 2 * 1024 * 1024) break;  /* far more than any index */
+            char *nb = realloc(b, cap * 2 + 1);
+            if (!nb) break;
+            b = nb;
+            cap *= 2;
+        }
+        ssize_t r = recv(s, b + got, cap - got, 0);
+        if (r <= 0) break;
+        got += (size_t)r;
+    }
+    close(s);
+    if (!b) return NULL;
+    b[got] = 0;
+    char *body = strstr(b, "\r\n\r\n");
+    if (!body || strncmp(b, "HTTP/1.", 7) || strncmp(b + 9, "200", 3)) {
+        logf_("index: %.40s", got ? b : "no answer");
+        free(b);
+        return NULL;
+    }
+    *body = 0;
+    body += 4;
+    size_t len = got - (size_t)(body - b);
+    for (char *c = b; *c; c++) *c = (char)(*c >= 'A' && *c <= 'Z' ? *c + 32 : *c);
+    if (strstr(b, "transfer-encoding: chunked")) {  /* undo chunking in place */
+        char *r = body, *w = body, *e = body + len;
+        while (r < e) {
+            unsigned long cl = strtoul(r, NULL, 16);
+            char *nl = strstr(r, "\r\n");
+            if (!nl || !cl) break;
+            r = nl + 2;
+            if (r + cl > e) cl = (unsigned long)(e - r);
+            memmove(w, r, cl);
+            w += cl;
+            r += cl + 2;
+        }
+        len = (size_t)(w - body);
+    }
+    memmove(b, body, len);
+    b[len] = 0;
+    *n = len;
+    return b;
+}
+
+/* ---------- keys and touch (phone only, and only with a monitor's list) ---------- */
+
+/* the kernel's 32-bit layout: musl's struct input_event has a 64-bit time */
+struct ev32 { unsigned sec, usec; unsigned short type, code; int value; };
+enum { EV_KEY_ = 1, EV_ABS_ = 3, ABS_X_ = 0, ABS_Y_ = 1, BTN_TOUCH_ = 0x14a };
+enum { K_UP = 103, K_LEFT = 105, K_RIGHT = 106, K_DOWN = 108, K_OK = 28, K_X = 14 };  /* linux/input.h */
+#define EVIOCGRAB_ 0x40044590u
+#define EVIOCGNAME64_ 0x80404506u
+
+enum { A_UP = 1, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_BACK, A_TAP };
+static struct { int a, x, y; } acts[16];
+static int n_acts;
+static int in_key = -1, in_touch = -1;
+static long cal[7] = {14798, 13, -4134128, 53, 10207, -5441552, 65536};  /* U-Boot's numbers */
+
+static void act(int a, int x, int y)
+{
+    if (n_acts < 16) acts[n_acts].a = a, acts[n_acts].x = x, acts[n_acts].y = y, n_acts++;
+}
+
+static void open_inputs(void)
+{
+    in_key = open("/dev/input/event0", O_RDONLY | O_NONBLOCK);
+    if (in_key >= 0) ioctl(in_key, EVIOCGRAB_, 1);  /* or the console echoes the keys */
+    for (int i = 1; i < 8 && in_touch < 0; i++) {
+        char path[32], name[64] = "";
+        snprintf(path, sizeof path, "/dev/input/event%d", i);
+        int fd = open(path, O_RDONLY | O_NONBLOCK);
+        if (fd < 0) continue;
+        ioctl(fd, EVIOCGNAME64_, name);
+        if (strstr(name, "touch") || strstr(name, "tsc")) in_touch = fd;
+        else close(fd);
+    }
+    FILE *f = fopen("/etc/pointercal", "r");
+    if (f) {
+        long c[7];
+        if (fscanf(f, "%ld %ld %ld %ld %ld %ld %ld", &c[0], &c[1], &c[2], &c[3], &c[4], &c[5], &c[6]) == 7 && c[6])
+            memcpy(cal, c, sizeof cal);
+        fclose(f);
+    }
+    logf_("inputs: keypad %s, touch %s", in_key >= 0 ? "yes" : "no", in_touch >= 0 ? "yes" : "no");
+}
+
+static void read_keys(void)
+{
+    struct ev32 ev;
+    while (read(in_key, &ev, sizeof ev) == sizeof ev) {
+        if (ev.type != EV_KEY_ || ev.value != 1) continue;  /* presses only, no repeats */
+        switch (ev.code) {
+        case K_UP: act(A_UP, 0, 0); break;
+        case K_DOWN: act(A_DOWN, 0, 0); break;
+        case K_LEFT: act(A_LEFT, 0, 0); break;
+        case K_RIGHT: act(A_RIGHT, 0, 0); break;
+        case K_OK: act(A_OK, 0, 0); break;
+        case K_X: act(A_BACK, 0, 0); break;
+        }
+    }
+}
+
+/* a tap: where the finger first came down, reported when it lifts */
+static void read_touch(void)
+{
+    static int rx, ry, down, placed, tx, ty;
+    struct ev32 ev;
+    while (read(in_touch, &ev, sizeof ev) == sizeof ev) {
+        if (ev.type == EV_ABS_ && ev.code == ABS_X_) rx = ev.value;
+        else if (ev.type == EV_ABS_ && ev.code == ABS_Y_) ry = ev.value;
+        else if (ev.type == EV_KEY_ && ev.code == BTN_TOUCH_) {
+            if (ev.value) down = 1, placed = 0;
+            else if (down) {
+                down = 0;
+                if (placed) act(A_TAP, tx, ty);
+            }
+        } else if (ev.type == 0 && down && !placed) {
+            tx = (int)((cal[0] * rx + cal[1] * ry + cal[2]) / cal[6]);
+            ty = (int)((cal[3] * rx + cal[4] * ry + cal[5]) / cal[6]);
+            placed = 1;
+        }
+    }
+}
+
+/* wait up to ms for the socket (if any) or a key or touch; 1 if the socket has something */
+static int poll_io(int s, int ms)
+{
+    struct pollfd p[3];
+    int n = 0, si = -1, ki = -1, ti = -1;
+    if (s >= 0) si = n, p[n++] = (struct pollfd){.fd = s, .events = POLLIN};
+    if (in_key >= 0) ki = n, p[n++] = (struct pollfd){.fd = in_key, .events = POLLIN};
+    if (in_touch >= 0) ti = n, p[n++] = (struct pollfd){.fd = in_touch, .events = POLLIN};
+    if (!n) { usleep((useconds_t)ms * 1000); return 0; }
+    if (poll(p, (nfds_t)n, ms) <= 0) return 0;
+    if (ki >= 0 && (p[ki].revents & POLLIN)) read_keys();
+    if (ti >= 0 && (p[ti].revents & POLLIN)) read_touch();
+    return si >= 0 && (p[si].revents & (POLLIN | POLLHUP | POLLERR));
+}
+
+/* ---------- the monitor's list ---------- */
+
+#define MAX_ENT 200
+#define L_HEAD_Y 40
+#define L_ROW_Y 62
+#define L_ROW_H 48
+#define L_ROWS 8
+#define L_FOOT_Y (L_ROW_Y + L_ROWS * L_ROW_H)
+#define L_PREV_X 556
+#define L_NEXT_X 676
+#define L_BTN_W 112
+
+typedef struct {
+    char slug[64], call[24], name[64], where[64], why[48];
+    int station, offered, snr, avail, maxc;
+} entry_t;
+
+static struct {
+    char host[64], base[128];   /* the monitor: http://host:port/base */
+    int port;
+    char title[48];
+    entry_t e[MAX_ENT];
+    int n, n_rx, n_st, n_down;
+    int loaded, failed, stale;
+    long next_fetch;
+    int sel, top;
+    int dirty;
+} ix;
+
+static int ent_order(const void *a, const void *b)
+{
+    const entry_t *x = a, *y = b;
+    /* stations first (somebody's own radio, always on), then what can be opened, then by callsign */
+    if (x->station != y->station) return y->station - x->station;
+    if (x->offered != y->offered) return y->offered - x->offered;
+    return strcasecmp(x->call, y->call);
+}
+
+static void fetch_index(void)
+{
+    char path[160];
+    size_t n = 0;
+    snprintf(path, sizeof path, "%sapi/instances", ix.base);
+    char *b = http_get(ix.host, ix.port, path, &n);
+    if (!b) { ix.failed = 1; ix.dirty = 1; return; }
+    const char *e = b + n, *recv_ = jget(b, e, "receivers");
+    if (!jfirst(recv_, e) && !(recv_ && *recv_ == '[')) {
+        logf_("index: no receivers in the answer");
+        free(b);
+        ix.failed = 1;
+        ix.dirty = 1;
+        return;
+    }
+    char keep[64];
+    snprintf(keep, sizeof keep, "%s", ix.n ? ix.e[ix.sel].slug : "");
+    if (!jstr(jget(b, e, "title"), e, ix.title, sizeof ix.title) || !ix.title[0]) snprintf(ix.title, sizeof ix.title, "packet monitor");
+    const char *stale = jget(b, e, "staleSince");
+    ix.stale = stale && *stale == '"';
+    ix.n = ix.n_rx = ix.n_st = ix.n_down = 0;
+    for (const char *r = jfirst(recv_, e); r && ix.n < MAX_ENT; r = jnext(r, e)) {
+        entry_t *x = &ix.e[ix.n];
+        memset(x, 0, sizeof *x);
+        if (!jstr(jget(r, e, "slug"), e, x->slug, sizeof x->slug) || !x->slug[0]) continue;
+        char kind[16] = "";
+        jstr(jget(r, e, "kind"), e, kind, sizeof kind);
+        x->station = !strcmp(kind, "station");
+        if (!jstr(jget(r, e, "callsign"), e, x->call, sizeof x->call) || !x->call[0])
+            jstr(jget(r, e, "host"), e, x->call, sizeof x->call);
+        if (!jstr(jget(r, e, x->station ? "operator" : "name"), e, x->name, sizeof x->name)) x->name[0] = 0;
+        jstr(jget(r, e, "location"), e, x->where, sizeof x->where);
+        jstr(jget(r, e, "why"), e, x->why, sizeof x->why);
+        x->offered = jtrue(jget(r, e, "offered"), e);
+        double d;
+        x->snr = jnum(jget(r, e, "snrDb"), e, &d) && d >= 0 ? (int)d : -1;
+        x->avail = jnum(jget(r, e, "availableClients"), e, &d) ? (int)d : -1;
+        x->maxc = jnum(jget(r, e, "maxClients"), e, &d) ? (int)d : -1;
+        if (x->station) ix.n_st++;
+        else ix.n_rx++;
+        if (!x->offered) ix.n_down++;
+        ix.n++;
+    }
+    free(b);
+    qsort(ix.e, (size_t)ix.n, sizeof ix.e[0], ent_order);
+    ix.sel = 0;
+    for (int i = 0; i < ix.n; i++)
+        if (!strcmp(ix.e[i].slug, keep)) ix.sel = i;
+    if (ix.top > ix.sel || ix.sel >= ix.top + L_ROWS) ix.top = ix.sel / L_ROWS * L_ROWS;
+    if (!ix.loaded) logf_("index: %d stations, %d receivers, %d not available", ix.n_st, ix.n_rx, ix.n_down);
+    ix.loaded = 1;
+    ix.failed = 0;
+    ix.dirty = 1;
+}
+
+static void draw_list_header(void)
+{
+    char b[96];
+    fill(0, 0, W, HDR_H, C_HDR);
+    fill(0, HDR_H - 1, W, 1, C_LINE);
+    int x = text(12, 8, &f_head, C_TEXT, ix.title[0] ? ix.title : ix.host);
+    if (ix.loaded) {
+        snprintf(b, sizeof b, "%d station%s, %d receiver%s", ix.n_st, ix.n_st == 1 ? "" : "s", ix.n_rx,
+                 ix.n_rx == 1 ? "" : "s");
+        x = text(x + 16, 12, &f_small, C_DIM, b);
+    }
+    time_t now = time(0);
+    struct tm tm;
+    gmtime_r(&now, &tm);
+    snprintf(b, sizeof b, "%02d:%02d:%02d UTC", tm.tm_hour, tm.tm_min, tm.tm_sec);
+    int rx = W - 12 - text_width(&f_mono, b);
+    text(rx, 11, &f_mono, C_DIM, b);
+    const char *warn = ix.failed ? "monitor unreachable" : ix.stale ? "list out of date" : NULL;
+    if (warn) text(rx - 16 - text_width(&f_small, warn), 12, &f_small, C_BAD, warn);
+    flush(0, 0, W, HDR_H);
+}
+
+static void dot(int cx, int cy, unsigned c)
+{
+    for (int j = -5; j <= 5; j++)
+        for (int i = -5; i <= 5; i++)
+            if (i * i + j * j <= 26) back[(cy + j) * W + cx + i] = c;
+}
+
+static void draw_list(void)
+{
+    char b[64];
+    fill(0, HDR_H, W, H - HDR_H, C_BG);
+    text(32, L_HEAD_Y + 4, &f_tiny, C_FAINT, "STATION");
+    text(420, L_HEAD_Y + 4, &f_tiny, C_FAINT, "WHERE");
+    text(652, L_HEAD_Y + 4, &f_tiny, C_FAINT, "SIGNAL");
+    text(726, L_HEAD_Y + 4, &f_tiny, C_FAINT, "SLOTS");
+    fill(0, L_ROW_Y - 2, W, 1, C_LINE);
+    if (!ix.n) {
+        const char *big = ix.failed ? "MONITOR UNREACHABLE" : "LOADING";
+        snprintf(b, sizeof b, "%s:%d", ix.host, ix.port);
+        text_centre(W / 2, 200, &f_big, ix.failed ? C_BAD : C_AMBER, big);
+        text_centre(W / 2, 244, &f_small, C_DIM, b);
+    }
+    for (int k = 0; k < L_ROWS && ix.top + k < ix.n; k++) {
+        const entry_t *x = &ix.e[ix.top + k];
+        int y = L_ROW_Y + k * L_ROW_H, sel = ix.top + k == ix.sel;
+        if (sel) {
+            fill(0, y, W, L_ROW_H - 1, RGB(24, 33, 50));
+            fill(0, y, 4, L_ROW_H - 1, C_AMBER);
+        }
+        fill(12, y + L_ROW_H - 1, W - 24, 1, C_GRID);
+        dot(18, y + 15, x->offered ? C_GOOD : C_BAD);
+        unsigned ct = x->offered ? C_TEXT : C_FAINT;
+        int cx = text(32, y + 5, &f_bold, sel ? C_AMBER : ct, x->call);
+        if (x->station) {
+            int w = text_width(&f_tiny, "STATION") + 10;
+            fill(cx + 10, y + 7, w, 16, dim(C_COOL, 1, 3));
+            text(cx + 15, y + 8, &f_tiny, C_COOL, "STATION");
+        }
+        text_fit(32, y + 27, 370, &f_small, x->offered ? C_DIM : C_FAINT, x->name);
+        text_fit(420, y + 7, 222, &f_small, x->offered ? C_DIM : C_FAINT, x->where);
+        if (!x->offered) text_fit(420, y + 27, 360, &f_small, C_BAD, x->why[0] ? x->why : "not available");
+        if (x->snr >= 0) {
+            snprintf(b, sizeof b, "%d dB", x->snr);
+            text(652, y + 7, &f_mono, ct, b);
+        }
+        if (x->maxc > 0) {
+            snprintf(b, sizeof b, "%d/%d", x->avail < 0 ? 0 : x->avail, x->maxc);
+            text(726, y + 7, &f_mono, x->avail > 0 ? ct : C_BAD, b);
+        }
+    }
+    /* footer: what the keys do, where we are, and two buttons for a finger */
+    fill(0, L_FOOT_Y, W, H - L_FOOT_Y, C_HDR);
+    fill(0, L_FOOT_Y, W, 1, C_LINE);
+    text(12, L_FOOT_Y + 9, &f_small, C_FAINT, "Up/Down choose, OK open, Left/Right page, or tap");
+    int pages = (ix.n + L_ROWS - 1) / L_ROWS;
+    if (pages > 1) {
+        snprintf(b, sizeof b, "%d/%d", ix.top / L_ROWS + 1, pages);
+        text(L_PREV_X - 14 - text_width(&f_mono, b), L_FOOT_Y + 9, &f_mono, C_DIM, b);
+        int can_prev = ix.top > 0, can_next = ix.top + L_ROWS < ix.n;
+        fill(L_PREV_X, L_FOOT_Y + 5, L_BTN_W, H - L_FOOT_Y - 10, can_prev ? C_LINE : C_PANEL);
+        fill(L_NEXT_X, L_FOOT_Y + 5, L_BTN_W, H - L_FOOT_Y - 10, can_next ? C_LINE : C_PANEL);
+        text_centre(L_PREV_X + L_BTN_W / 2, L_FOOT_Y + 8, &f_bold, can_prev ? C_TEXT : C_FAINT, "< Prev");
+        text_centre(L_NEXT_X + L_BTN_W / 2, L_FOOT_Y + 8, &f_bold, can_next ? C_TEXT : C_FAINT, "Next >");
+    }
+    flush(0, HDR_H, W, H - HDR_H);
+}
+
+static void list_move(int sel)
+{
+    if (!ix.n) return;
+    if (sel < 0) sel = 0;
+    if (sel >= ix.n) sel = ix.n - 1;
+    ix.sel = sel;
+    if (ix.sel < ix.top) ix.top = ix.sel;
+    if (ix.sel >= ix.top + L_ROWS) ix.top = ix.sel - L_ROWS + 1;
+    ix.dirty = 1;
+}
+
+static void list_page(int dir)
+{
+    int top = ix.top + dir * L_ROWS;
+    if (top < 0 || top >= ix.n) return;
+    ix.top = top;
+    ix.sel = top;
+    ix.dirty = 1;
+}
+
+/* ---------- the waterfall screen, one station after another ---------- */
+
+static struct {
+    char host[64], path[192];
+    int port;
+    int backoff;
+    long last_rx;
+} cn;
+static ws_dec_t dec;
+static uint8_t *msg, *rxb;
+#define RX_CAP 8192
+#define MSG_MAX (256 * 1024)
+
+/* forget everything about the last station */
+static void wf_reset(void)
+{
+    char name[32];
+    int nfa = st.name_from_arg;
+    memcpy(name, st.name, sizeof name);
+    memset(&st, 0, sizeof st);
+    memcpy(st.name, name, sizeof name);
+    st.name_from_arg = nfa;
+    snprintf(st.url_host, sizeof st.url_host, "%s", cn.host);
+    st.url_port = cn.port;
+    row_seq = row_first = 0;
+    have_rows = have_levels = 0;
+    floor_q8 = top_q8 = 0;
+    memset(spec16, 0, sizeof spec16);
+    for (int x = 0; x < WF_W; x++) spec_bg[x] = C_BG;
+    memset(tags, 0, sizeof tags);
+    tag_seq = 0;
+    wf_rows_reset(&rows, 0, 4);
+    cn.backoff = 1;
+    cn.last_rx = 0;
+    dirty_static = dirty_hdr = dirty_panel = dirty_wf = 1;
+}
+
+static void wf_disconnect(void)
+{
+    if (sock >= 0) close(sock);
+    sock = -1;
+    st.up = 0;
+    cn.last_rx = 0;
+}
+
+/* one turn of the station connection: connect when due, read what has come */
+static void wf_step(void)
+{
+    long t = now_ms();
+    if (!st.up && t >= st.retry_at) {
+        st.retry_at = 0;
+        dirty_hdr = dirty_wf = 1;
+        redraw(0);
+        size_t rest_n = 0;
+        sock = connect_ws(cn.host, cn.port, cn.path, rxb, RX_CAP, &rest_n);
+        if (sock >= 0) {
+            logf_("listening to %s:%d%s", cn.host, cn.port, cn.path);
+            st.up = 1;
+            st.attempts = 0;
+            cn.backoff = 1;
+            closing = 0;
+            st.last_line_ms = now_ms();
+            ws_dec_init(&dec, msg, MSG_MAX);
+            wf_rows_reset(&rows, row_seq, st.lpr ? st.lpr : 4);
+            if (ws_dec_feed(&dec, rxb, rest_n, on_msg, NULL)) closing = 1;
+        } else {
+            st.attempts++;
+            st.retry_at = now_ms() + cn.backoff * 1000L;
+            logf_("cannot connect, retry in %d s", cn.backoff);
+            cn.backoff = cn.backoff < 30 ? cn.backoff * 2 : 30;
+        }
+        dirty_hdr = dirty_wf = 1;
+    }
+    if (st.up) {
+        int ready = poll_io(sock, 40);
+        int drop = closing;
+        if (ready) {
+            ssize_t k = recv(sock, rxb, RX_CAP, 0);
+            if (k > 0) {
+                cn.last_rx = now_ms();
+                if (ws_dec_feed(&dec, rxb, (size_t)k, on_msg, NULL)) { logf_("protocol error"); drop = 1; }
+            } else if (k == 0 || (errno != EAGAIN && errno != EINTR)) {
+                drop = 1;
+            }
+        }
+        if (!cn.last_rx) cn.last_rx = now_ms();
+        if (now_ms() - cn.last_rx > 60000) { logf_("silent for 60 s"); drop = 1; }
+        if (drop || closing) {
+            wf_disconnect();
+            st.retry_at = now_ms() + cn.backoff * 1000L;
+            logf_("disconnected, retry in %d s", cn.backoff);
+            cn.backoff = cn.backoff < 30 ? cn.backoff * 2 : 30;
+            gap_row();
+            dirty_hdr = dirty_wf = 1;
+        }
+    } else {
+        poll_io(-1, 100);
+    }
+}
+
+/* ---------- main ---------- */
+
 static void usage(void)
 {
-    fprintf(stderr, "usage: waterfall [-n NAME] [--fb /dev/fb0] ws://host:port/\n"
-                    "       waterfall [-n NAME] --shot OUT.ppm --seconds N ws://host:port/   (render to a file)\n");
+    fprintf(stderr, "usage: waterfall [-n NAME] [--fb /dev/fb0] ws://host:port/      one station\n"
+                    "       waterfall [--fb /dev/fb0] http://host:port/              a monitor's list of stations\n"
+                    "       ... --shot OUT.ppm --seconds N [--keys up,down,ok,x,..]  render to a file instead\n");
     exit(2);
 }
 
-#define MSG_MAX (256 * 1024)
+static int key_action(const char *k)
+{
+    static const char *names[] = {"", "up", "down", "left", "right", "ok", "x"};
+    for (int i = 1; i <= A_BACK; i++)
+        if (!strcmp(k, names[i])) return i;
+    return 0;
+}
 
 int main(int argc, char **argv)
 {
-    const char *url = NULL, *shot = NULL, *fbpath = "/dev/fb0";
+    const char *url = NULL, *shot = NULL, *fbpath = "/dev/fb0", *keys = NULL;
     int seconds = 20;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-n") && i + 1 < argc) {
@@ -1033,15 +1529,25 @@ int main(int argc, char **argv)
         } else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--fb") && i + 1 < argc) fbpath = argv[++i];
+        else if (!strcmp(argv[i], "--keys") && i + 1 < argc) keys = argv[++i];
         else if (argv[i][0] != '-' && !url) url = argv[i];
         else usage();
     }
     char host[64], path[128];
     int port = 80;
     if (!url || !parse_url(url, host, sizeof host, &port, path, sizeof path)) usage();
-    snprintf(st.url_host, sizeof st.url_host, "%s", host);
-    st.url_port = port;
-    if (!st.name[0]) snprintf(st.name, sizeof st.name, "%s", host);
+    int index_mode = !strncmp(url, "http://", 7);
+    snprintf(cn.host, sizeof cn.host, "%s", host);
+    cn.port = port;
+    if (index_mode) {
+        snprintf(ix.host, sizeof ix.host, "%s", host);
+        ix.port = port;
+        snprintf(ix.base, sizeof ix.base, "%s%s", path, path[strlen(path) - 1] == '/' ? "" : "/");
+        from_index = 1;
+    } else {
+        snprintf(cn.path, sizeof cn.path, "%s", path);
+        if (!st.name[0]) snprintf(st.name, sizeof st.name, "%s", host);
+    }
 
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, on_signal);
@@ -1049,79 +1555,96 @@ int main(int argc, char **argv)
     srand((unsigned)time(0) ^ (unsigned)getpid());
 
     back = calloc(W * H, 4);
-    uint8_t *msg = malloc(MSG_MAX + 1), *rx = malloc(8192);
-    static ws_dec_t dec;
-    if (!back || !msg || !rx) return 1;
+    msg = malloc(MSG_MAX + 1);
+    rxb = malloc(RX_CAP);
+    if (!back || !msg || !rxb) return 1;
     if (!shot && open_fb(fbpath)) return 1;
+    if (!shot && index_mode) open_inputs();
 
     static const unsigned rxs[] = {0x080A10, 0x0B1030, 0x2A1450, 0x7A2448, 0xD9601E, 0xFF9F1C, 0xFFE8B8};
     static const unsigned txs[] = {0x080A10, 0x06182A, 0x0E3A5C, 0x2A7FB0, 0x9AD8FF};
-    for (int x = 0; x < WF_W; x++) spec_bg[x] = C_BG;
     build_ramp(ramp_rx, rxs, 7);
     build_ramp(ramp_tx, txs, 5);
-    wf_rows_reset(&rows, 0, 4);
+    wf_reset();
 
-    long start = now_ms(), last_draw = 0, last_sec = 0;
-    int backoff = 1;
-    redraw(1);
+    enum { SCR_LIST, SCR_WF } screen = index_mode ? SCR_LIST : SCR_WF;
+    long start = now_ms(), last_draw = 0, last_sec = 0, next_key = 0;
+    const char *kp = keys;
+    ix.dirty = 1;
+    if (screen == SCR_WF) redraw(1);
     while (!stop) {
         long t = now_ms();
         if (shot && t - start >= seconds * 1000L) break;
-        if (!st.up && t >= st.retry_at) {
-            st.retry_at = 0;
-            dirty_hdr = dirty_wf = 1;
-            redraw(0);
-            size_t rest_n = 0;
-            sock = connect_ws(host, port, path, rx, 8192, &rest_n);
-            if (sock >= 0) {
-                logf_("listening to %s:%d%s", host, port, path);
-                st.up = 1;
-                st.attempts = 0;
-                backoff = 1;
-                closing = 0;
-                st.last_line_ms = now_ms();
-                ws_dec_init(&dec, msg, MSG_MAX);
-                wf_rows_reset(&rows, row_seq, st.lpr ? st.lpr : 4);
-                if (ws_dec_feed(&dec, rx, rest_n, on_msg, NULL)) closing = 1;
-            } else {
-                st.attempts++;
-                st.retry_at = now_ms() + backoff * 1000L;
-                logf_("cannot connect, retry in %d s", backoff);
-                backoff = backoff < 30 ? backoff * 2 : 30;
-            }
-            dirty_hdr = dirty_wf = 1;
+        /* host test: the next scripted key, one a second once the list is in */
+        if (kp && *kp && (ix.loaded || !index_mode) && t >= next_key) {
+            char k[16];
+            size_t n = strcspn(kp, ",");
+            snprintf(k, sizeof k, "%.*s", (int)(n < 15 ? n : 15), kp);
+            kp += n + (kp[n] == ',');
+            if (key_action(k)) act(key_action(k), 0, 0);
+            else logf_("--keys: no key called %s", k);
+            next_key = t + 1000;
         }
-        if (st.up) {
-            struct pollfd pf = {.fd = sock, .events = POLLIN};
-            int r = poll(&pf, 1, 40);
-            int drop = closing;
-            static long last_rx;
-            if (r > 0) {
-                ssize_t k = recv(sock, rx, 8192, 0);
-                if (k > 0) {
-                    last_rx = now_ms();
-                    if (ws_dec_feed(&dec, rx, (size_t)k, on_msg, NULL)) { logf_("protocol error"); drop = 1; }
-                } else if (k == 0 || (errno != EAGAIN && errno != EINTR)) {
-                    drop = 1;
-                }
+
+        if (screen == SCR_LIST) {
+            if (t >= ix.next_fetch) {
+                fetch_index();
+                ix.next_fetch = now_ms() + (ix.failed ? 5000 : 30000);
             }
-            if (!last_rx) last_rx = now_ms();
-            if (now_ms() - last_rx > 60000) { logf_("silent for 60 s"); drop = 1; }
-            if (drop || closing) {
-                close(sock);
-                sock = -1;
-                st.up = 0;
-                last_rx = 0;
-                st.retry_at = now_ms() + backoff * 1000L;
-                logf_("disconnected, retry in %d s", backoff);
-                backoff = backoff < 30 ? backoff * 2 : 30;
-                gap_row();
-                dirty_hdr = dirty_wf = 1;
-            }
+            poll_io(-1, 200);
         } else {
-            usleep(100000);
+            wf_step();
         }
+
+        /* what the keys and the finger asked for */
+        for (int i = 0; i < n_acts; i++) {
+            int a = acts[i].a, open_it = 0;
+            if (screen == SCR_LIST) {
+                if (a == A_UP) list_move(ix.sel - 1);
+                else if (a == A_DOWN) list_move(ix.sel + 1);
+                else if (a == A_LEFT) list_page(-1);
+                else if (a == A_RIGHT) list_page(1);
+                else if (a == A_OK) open_it = 1;
+                else if (a == A_TAP) {
+                    int x = acts[i].x, y = acts[i].y;
+                    if (y >= L_ROW_Y && y < L_FOOT_Y && ix.top + (y - L_ROW_Y) / L_ROW_H < ix.n) {
+                        list_move(ix.top + (y - L_ROW_Y) / L_ROW_H);
+                        open_it = 1;
+                    } else if (y >= L_FOOT_Y && x >= L_PREV_X && x < L_PREV_X + L_BTN_W) list_page(-1);
+                    else if (y >= L_FOOT_Y && x >= L_NEXT_X && x < L_NEXT_X + L_BTN_W) list_page(1);
+                }
+                if (open_it && ix.n && ix.e[ix.sel].offered) {
+                    const entry_t *x = &ix.e[ix.sel];
+                    snprintf(cn.path, sizeof cn.path, "%sr/%s/ws", ix.base, x->slug);
+                    snprintf(st.name, sizeof st.name, "%s", x->call);
+                    st.name_from_arg = 1;
+                    wf_reset();
+                    st.retry_at = 0;
+                    logf_("open %s", x->slug);
+                    screen = SCR_WF;
+                    redraw(1);
+                }
+            } else if (index_mode && (a == A_BACK || a == A_TAP)) {
+                wf_disconnect();
+                logf_("back to the list");
+                screen = SCR_LIST;
+                ix.next_fetch = 0;  /* fresh figures */
+                ix.dirty = 1;
+                break;
+            }
+        }
+        n_acts = 0;
+
         t = now_ms();
+        if (screen == SCR_LIST) {
+            if (t / 1000 != last_sec || ix.dirty) {
+                last_sec = t / 1000;
+                draw_list_header();
+            }
+            if (ix.dirty) draw_list();
+            ix.dirty = 0;
+            continue;
+        }
         if (t / 1000 != last_sec) {  /* clock, countdowns, stale states */
             last_sec = t / 1000;
             dirty_hdr = 1;
@@ -1137,13 +1660,14 @@ int main(int argc, char **argv)
             redraw(0);
         }
     }
-    if (sock >= 0) close(sock);
     if (shot) {
-        redraw(1);
+        if (screen == SCR_WF) redraw(1);
+        else draw_list_header(), draw_list();
         if (write_ppm(shot)) return 1;
         logf_("wrote %s", shot);
     } else {
         console_back();
     }
+    wf_disconnect();
     return 0;
 }
