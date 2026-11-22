@@ -20,7 +20,11 @@ Where things stand and what's next: [docs/status.md](docs/status.md).
 - `docs/` - notes
 - `shots/`, `frames/` - screenshots and test frames
 
-## Getting a root shell (after every phone reboot)
+## Logging in
+
+SSH starts at boot: `ssh root@<phone>` (key login; keys in `/data/ssh/authorized_keys`). Copy files with `scp -O`.
+
+If SSH is ever gone (for example after a factory reset), the web trick still gives root:
 
 ```sh
 cd tools
