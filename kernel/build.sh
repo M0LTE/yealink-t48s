@@ -75,6 +75,11 @@ grep -c "T48S: t48s_eth" arch/arm/mach-bcmring/dma_device.c | grep -q 2
 # our ethernet driver
 cp ../kernel/drivers/t48s_eth.c drivers/net/ethernet/t48s_eth.c
 grep -q "t48s_eth.o" drivers/net/ethernet/Makefile || echo "obj-y += t48s_eth.o" >> drivers/net/ethernet/Makefile
+# our screen driver, with a Kconfig entry so the cfb drawing helpers get selected
+cp ../kernel/drivers/t48s_fb.c drivers/video/t48s_fb.c
+grep -q "FB_T48S" drivers/video/Kconfig || sed -i 's/^config FB_ARMCLCD$/config FB_T48S\n\tbool "Yealink T48S screen (PL111 left running by U-Boot)"\n\tdepends on FB = y\n\tselect FB_CFB_FILLRECT\n\tselect FB_CFB_COPYAREA\n\tselect FB_CFB_IMAGEBLIT\n\nconfig FB_ARMCLCD/' drivers/video/Kconfig
+grep -q "FB_T48S" drivers/video/Kconfig
+grep -q "t48s_fb.o" drivers/video/Makefile || echo 'obj-$(CONFIG_FB_T48S) += t48s_fb.o' >> drivers/video/Makefile
 # leave the PLLs exactly as U-Boot set them
 sed -i 's/^\tchipcHw_enableSpreadSpectrum();/\t\/* T48S: chipcHw_enableSpreadSpectrum() skipped *\//' arch/arm/mach-bcmring/arch.c
 grep -q "spreadSpectrum() skipped\|SpreadSpectrum() skipped" arch/arm/mach-bcmring/arch.c

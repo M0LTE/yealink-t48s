@@ -9,7 +9,14 @@ echo
 echo "===== T48S: our own kernel is running (started from Yealink's kernel) ====="
 uname -a
 free
-/usr/bin/membanner "OUR KERNEL" "$(uname -sr) $(uname -v)" "started from Yealink's kernel, no key presses" "$(grep -m1 MemTotal /proc/meminfo)" "busybox shell on the serial console"
+# screen: our framebuffer console (/dev/tty1) if the screen driver found the LCD running,
+# else draw straight into the LCD's memory as before
+if [ -e /dev/fb0 ]; then
+    printf '\033[9;0]\033[14;0]' > /dev/tty1   # never blank the console
+    { echo; echo "  OUR KERNEL: $(uname -sr)"; echo "  $(grep -m1 MemTotal /proc/meminfo)"; echo; } > /dev/tty1
+else
+    /usr/bin/membanner "OUR KERNEL" "$(uname -sr) $(uname -v)" "started from Yealink's kernel, no key presses" "$(grep -m1 MemTotal /proc/meminfo)" "busybox shell on the serial console"
+fi
 # network: DHCP on the switch's CPU port, then SSH (key login only)
 hostname t48s
 ifconfig lo 127.0.0.1 up

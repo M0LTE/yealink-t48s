@@ -151,6 +151,10 @@ struct t48s_eth {
 
 static u8 t48s_mac[ETH_ALEN] = { 0x80, 0x5e, 0xc0, 0x03, 0x1c, 0x05 };
 
+/* debugging: echo N > /sys/module/t48s_eth/parameters/dump prints the next N frames */
+static int dump;
+module_param(dump, int, 0644);
+
 /* ---- switch registers: 64-bit accesses, low word holds the value ---- */
 
 static u32 esw_rd(struct t48s_eth *p, u32 off)
@@ -251,6 +255,13 @@ static void rx_frame(struct t48s_eth *p, const u8 *buf, int len)
 	struct net_device *dev = p->dev;
 	struct sk_buff *skb;
 
+	if (dump > 0) {
+		dump--;
+		pr_info(DRV_NAME " rx %d (desc %d)\n", len, p->rx_next);
+		print_hex_dump(KERN_INFO, DRV_NAME " rx: ", DUMP_PREFIX_OFFSET,
+			       16, 1, buf, min(len, 48), false);
+	}
+
 	/* [DA SA][BRCM tag][type ... payload][FCS] */
 	if (len < 12 + BRCM_HDR_LEN + 2 + FCS_LEN || len > RX_BUF_LEN) {
 		dev->stats.rx_length_errors++;
@@ -329,6 +340,14 @@ static irqreturn_t t48s_tx_irq(int irq, void *data)
 
 	spin_lock_irqsave(&p->lock, flags);
 	if (p->tx_busy) {
+		int n = 1000;
+
+		/* only complete a frame whose channel has really stopped: this may be a
+		 * late interrupt for a frame that t48s_xmit already reclaimed */
+		while ((dmac_rd(p, DMAC_CHEN) & (1 << CH_TX)) && --n)
+			cpu_relax();
+	}
+	if (p->tx_busy && !(dmac_rd(p, DMAC_CHEN) & (1 << CH_TX))) {
 		p->tx_busy = 0;
 		dev->stats.tx_packets++;
 		dev->stats.tx_bytes += p->tx_len;
@@ -354,6 +373,12 @@ static int t48s_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	spin_lock_irqsave(&p->lock, flags);
+	if (p->tx_busy && !(dmac_rd(p, DMAC_CHEN) & (1 << CH_TX))) {
+		/* the previous frame went but its interrupt has not been handled yet */
+		p->tx_busy = 0;
+		dev->stats.tx_packets++;
+		dev->stats.tx_bytes += p->tx_len;
+	}
 	if (p->tx_busy) {
 		netif_stop_queue(dev);
 		spin_unlock_irqrestore(&p->lock, flags);

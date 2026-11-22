@@ -11,6 +11,6 @@ bound|renew)
     fi
     : > /etc/resolv.conf
     for d in $dns; do echo "nameserver $d" >> /etc/resolv.conf; done
-    echo "dhcp: $interface $ip" > /dev/console ;;
+    echo "dhcp: $interface $ip" > /dev/console; [ -e /dev/tty1 ] && echo "  network: $ip" > /dev/tty1 ;;
 esac
 exit 0
