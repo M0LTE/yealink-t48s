@@ -97,19 +97,20 @@ static unsigned short t48s_keymap[NCODES] = {
 	[60] = KEY_ENTER,	/* OK */
 	[53] = KEY_BACKSPACE,	/* X (Yealink: F13) */
 
-	[36] = KEY_F10,		/* Speakerphone */
-
-	/* guesses: Yealink F14 and F15 sit next to each other, like a volume bar */
-	[45] = KEY_VOLUMEDOWN,	/* Yealink F14 */
-	[44] = KEY_VOLUMEUP,	/* Yealink F15 */
-
-	/* labels unknown: headset, mute, message, hold, redial, transfer in some order */
-	[25] = KEY_F7,
-	[37] = KEY_F8,
-	[35] = KEY_F9,
-	[34] = KEY_F16,
-	[33] = KEY_F17,
-	[26] = KEY_F20,
+	/*
+	 * Phone keys, confirmed by pressing them (2026-11-22). Codes chosen so the text
+	 * console ignores them (no escape sequences at the login prompt) and an
+	 * application can tell them apart.
+	 */
+	[45] = KEY_VOLUMEDOWN,
+	[44] = KEY_VOLUMEUP,
+	[33] = KEY_PROG1,	/* Headset (has an LED) */
+	[25] = KEY_MUTE,	/* Mute (has an LED) */
+	[34] = KEY_MESSENGER,	/* Message */
+	[26] = KEY_PAUSE,	/* Hold */
+	[35] = KEY_AGAIN,	/* Redial */
+	[37] = KEY_FORWARD,	/* Transfer */
+	[36] = KEY_PROG2,	/* Speakerphone */
 };
 
 static void __iomem *keyc;

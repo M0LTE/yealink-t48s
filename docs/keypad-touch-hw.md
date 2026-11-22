@@ -42,9 +42,9 @@ Code = row*8 + col + 1, as Yealink's driver reports it. Qt key is what Yealink's
 | 60 | 7, 3 | Return | OK |
 | 53 | 6, 4 | F13 | X |
 | 36 | 4, 3 | F10 | Speakerphone |
-| 45 44 | 5,4 5,3 | F14 F15 | **guess**: volume down, up |
-| 25 26 | 3,0 3,1 | F7 F20 | **unknown** |
-| 33 34 35 37 | 4,0 4,1 4,2 4,4 | F17 F16 F9 F8 | **unknown** |
+| 45 44 | 5,4 5,3 | F14 F15 | Volume down, volume up (confirmed by key presses 2026-11-22) |
+| 33 25 | 4,0 3,0 | F17 F7 | Headset, Mute (both have LEDs; confirmed) |
+| 34 26 35 37 | 4,1 3,1 4,2 4,4 | F16 F20 F9 F8 | Message, Hold, Redial, Transfer (confirmed) |
 | 89 | (not in the matrix) | F11 | hook |
 
 The six unknown ones are Headset, Mute, Message, Hold, Redial and Transfer in some order.
