@@ -28,10 +28,37 @@ grep -q '.dev_id = "uartA"' arch/arm/mach-bcmring/core.c
 # under the boot console
 sed -i 's/^\t.rate_hz = HW_CFG_UART_CLK_HZ,$/\t.rate_hz = HW_CFG_UART_CLK_HZ,\n\t.use_cnt = 1, \/* T48S: on from U-Boot *\//' arch/arm/mach-bcmring/core.c
 grep -q "use_cnt = 1, /\* T48S" arch/arm/mach-bcmring/core.c
-# skip the DMA controller setup: nothing uses DMA yet, and after Yealink's kernel has
-# run (kexec boot) the DMA block faults on access (its clock is presumably off)
-sed -i 's/^\tdma_init();/\t\/* T48S: dma_init() skipped *\//' arch/arm/mach-bcmring/arch.c
-grep -q "dma_init() skipped" arch/arm/mach-bcmring/arch.c
+# DMA: controller 0 belongs to the voice DSP, which keeps running after a kexec boot
+# with channels active; writing an active channel's registers faults. Leave controller
+# 0 alone, and stop each controller 1 channel before resetting its configuration.
+python3 - <<'EOP'
+p = "arch/arm/mach-bcmring/csp/dmac/dmacHw.c"
+s = open(p).read()
+old = "\tpCblk->channel = channel;\n\n\t/* Enable DMA controller */"
+new = ("\tpCblk->channel = channel;\n\n"
+       "\t/* T48S: controller 0 belongs to the voice DSP; do not touch it */\n"
+       "\tif (module == 0)\n\t\treturn 0;\n"
+       "\t/* T48S: stop the channel before resetting its configuration */\n"
+       "\t{\n\t\tint n = 100000;\n"
+       "\t\tdmacHw_DMA_STOP(module, channel);\n"
+       "\t\twhile ((dmacHw_REG_MISC_CH_ENABLE(module) & (1 << channel)) && --n)\n\t\t\t;\n\t}\n\n"
+       "\t/* Enable DMA controller */")
+assert s.count(old) == 1
+open(p, "w").write(s.replace(old, new))
+EOP
+grep -q "controller 0 belongs to the voice DSP" arch/arm/mach-bcmring/csp/dmac/dmacHw.c
+# ... and register no interrupt handlers for controller 0's channels: the DSP's
+# transfers keep raising them, and with no owner here they storm
+python3 - <<'EOP'
+p = "arch/arm/mach-bcmring/dma.c"
+s = open(p).read()
+old = "\t\t\tif ((channel->flags & DMA_CHANNEL_FLAG_NO_ISR) == 0) {\n\t\t\t\tsnprintf(channel->name"
+new = ("\t\t\tif (controllerIdx != 0 && /* T48S: controller 0 is the DSP's */\n"
+       "\t\t\t    (channel->flags & DMA_CHANNEL_FLAG_NO_ISR) == 0) {\n\t\t\t\tsnprintf(channel->name")
+assert s.count(old) == 1, s.count(old)
+open(p, "w").write(s.replace(old, new))
+EOP
+grep -q "controller 0 is the DSP's" arch/arm/mach-bcmring/dma.c
 # leave the PLLs exactly as U-Boot set them
 sed -i 's/^\tchipcHw_enableSpreadSpectrum();/\t\/* T48S: chipcHw_enableSpreadSpectrum() skipped *\//' arch/arm/mach-bcmring/arch.c
 grep -q "spreadSpectrum() skipped\|SpreadSpectrum() skipped" arch/arm/mach-bcmring/arch.c

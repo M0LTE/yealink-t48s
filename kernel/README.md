@@ -32,3 +32,9 @@ Board changes:
 Pitfalls found on the way, in boot order: RAM must end on a 1 MB boundary or 3.6 hangs in `paging_init`; overlapping static mappings hit `BUG()` in `vm_area_add_early`; a UART clock gated off during `amba_device_add` leaves the early console spinning on a full FIFO (a silent hang).
 
 Userspace for testing: `tools/mkrfs-bb.sh` builds `T48S.rfs` with a static busybox (musl), a shell on the serial console and `native/membanner` drawing on the screen. Boot it with U-Boot's recovery mode, option 1 (TFTP), served by `tools/tftpd.py DIR 69 --rom-once`.
+
+## Memory map and DMA on the BCM11188 (2026-11-22)
+
+Yealink's page tables (`kmod/pgdprobe.c`, output in `dumps/yealink-iomap.txt`) confirm mainline's `mm_addr.h`: AXI blocks at 0x30100000 (ARAM), 0x30200000 (DMA0), 0x30300000 (DMA1), 0x30400000 (Ethernet switch), 0x30500000 (LCD), 0x30600000 (APM), 0x30700000 (SPUM), 0x30800000/0x30A00000 (VPM); chip control at 0x80000000 (ChipId reads 0x111880B0, BCM11188 rev B0). Ignore the addresses in the comments in mainline's `mm.c` (0x32000000 etc.), they are stale.
+
+DMA0 (Synopsys DW AHB DMAC, ID 0x44571110) belongs to the voice DSP, which keeps running across a kexec boot with channels active; our kernel neither initialises its channels nor takes their interrupts. DMA1 carries the Ethernet switch (channel 2 RX, channel 3 TX); its channels are stopped before being reset.
