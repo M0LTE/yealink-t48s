@@ -79,6 +79,26 @@ If either is armed when our kernel takes over, the phone will reset after some s
 - Yealink's GPL page offers a "Linux Kernel" archive for "T4XS, ..." but it is a RAR of a **MontaVista Linux 2.6.10 MIPS tree** from 2010, not this phone's 2.6.27 ARM kernel. No U-Boot source is published. A GPL source request to Yealink is possible (the kernel and `keypad.ko` are GPL) but is Tom's call.
 - Mainline Linux had `arch/arm/mach-bcmring` (BCM11107) from about 2.6.31 until it was removed for 3.7 (2012): timers, interrupts, DMA, clocks, PL011 serial and the `bcm_umi_nand` NAND driver; no Ethernet, LCD or keypad. Never device tree. v3.6 is the last tree with it.
 
+## USB boot smoke test (prepared 2026-11-22)
+
+U-Boot details that settle the file names: `phonename` is set by U-Boot from the board type, `T48S` here, so it wants `T48S.bin` and `T48S.rfs`. The ROM name is `phonename` unless an internal board-type byte maps to 'T2x', 'T61', 'T66', 'T41' or 'T42', so the stick carries the ROM under both names. `usbpart` is set by U-Boot's USB detect (first device:partition with a filesystem). In the updater, a board-type check either goes straight to USB or shows an on-screen menu (network or USB).
+
+`BOOTMODE`: U-Boot saves `BOOTMODE=usbmode` before booting from USB. Yealink's `rcS` reads `BOOTMODE` once and clears it (`userenv -s BOOTMODE`), then runs `usbmode.sh` (reflash `T48S.rom` from the stick), `resumemode.sh` (reflash over TFTP), `safemode.sh` or `normode.sh`. So a boot that skips Yealink's `rcS` must clear it itself, or the next normal boot runs the USB reflash once instead of the phone.
+
+The stick (FAT32, plugged into the phone) now holds:
+
+| File | What |
+|---|---|
+| `T48S.rom`, `T66.rom` | genuine 66.82.0.31 firmware, only to pass U-Boot's ROM check |
+| `T48S.bin` | Yealink's own kernel, byte for byte from `mtd7`, so this test only proves the boot route |
+| `T48S.rfs` | our 4 MB ext2 ramdisk (`tools/mkrfs.sh native/usbinit`) |
+
+`native/usbinit.c` (the ramdisk's `/sbin/init`): clears `BOOTMODE` with Yealink's own `userenv`, prints `/proc/cmdline` and `/proc/version`, draws "BOOTED FROM USB" on the screen through `/dev/mem` at 0x07A24000, echoes anything typed on the serial port, and prints `alive N s` every second. Exact files and checksums are in `dumps/usbtest/` (not committed).
+
+To run it: power on holding the key for scan code 40 or 41 for about 2 s (not yet identified; try one key per boot). If an update menu appears, choose USB. Success looks like "BOOTED FROM USB" on the screen and `alive` lines in the serial log on proxmox0. If the counter stops and the phone reboots, that is a watchdog, and the last number is its timeout. Afterwards, power-cycle without holding anything for a normal boot.
+
+Risk notes: nothing is written to flash except `BOOTMODE` in the userenv partition (by U-Boot, then cleared by our init, as Yealink does every boot). If our init failed to clear it, the next normal boot would run `usbmode.sh`, which reflashes 66.82.0.31 from the stick (the version already installed); our files in `/config` and `/data` survived the earlier web upgrades, so they should survive this too.
+
 ## Paths to our own kernel
 
 1. **Boot from USB via the recovery mode (no flash writes).** Needs: the key for scan code 40/41 (and maybe 50 for USB), a FAT USB stick with the genuine `.rom` plus our `.bin` (legacy image) and `.rfs` (ext2 ramdisk), named after `phonename`. First target: a minimal kernel with serial console and a busybox ramdisk, reaching a shell on CON4. Kernel options: mainline v3.6 `bcmring_defconfig` adapted to machine 2342 and this board's memory map; it covers serial and NAND. Build needs an old toolchain (gcc 4.x era), in a container or on a build box.
@@ -90,5 +110,5 @@ Replacing Yealink's drivers (screen, touch, keypad, Ethernet, audio) is the long
 ## What Tom can do to move this on
 
 1. **Identify keys 40/41, 50 and 60.** Power on holding a key and read `scan key=N` in the serial log; the logger on proxmox0 captures it. Holding one of these for 2 s enters recovery or update mode. With no USB stick or TFTP server it should fail and stop (power-cycle to recover), so it is safe, but expect the screen to show an update message.
-2. **A FAT-formatted USB stick** plugged into the phone's USB port, for the recovery-boot test.
+2. ~~A FAT-formatted USB stick~~ done: plugged in and prepared, see "USB boot smoke test".
 3. Decide whether to ask Yealink for the 2.6.27 GPL source.

@@ -4,6 +4,8 @@ Last updated 2026-11-22.
 
 ## Done
 
+- Touch test passed (2026-11-22): taps land on the buttons, keys and the handset drop back to Yealink. Linux keycodes are keypad matrix positions (digits 1-9 = 57 58 59 / 49 50 51 / 41 42 43, hook = 89); U-Boot's scan codes use different numbers.
+
 - Root shell on the phone, over the network, no hardware needed.
 - Our own compiled program running on the phone and drawing the whole screen.
 - Serial console wired up for watching boots.
@@ -15,8 +17,7 @@ Last updated 2026-11-22.
 
 (Phone address is now fixed at 10.45.0.214 by a DHCP reservation, `yealink-t48s` on the router, 2026-11-22. Tom's RSA key is in `/data/ssh/authorized_keys`.)
 
-- **Touch test:** tap the Phone and Refresh buttons; press keys and lift the handset while the GB7RDG page is up (each key should drop straight back to Yealink and act there). Key codes land in `/tmp/t48ui.log`.
-- **Recovery keys:** power on holding keys to find scan codes 40/41, 50 and 60 (see own-kernel.md).
+- **USB boot smoke test:** the stick is prepared. Power on holding a key for about 2 s, one key per boot, until an update screen appears (scan code 40/41); choose USB if asked. See own-kernel.md.
 
 ## Next
 
