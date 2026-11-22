@@ -1,15 +1,27 @@
-# Freestanding programs for the T48S (ARMv6, Linux 2.6.27, EABI soft-float).
-# No libc: raw syscalls only, so the phone's old glibc does not matter.
-CC = clang
-CFLAGS = --target=armv6-linux-gnueabi -march=armv6 -mfloat-abi=soft -marm -Os \
-         -ffreestanding -fno-builtin -nostdlib -static -fuse-ld=lld -Wl,-e,_start
+# Programs for the T48S (ARMv6, Linux 2.6.27, EABI soft-float).
+# Freestanding ones use raw syscalls; the rest link musl built by build-dropbear.sh.
+T ?= $(HOME)/src-build/t48s
+FREE = clang --target=armv6-linux-gnueabi -march=armv6 -mfloat-abi=soft -marm -Os \
+       -ffreestanding -fno-builtin -nostdlib -fuse-ld=lld
+MUSLCC = $(T)/bin/armcc -Os -Wall
 
-PROGS = fbtest
+all: fbtest fbswap.so envexec fbinfo tap t48ui
 
-all: $(PROGS)
+fbtest: fbtest.c
+	$(FREE) -static -Wl,-e,_start -o $@ $<
 
-%: %.c
-	$(CC) $(CFLAGS) -o $@ $<
+# Loaded into Yealink's dskPhone with LD_PRELOAD; only errno comes from the host glibc
+fbswap.so: fbswap.c
+	$(FREE) -O2 -fPIC -shared -Wl,--hash-style=both -Wl,-soname,fbswap.so -o $@ $<
+
+envexec fbinfo tap: %: %.c
+	$(MUSLCC) -o $@ $<
+
+gen/fonts.h: ../tools/mkfont.py
+	python3 ../tools/mkfont.py $@
+
+t48ui: t48ui.c gen/fonts.h
+	$(MUSLCC) -o $@ t48ui.c
 
 clean:
-	rm -f $(PROGS)
+	rm -f fbtest fbswap.so envexec fbinfo tap t48ui

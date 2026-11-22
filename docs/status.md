@@ -9,16 +9,18 @@ Last updated 2026-11-22.
 - Serial console wired up for watching boots.
 - SSH: static dropbear (musl, built with `native/build-dropbear.sh`) installed in `/data/ssh`, key login as root. `scp` needs `-O` (no SFTP server).
 - Boot hook: Yealink's `phone.sh` runs `/config/simulator.sh` *instead of* its normal startup when that file exists. Ours starts SSH, then hands over to Yealink's original startup. SSH now survives reboots, and the phone otherwise behaves as stock.
+- **Our own screen alongside Yealink's** (`t48ui`), starting at boot. It shows GB7RDG's open links, sessions and neighbours, read from LinBPQ's web server every 15 s. The "GB7RDG" line key (key 7) on Yealink's screen opens it; the Phone button, any physical key, or any call goes back to Yealink. See "Screen switching" below.
 
-## Now
+## Needs Tom
 
-- **The phone's address moves.** It has been 10.45.0.217 and, since a reboot, 10.45.0.214 (DHCP). Its MAC is `80:5e:c0:03:1c:05`; find it with a ping sweep and `ip neigh`. A DHCP reservation on the router would fix this. `tools/phonecfg.py` defaults to .214; override with `T48S_HOST`.
+- **Touch test:** tap the Phone and Refresh buttons; press keys and lift the handset while the GB7RDG page is up (each key should drop straight back to Yealink and act there). Key codes land in `/tmp/t48ui.log`.
+- **DHCP reservation:** the phone's address moves (10.45.0.217, now 10.45.0.214). MAC `80:5e:c0:03:1c:05`. Until then find it with a ping sweep and `ip neigh`; `tools/phonecfg.py` defaults to .214, override with `T48S_HOST`.
+- **An SSH public key** to add to `/data/ssh/authorized_keys` (none on github.com/M0LTE.keys).
 
 ## Next
 
-1. **Our own UI alongside Yealink's.** A launcher that can switch the screen between Yealink's phone UI and ours, so the SIP phone keeps working.
-2. **Packet-radio display.** For example the connections currently open on GB7RDG. Needs a small feed from the node side.
-3. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
+1. **More pages and the keypad:** map the keys once Tom has pressed them; more packet views (heard lists, per-port traffic); maybe a page switcher.
+2. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
 
 ## How we got root
 
@@ -83,13 +85,26 @@ Files on the phone:
 | `/data/ssh/dropbearmulti` | dropbear, dropbearkey, scp, dbclient (symlinks alongside) |
 | `/data/ssh/dropbear_ed25519_host_key` | host key, fingerprint `SHA256:lIPt4HWHPqX6WiCIdtriaOeP9snbZc8m11q+4YmkdBk` |
 | `/data/ssh/authorized_keys` | keys allowed to log in as root (dropbear `-D /data/ssh`, since root's home `/` is read-only) |
-| `/data/custom/start.sh` | our services, started at boot (from `phone/start.sh`) |
+| `/data/custom/start.sh` | our services, started at boot (from `phone/start.sh`): dropbear and t48ui |
+| `/data/custom/t48ui`, `fbswap.so`, `tap`, `envexec` | built from `native/` |
 | `/data/custom/rearm.sh` | puts the boot hook back after 2 minutes if SSH is up (from `phone/rearm.sh`) |
 | `/config/simulator.sh` | the boot hook (from `phone/simulator.sh`); `.armed` suffix while disarmed |
 
 Start SSH by hand: `/data/ssh/dropbear -r /data/ssh/dropbear_ed25519_host_key -D /data/ssh -s -p 22 -P /var/dropbear.pid`
 
 Other boot facts: `/etc/inittab` runs a getty on the serial port, but it gave no response to Enter. `/phone/scripts/TelnetServices.sh` starts Yealink's own telnetd when the config setting `features.temode` is 1. There is also a uid-0 account `toor` in `/etc/passwd`.
+
+## Screen switching
+
+The display driver refuses any change to the screen layout, so there is no page flipping. Instead:
+
+- `fbswap.so` is loaded into every process via `LD_PRELOAD`, set by the boot hook. It does nothing except in Yealink's UI (`dskPhone.exx`), where it records the address of its `/dev/fb0` mapping and writes its PID to `/tmp/fbswap.pid`.
+- On signal 44 it reads `/tmp/fbswap.mode`. `o`: the first 1.5 MB of that mapping (the visible screen) is replaced, at the same address, by the tmpfs file `/tmp/fbswap.shadow`, so Yealink keeps drawing unseen. `y`: the real framebuffer is mapped back and the shadow is copied onto the screen. No copying at all while idle.
+- `t48ui` (static, musl) does the switching: fbswap mode, an exclusive grab (`EVIOCGRAB`) of the keypad (event0, node made in `/tmp`), expansion port (event1) and touchscreen (event2), and the backlight via `/proc/keypad/lcd_bklight` (lit while shown, dims after 10 minutes, restored on the way out). Physical keys hide our screen and are written back into the device so Yealink sees them.
+- Control on port 8123: `/show`, `/hide`, `/toggle`, `/status`. Yealink calls these itself: line key 7 is a URL key for `/show` (`tools/linekey.py`), and Action URLs for incoming call, off-hook, call out and idle-to-busy call `/hide`; setup-completed calls `/status` (`tools/actionurls.py`).
+- Touch positions come from the tslib calibration in `/etc/pointercal` (12-bit raw values). `/data/custom/tap X Y` injects a tap for testing; injected taps do not reach a grabbed device.
+
+Why freezing Yealink's UI rebooted the phone: the keypad driver has a watchdog (`/proc/keypad/watchdog`) that the UI feeds.
 
 ## Building for the phone
 
@@ -101,7 +116,7 @@ python3 ../tools/push.py fbtest /tmp/fbtest
 python3 ../tools/tsh.py 'chmod +x /tmp/fbtest; /tmp/fbtest &'
 ```
 
-`fbtest` draws a test card and logs touch and key events.
+`fbtest` draws a test card and logs touch and key events. `make` builds everything; the musl-linked ones need the toolchain from `build-dropbear.sh`, and `gen/fonts.h` is generated from DejaVu fonts by `tools/mkfont.py`.
 
 ## Serial console
 

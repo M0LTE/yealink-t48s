@@ -12,6 +12,9 @@ Where things stand and what's next: [docs/status.md](docs/status.md).
   - `diag82.py` - runs a shell command as root through the 66.82 ping box
   - `tsh.py` - runs commands over the root telnet shell
   - `push.py` - copies a file to the phone
+  - `shot.py` - screenshot of the phone (or of Yealink's hidden screen) as PNG
+  - `actionurls.py`, `linekey.py` - read or set Yealink's Action URLs and line keys
+  - `mkfont.py` - generates the fonts for `t48ui`
   - `phonecfg.py` - phone address; reads the web login from `~/.config/yealink-t48s/web-login` (`user:password`) or `T48S_LOGIN`
 - `native/` - programs for the phone, built with clang (`make`)
 - `docs/` - notes

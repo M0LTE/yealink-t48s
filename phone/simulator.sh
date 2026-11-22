@@ -12,5 +12,9 @@ sync
 [ -x /data/custom/start.sh ] && /data/custom/start.sh > /tmp/custom-start.log 2>&1 &
 [ -x /data/custom/rearm.sh ] && /data/custom/rearm.sh > /tmp/custom-rearm.log 2>&1 &
 
+# Yealink's UI (and everything else started from here) loads fbswap.so, which lets
+# t48ui borrow the screen. It does nothing in any process except dskPhone.
+[ -f /data/custom/fbswap.so ] && export LD_PRELOAD=/data/custom/fbswap.so
+
 # The hook file is gone now, so Yealink's own script takes its normal path.
 exec /phone/scripts/phone.sh
