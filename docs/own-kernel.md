@@ -45,10 +45,10 @@ U-Boot's key scan (code at 0x03B15910) polls the key 20 times, 100 ms apart, pri
 
 | Key held about 2 s | Scan code | Result | What U-Boot does |
 |---|---|---|---|
-| ? | 40 or 41 | 1 | "Start Updating...": the recovery updater (network setup, `.rom` check, then the USB/TFTP boot below) |
+| Speakerphone (Yealink's documented recovery key; older guides say Redial, which is probably the other of 40/41) | 40 or 41 | 1 | "Start Updating...": the recovery updater (network setup, `.rom` check, then the USB/TFTP boot below) |
 | ? | 50 | 2 | (handled inside the updater: selects USB) |
-| ? | 60 | 3 | another update path (0x03B1522C) |
-| OK | 16 | 4 | only acted on inside the updater |
+| ? (avoid) | 60 | 3 | 0x03B1522C: erases the `cfg` partition (`/config`) and sets `NeedSync`, i.e. a configuration reset that would also remove our boot hook |
+| OK | 16 | 4 | ignored at boot; inside the updater it runs the same `cfg` reset, so do not hold OK at the recovery menu |
 
 Known codes from Tom's test: OK 16, X 17, \* 10, # 11. Codes 40/41, 50 and 60 are other keys, not yet identified.
 
@@ -95,7 +95,7 @@ The stick (FAT32, plugged into the phone) now holds:
 
 `native/usbinit.c` (the ramdisk's `/sbin/init`): clears `BOOTMODE` with Yealink's own `userenv`, prints `/proc/cmdline` and `/proc/version`, draws "BOOTED FROM USB" on the screen through `/dev/mem` at 0x07A24000, echoes anything typed on the serial port, and prints `alive N s` every second. Exact files and checksums are in `dumps/usbtest/` (not committed).
 
-To run it: power on holding the key for scan code 40 or 41 for about 2 s (not yet identified; try one key per boot). If an update menu appears, choose USB. Success looks like "BOOTED FROM USB" on the screen and `alive` lines in the serial log on proxmox0. If the counter stops and the phone reboots, that is a watchdog, and the last number is its timeout. Afterwards, power-cycle without holding anything for a normal boot.
+To run it (Yealink's documented procedure, "Recovery Mode on Yealink IP Phones", USB section for T41S/T42S/T46S/T48S): hold the **Speakerphone** key and reconnect power, keep holding until the screen shows "1. TFTP / 2: USB", then press **2**. Do not hold OK. Success looks like "BOOTED FROM USB" on the screen and `alive` lines in the serial log on proxmox0. If the counter stops and the phone reboots, that is a watchdog, and the last number is its timeout. Afterwards, power-cycle without holding anything for a normal boot.
 
 Risk notes: nothing is written to flash except `BOOTMODE` in the userenv partition (by U-Boot, then cleared by our init, as Yealink does every boot). If our init failed to clear it, the next normal boot would run `usbmode.sh`, which reflashes 66.82.0.31 from the stick (the version already installed); our files in `/config` and `/data` survived the earlier web upgrades, so they should survive this too.
 
@@ -109,6 +109,6 @@ Replacing Yealink's drivers (screen, touch, keypad, Ethernet, audio) is the long
 
 ## What Tom can do to move this on
 
-1. **Identify keys 40/41, 50 and 60.** Power on holding a key and read `scan key=N` in the serial log; the logger on proxmox0 captures it. Holding one of these for 2 s enters recovery or update mode. With no USB stick or TFTP server it should fail and stop (power-cycle to recover), so it is safe, but expect the screen to show an update message.
+1. **Run the USB boot smoke test:** Speakerphone held while reconnecting power, then 2 at the menu.
 2. ~~A FAT-formatted USB stick~~ done: plugged in and prepared, see "USB boot smoke test".
 3. Decide whether to ask Yealink for the 2.6.27 GPL source.

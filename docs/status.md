@@ -17,7 +17,7 @@ Last updated 2026-11-22.
 
 (Phone address is now fixed at 10.45.0.214 by a DHCP reservation, `yealink-t48s` on the router, 2026-11-22. Tom's RSA key is in `/data/ssh/authorized_keys`.)
 
-- **USB boot smoke test:** the stick is prepared. Power on holding a key for about 2 s, one key per boot, until an update screen appears (scan code 40/41); choose USB if asked. See own-kernel.md.
+- **USB boot smoke test:** the stick is prepared. Hold Speakerphone while reconnecting power, keep holding until "1. TFTP / 2: USB" appears, press 2. Do not hold OK at that menu. See own-kernel.md.
 
 ## Next
 
