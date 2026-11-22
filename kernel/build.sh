@@ -1,7 +1,11 @@
 #!/bin/sh
 # Build the T48S kernel inside the t48s-kbuild:trusty container (gcc 4.7).
 # Run from the directory holding linux-3.6.11/ and this kernel/ directory.
+#   sh kernel/build.sh          -> T48S.bin   (U-Boot image, for recovery-mode TFTP boot)
+#   sh kernel/build.sh kexec    -> Image-kexec (raw Image with built-in initramfs,
+#                                  for kmod/t48kexec; needs kexec-rootfs.list)
 set -e
+VARIANT=${1:-tftp}
 cd linux-3.6.11
 # mainline gives bcmring machine number 2289; the phone's U-Boot passes 2342
 sed -i 's/^\(bcmring[[:space:]]*MACH_BCMRING[[:space:]]*BCMRING[[:space:]]*\)2289$/\12342/' arch/arm/tools/mach-types
@@ -42,7 +46,13 @@ cat > arch/arm/mach-bcmring/include/mach/debug-macro.S <<'EOD'
 EOD
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- bcmring_defconfig
 ./scripts/kconfig/merge_config.sh -m .config ../kernel/t48s.config >/dev/null
+[ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kernel/kexec.config >/dev/null
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig >/dev/null 2>&1 || make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- oldnoconfig >/dev/null
 for o in CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
+if [ "$VARIANT" = kexec ]; then
+    make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j12 Image 2>&1 | tail -n 3
+    cp arch/arm/boot/Image ../Image-kexec
+    exit 0
+fi
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j12 zImage 2>&1 | tail -n 5
 mkimage -A arm -O linux -T kernel -C none -a 0x0e000000 -e 0x0e000000 -n "Linux-3.6.11-t48s" -d arch/arm/boot/zImage ../T48S.bin

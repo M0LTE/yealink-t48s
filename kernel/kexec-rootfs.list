@@ -1,0 +1,23 @@
+# gen_init_cpio list for the kexec kernel's built-in root filesystem (paths inside the build container)
+dir /dev 0755 0 0
+nod /dev/console 0600 0 0 c 5 1
+dir /proc 0755 0 0
+dir /sys 0755 0 0
+dir /tmp 1777 0 0
+dir /root 0700 0 0
+dir /bin 0755 0 0
+dir /sbin 0755 0 0
+dir /usr 0755 0 0
+dir /usr/bin 0755 0 0
+dir /usr/sbin 0755 0 0
+dir /etc 0755 0 0
+dir /etc/init.d 0755 0 0
+file /bin/busybox /w/kexec-rootfs/bin/busybox 0755 0 0
+slink /bin/sh busybox 0777 0 0
+slink /init bin/busybox 0777 0 0
+slink /sbin/init ../bin/busybox 0777 0 0
+file /bin/back-to-yealink /w/kexec-rootfs/bin/back-to-yealink 0755 0 0
+file /usr/bin/membanner /w/kexec-rootfs/usr/bin/membanner 0755 0 0
+file /etc/inittab /w/kexec-rootfs/etc/inittab 0644 0 0
+file /etc/init.d/rcS /w/kexec-rootfs/etc/init.d/rcS 0755 0 0
+file /etc/profile /w/kexec-rootfs/etc/profile 0644 0 0

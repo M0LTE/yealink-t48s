@@ -15,3 +15,6 @@ __pycache__/
 dumps/
 # Vendor GPL source downloads
 gpl-src/
+# Built binaries copied in for the kexec initramfs
+kernel/kexec-rootfs/bin/busybox
+kernel/kexec-rootfs/usr/bin/

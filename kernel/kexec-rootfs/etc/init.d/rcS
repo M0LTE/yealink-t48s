@@ -1,0 +1,12 @@
+#!/bin/sh
+/bin/busybox --install -s
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+# userspace is up: disarm the SP805 watchdog the loader armed (unlock, control 0, lock)
+devmem 0x80017c00 32 0x1ACCE551; devmem 0x80017808 32 0; devmem 0x80017c00 32 0
+echo
+echo "===== T48S: our own kernel is running (started from Yealink's kernel) ====="
+uname -a
+free
+/usr/bin/membanner "OUR KERNEL" "$(uname -sr) $(uname -v)" "started from Yealink's kernel, no key presses" "$(grep -m1 MemTotal /proc/meminfo)" "busybox shell on the serial console"
