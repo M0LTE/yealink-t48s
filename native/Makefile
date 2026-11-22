@@ -5,7 +5,7 @@ FREE = clang --target=armv6-linux-gnueabi -march=armv6 -mfloat-abi=soft -marm -O
        -ffreestanding -fno-builtin -nostdlib -fuse-ld=lld
 MUSLCC = $(T)/bin/armcc -Os -Wall
 
-all: fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner
+all: fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner cpubench
 
 fbtest: fbtest.c
 	$(FREE) -static -Wl,-e,_start -o $@ $<
@@ -24,7 +24,11 @@ t48ui: t48ui.c gen/fonts.h
 	$(MUSLCC) -o $@ t48ui.c
 
 clean:
-	rm -f fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner
+	rm -f fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner cpubench
 
 membanner: membanner.c gen/fonts.h
 	$(MUSLCC) -o $@ membanner.c
+
+# CPU speed comparison between kernels (issue #9)
+cpubench: cpubench.c
+	$(MUSLCC) -O2 -o $@ $<

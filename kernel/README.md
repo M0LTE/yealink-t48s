@@ -1,6 +1,6 @@
 # Our kernel for the T48S
 
-**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 331.77 against Yealink's 498.07, which is the delay-loop measurement, not the clock. Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. No drivers yet for screen, touch, keypad, NAND or audio.
+**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 498.89, matching Yealink's 498.07 (see "CPU speed" below). Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. No drivers yet for screen, touch, keypad, NAND or audio.
 
 Linux 3.6.11 (the last mainline release with Broadcom's `mach-bcmring` platform, the BCM11107 family the phone's BCM11188 belongs to), patched and configured for the phone. Built with gcc 4.7 in an Ubuntu 14.04 container.
 
@@ -25,6 +25,7 @@ Board changes:
 | PLL spread spectrum | enabled at boot | left as U-Boot set it |
 | Flash (MTD/NAND) | built in | not built: this kernel cannot write the NAND |
 | Command line | from U-Boot | built in: serial console on ttyAMA0 at 115200, ramdisk at 0x02a80000 |
+| Delay loop | wherever the link puts it | on an 8-byte boundary (see "CPU speed" below) |
 | Early debug output | none for this platform | `mach/debug-macro.S` for UARTA (phys 0x80012000, virt 0xF8012000) |
 | Static I/O map | UMI and NAND entries overlapping CHIPC | dropped (3.6 BUG()s on overlaps) |
 | UART clock lookup | registered for `uarta`/`uartb`, devices named `uartA`/`uartB` | names fixed; use count starts at 1 so the AMBA ID read does not gate the clock off under the console |
@@ -48,3 +49,18 @@ The DMA control and config values are the ones Yealink's kernel was seen using (
 The driver assumes the switch is already set up (it is, after a kexec from Yealink): ports forwarding, a static ARL entry for the phone's MAC on the CPU port. It only re-enables the CPU port, which Yealink's `ifconfig eth0 down` turns off before the jump. It uses the phone's own MAC, so the DHCP reservation gives the usual address. Buffers are DMA-coherent and every frame is copied; one transmit is in flight at a time. Simple, and fast enough for SSH.
 
 `dma_device.c` marks the two ESW channels `NO_ISR` so the DMA framework leaves their interrupts to the driver.
+
+## CPU speed (2026-11-22, issue #9)
+
+Our kernel used to report 331.77 BogoMIPS against Yealink's 498.07. The CPU was never slower: the core runs at about 500 MHz under both. On this ARM1176 the two-instruction delay loop takes 2 cycles per pass when it starts on an 8-byte boundary and 3 when it starts 4 bytes off one, and our build happened to link it at 0xc01034cc where Yealink's sits at 0xc014bab0. `build.sh` now aligns it; BogoMIPS reads 498.89.
+
+`native/cpubench.c` runs the same work under either kernel (CPU time, best of three passes; Yealink's figures are a little lower because its UI and DSP keep disturbing the caches):
+
+| Test | Yealink 2.6.27 | Ours 3.6.11 |
+|---|---|---|
+| delay loop, 8-byte aligned (million passes/s) | 235 | 250 |
+| delay loop, 4 bytes off | 156 | 167 |
+| integer mix in L1 cache (million passes/s) | 27.0 | 31.2 |
+| memcpy through 4 MB buffers (MB/s) | 160 | 200 |
+
+The CP15 control register is 0x00c5387f under Yealink and 0x00c5387d under ours: caches, branch prediction and MMU are on in both; the one differing bit is alignment-fault checking, which does not affect speed.
