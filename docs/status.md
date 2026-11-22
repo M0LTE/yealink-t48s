@@ -4,6 +4,9 @@ Last updated 2026-11-22.
 
 ## Done
 
+- **Hands-off kernel iteration** (2026-11-22): `tools/kexec-boot.sh` starts our kernel from Yealink's running system (module `kmod/t48kexec.ko`), its shell is driven over serial (`sercmd.py` on proxmox0), and `back-to-yealink` returns to Yealink with SSH. No key presses, no flash writes. See `kmod/README.md`.
+- Rescue route if SSH is ever lost: `tools/mkrescue.sh` + recovery mode option 1 (Speakerphone at power-on).
+
 - **Our own kernel runs** (2026-11-22): Linux 3.6.11 for the board, network-booted via recovery mode, busybox shell on the serial console, banner on the screen. See `kernel/README.md`.
 
 - **Network boot of our own userspace** (2026-11-22): recovery mode (Speakerphone at power-on, menu option 1, TFTP from `tools/tftpd.py`) boots `T48S.bin` and our `T48S.rfs`. Serial console works both ways; no watchdog resets. USB recovery hangs with our stick. Details in own-kernel.md.

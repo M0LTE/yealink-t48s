@@ -12,7 +12,8 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 ssh -o BatchMode=yes root@$PHONE '[ -f /config/simulator.sh.armed ] && mv /config/simulator.sh.armed /config/simulator.sh; sync; [ -x /config/simulator.sh ]' || { echo "boot hook not in place; not jumping" >&2; exit 1; }
 scp -q -O "$IMG" root@$PHONE:/tmp/Image
 scp -q -O "$HERE/dumps/t48kexec.ko" root@$PHONE:/tmp/t48kexec.ko
-# keypad chip watchdog off (Yealink's scripts do this too), network down (no DMA into
+# freeze Yealink's UI (it keeps re-arming the keypad chip's watchdog), turn that
+# watchdog off (Yealink's scripts do this too), network down (no DMA into
 # memory after the jump), then load; detached because the network goes away
-ssh -o BatchMode=yes root@$PHONE "sh -c 'trap \"\" HUP; echo 0 > /proc/keypad/watchdog; sleep 1; ifconfig eth0 down; insmod /tmp/t48kexec.ko image=/tmp/Image wdt=$WDT' > /tmp/kexec.log 2>&1 < /dev/null &" || true
+ssh -o BatchMode=yes root@$PHONE "sh -c 'trap \"\" HUP; killall -STOP dskPhone.exx; echo 0 > /proc/keypad/watchdog; sleep 1; ifconfig eth0 down; insmod /tmp/t48kexec.ko image=/tmp/Image wdt=$WDT' > /tmp/kexec.log 2>&1 < /dev/null &" || true
 echo "loader started on $PHONE"
