@@ -116,6 +116,12 @@ Risk notes: nothing is written to flash except `BOOTMODE` in the userenv partiti
 
 Linux 3.6.11 with Broadcom's mainline `mach-bcmring` platform, patched for the board (`kernel/`), boots through recovery option 1 to a busybox shell on the serial console, with a banner on the screen. Six boot attempts; what each one taught is in `kernel/README.md`. Getting back to Yealink afterwards takes two power cycles (the first runs Yealink's resume script, which fails harmlessly because `tftpd.py --rom-once` refuses it the ROM).
 
+### Side effect: factory reset (2026-11-22, evening)
+
+After the six recovery-mode boots and one watchdog reset into Yealink's `resumemode.sh` (which showed "Firmware updating..." while its ROM downloads were refused), the next normal boot came up factory-reset: no account, default timezone and language, our boot hook gone from `/config`, and the web password no longer the one we set. The serial log shows OK was never held at the recovery menu and no `cfg` erase by U-Boot, so the reset most likely came from Yealink's own resume or upgrade code after its failed download. The kexec route below never enters recovery mode, which avoids this.
+
+The web UI locks out after a few failed logins (HTTP 403 "try again 3 minutes later"); repeated attempts during the lockout seem to extend it.
+
 ## Paths to our own kernel
 
 1. **Boot from USB via the recovery mode (no flash writes).** Needs: the key for scan code 40/41 (and maybe 50 for USB), a FAT USB stick with the genuine `.rom` plus our `.bin` (legacy image) and `.rfs` (ext2 ramdisk), named after `phonename`. First target: a minimal kernel with serial console and a busybox ramdisk, reaching a shell on CON4. Kernel options: mainline v3.6 `bcmring_defconfig` adapted to machine 2342 and this board's memory map; it covers serial and NAND. Build needs an old toolchain (gcc 4.x era), in a container or on a build box.
