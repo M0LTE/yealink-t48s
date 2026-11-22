@@ -1,6 +1,6 @@
 """Where the phone is and how to log in. Password lives outside the repo."""
 import os
-HOST = os.environ.get("T48S_HOST", "10.45.0.217")
+HOST = os.environ.get("T48S_HOST", "10.45.0.214")
 _cred = os.environ.get("T48S_LOGIN") or open(os.path.expanduser("~/.config/yealink-t48s/web-login")).read().strip()
 USER, PASSWORD = _cred.split(":", 1)
 

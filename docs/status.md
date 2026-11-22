@@ -8,18 +8,17 @@ Last updated 2026-11-22.
 - Our own compiled program running on the phone and drawing the whole screen.
 - Serial console wired up for watching boots.
 - SSH: static dropbear (musl, built with `native/build-dropbear.sh`) installed in `/data/ssh`, key login as root. `scp` needs `-O` (no SFTP server).
-- Found the boot hook: Yealink's `phone.sh` runs `/config/simulator.sh` *instead of* its normal startup when that file exists.
+- Boot hook: Yealink's `phone.sh` runs `/config/simulator.sh` *instead of* its normal startup when that file exists. Ours starts SSH, then hands over to Yealink's original startup. SSH now survives reboots, and the phone otherwise behaves as stock.
 
 ## Now
 
-**The phone is offline and needs a power cycle (2026-11-22 12:45).** The first boot-hook attempt ran a copy of `phone.sh` from `/tmp`; the network never came up. Likely cause: the copy finds its helpers relative to its own path. The hook disarms itself before doing anything else, so a power cycle should give a normal Yealink boot. After that, root via the web trick, start dropbear by hand, and try the corrected hook (`phone/simulator.sh`, which just runs Yealink's original `phone.sh` after moving itself away).
+- **The phone's address moves.** It has been 10.45.0.217 and, since a reboot, 10.45.0.214 (DHCP). Its MAC is `80:5e:c0:03:1c:05`; find it with a ping sweep and `ip neigh`. A DHCP reservation on the router would fix this. `tools/phonecfg.py` defaults to .214; override with `T48S_HOST`.
 
 ## Next
 
-1. **Survive reboots.** Get the corrected boot hook working, so SSH (and later our UI) starts by itself, without the web trick.
-2. **Our own UI alongside Yealink's.** A launcher that can switch the screen between Yealink's phone UI and ours, so the SIP phone keeps working.
-3. **Packet-radio display.** For example the connections currently open on GB7RDG. Needs a small feed from the node side.
-4. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
+1. **Our own UI alongside Yealink's.** A launcher that can switch the screen between Yealink's phone UI and ours, so the SIP phone keeps working.
+2. **Packet-radio display.** For example the connections currently open on GB7RDG. Needs a small feed from the node side.
+3. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
 
 ## How we got root
 
