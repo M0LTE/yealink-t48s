@@ -15,12 +15,14 @@ Last updated 2026-11-22.
 
 - **Touch test:** tap the Phone and Refresh buttons; press keys and lift the handset while the GB7RDG page is up (each key should drop straight back to Yealink and act there). Key codes land in `/tmp/t48ui.log`.
 - **DHCP reservation:** the phone's address moves (10.45.0.217, now 10.45.0.214). MAC `80:5e:c0:03:1c:05`. Until then find it with a ping sweep and `ip neigh`; `tools/phonecfg.py` defaults to .214, override with `T48S_HOST`.
+- **Recovery keys:** power on holding keys to find scan codes 40/41, 50 and 60 (see own-kernel.md).
 - **An SSH public key** to add to `/data/ssh/authorized_keys` (none on github.com/M0LTE.keys).
 
 ## Next
 
 1. **More pages and the keypad:** map the keys once Tom has pressed them; more packet views (heard lists, per-port traffic); maybe a page switcher.
-2. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
+2. **Our own kernel.** Researched in [own-kernel.md](own-kernel.md): no signature checks found; U-Boot's USB recovery boot or a kexec-style module could boot our kernel without writing flash. Needs Tom to find the recovery keys.
+3. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
 
 ## How we got root
 

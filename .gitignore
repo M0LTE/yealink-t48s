@@ -11,3 +11,7 @@ native/*
 !native/*.h
 !native/Makefile
 __pycache__/
+# Flash dumps from the phone (vendor code)
+dumps/
+# Vendor GPL source downloads
+gpl-src/
