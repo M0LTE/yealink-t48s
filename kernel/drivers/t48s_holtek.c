@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * t48s_holtek: the Holtek companion chip of the Yealink SIP-T48S.
  *

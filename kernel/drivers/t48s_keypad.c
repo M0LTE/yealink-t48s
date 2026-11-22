@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * t48s_keypad: the keys and the hook switch of the Yealink SIP-T48S.
  *
