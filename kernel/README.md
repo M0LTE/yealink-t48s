@@ -1,6 +1,6 @@
 # Our kernel for the T48S
 
-**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 498.89, matching Yealink's 498.07 (see "CPU speed" below). Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. No drivers yet for screen, touch, keypad, NAND or audio.
+**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 498.89, matching Yealink's 498.07 (see "CPU speed" below). Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. The screen, keys and hook switch have drivers too (below); none yet for touch, NAND or audio.
 
 Linux 3.6.11 (the last mainline release with Broadcom's `mach-bcmring` platform, the BCM11107 family the phone's BCM11188 belongs to), patched and configured for the phone. Built with gcc 4.7 in an Ubuntu 14.04 container.
 
@@ -49,6 +49,22 @@ The DMA control and config values are the ones Yealink's kernel was seen using (
 The driver assumes the switch is already set up (it is, after a kexec from Yealink): ports forwarding, a static ARL entry for the phone's MAC on the CPU port. It only re-enables the CPU port, which Yealink's `ifconfig eth0 down` turns off before the jump. It uses the phone's own MAC, so the DHCP reservation gives the usual address. Buffers are DMA-coherent and every frame is copied; one transmit is in flight at a time. Simple, and fast enough for SSH.
 
 `dma_device.c` marks the two ESW channels `NO_ISR` so the DMA framework leaves their interrupts to the driver.
+
+## Keys, hook switch and the Holtek chip (2026-11-22, issue #3)
+
+`drivers/t48s_keypad.c` (copied into `drivers/input/`) gives two input devices. "T48S keypad" (`/dev/input/event0`) reads the SoC keypad controller, which U-Boot and Yealink leave running; "T48S hook switch" (`/dev/input/event1`) reads GPIO29 and sends `KEY_PHONE`, held while the handset is lifted. Both are polled every 20 ms: the keypad interrupt's acknowledge is still a guess and this kernel has no GPIO interrupts. The keys also type on the screen console (digits, `*`, arrows, OK = Enter, X = Backspace).
+
+The key table is in the driver, taken from Yealink's own keymap for the phone. Known: digits, `*` (`KEY_KPASTERISK`), `#` (`KEY_NUMERIC_POUND`, which the console does not type), arrows, OK, X, Speakerphone (`KEY_F10`). Guessed: the two volume keys, and which is which. Unknown labels: six function keys (Headset, Mute, Message, Hold, Redial, Transfer in some order), sent as `KEY_F7`, `F8`, `F9`, `F16`, `F17`, `F20`, the same F-numbers Yealink's keymap uses. The table can be changed at run time with the usual `EVIOCSKEYCODE`.
+
+`drivers/t48s_holtek.c` (copied into `drivers/misc/`) bit-bangs the Holtek chip on GPIO36/11/10. At boot it reads the version block and, if the chip answers as a protocol 2.0 one, turns its watchdog off; the kexec loader has already done that, so this is for boot paths that have not. `echo N > /sys/module/t48s_holtek/parameters/watchdog` arms it for N seconds (nothing feeds it: the phone resets, which is a handy way to prove it works), 0 turns it off. The chip's LED and the other LEDs are not driven yet.
+
+Not tested yet: an actual key press. To test:
+
+```
+tools/ourkernel.sh ssh 'echo 1 > /sys/module/t48s_keypad/parameters/debug'
+```
+
+then press each key once. Every press and release prints a line on the screen and in `dmesg`, such as `t48s_keypad: row 8 col 0 code 65 down -> key 2` (key 2 is `KEY_1`; `key 0` means the position is not in the table). Lift and replace the handset: expect `hook GPIO29 = 0 (off hook)` then `= 1 (on hook)`; if it is the other way round, flip `HOOK_OFF_LEVEL` in the driver. Note the code printed for Headset, Mute, Message, Hold, Redial, Transfer and each volume key so the table can be finished. With debug off (`echo 0`), digits typed at the `login:` prompt on the screen should appear there.
 
 ## CPU speed (2026-11-22, issue #9)
 

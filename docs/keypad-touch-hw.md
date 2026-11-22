@@ -1,6 +1,6 @@
 # Keypad, hook, LEDs and touch: how Yealink's modules drive the hardware
 
-Offline reverse engineering of `dumps/keypad.ko` (v1.11.5.17, 2017) and `dumps/tsc.ko` (v1.3.0.3, 2016), with cross-checks against Yealink's kernel image (`dumps/vmlinux-image.bin`) and U-Boot (`dumps/uboot.dis`). For issues #3 (keypad/hook/LEDs) and #4 (touch). Nothing here was tested on the phone.
+Offline reverse engineering of `dumps/keypad.ko` (v1.11.5.17, 2017) and `dumps/tsc.ko` (v1.3.0.3, 2016), with cross-checks against Yealink's kernel image (`dumps/vmlinux-image.bin`) and U-Boot (`dumps/uboot.dis`). For issues #3 (keypad/hook/LEDs) and #4 (touch). The write-up below was done offline; the section "Checked on the phone" right after the summary lists what has since been confirmed live, and wins where the two disagree.
 
 References are `function+offset` in the module (`arm-linux-gnueabihf-objdump -drz`), or a virtual address in Yealink's kernel (loaded at 0xC0008000; exported symbol names recovered from its `__ksymtab`). Guesses are marked **guess**.
 
@@ -16,6 +16,38 @@ References are `function+offset` in the module (`arm-linux-gnueabihf-objdump -dr
 | LCD backlight | SoC PWM at 0x80002040 on GPIO35, enable on GPIO18 | on-chip |
 
 The keypad is **not** read through the Holtek chip. The Holtek event interrupt is configured as "none" in this build, so the MCU never reports keys; U-Boot's "scan key" also reads KEYC directly.
+
+## Checked on the phone (2026-11-22, issue #3)
+
+- **Hardware id is 65**, not 35: `holtek_hw=65.0.0.2.0.0.0`, `holtek_sw=0.2`, and `hwversion=65.0.0.2.0.0.0` on Yealink's command line. Our own driver reads the same version block (protocol 2.0, byte 6 = 2).
+- **LEDs are unresolved.** The offline reading says id 65 uses the SoC LED matrix on GPIO16-21 and GPIO0-9 (mux function 5), but live those pins are all muxed as plain GPIO (GpioMux 0x80000118 = 0, 0x8000011C = 0x00440000, 0x80000120 = 0x33000000). Nothing drives the LEDs in our kernel yet.
+- **Keypad controller registers as Yealink leaves them** (and as our kernel finds them after kexec): status words 0x01FF01FF x4 then 0x01FF0000 with no key pressed, prescaler 0x808, +0x18 = 200, control 0x13. Pin mux for GPIO43-58 is function 1, bus clock gate bit 15 set.
+- **Key positions: the U-Boot table is right**, and the old note in status.md was one row off. Settled by Yealink's own Qt keymap, `/phone/resource/device-res/keymap/T48.qmap` (table below).
+- **Hook:** GPIO29 read 1 and Yealink said `hook_sta=1` with the handset (as far as we know) on the cradle. Lifting it has not been tried.
+- **Holtek watchdog works from our kernel:** armed with 15 s it reset the phone after 15 s; armed with 20 s and turned off after 8 s, the phone stayed up.
+- GPIO set and direction in Yealink's kernel are plain read-modify-write of +0x000 and +0x400 with interrupts off (0xC0047C7C..0xC0047DAC); there are no set/clear registers.
+- Not checked: any actual key press, the keypad interrupt, hook polarity.
+
+### Key table from Yealink's T48.qmap
+
+Code = row*8 + col + 1, as Yealink's driver reports it. Qt key is what Yealink's UI receives.
+
+| Code | row, col | Qt key | Key |
+|---|---|---|---|
+| 65 66 67 | 8; 0 1 2 | 1 2 3 | 1 2 3 |
+| 57 58 59 | 7; 0 1 2 | 4 5 6 | 4 5 6 |
+| 49 50 51 | 6; 0 1 2 | 7 8 9 | 7 8 9 |
+| 41 42 43 | 5; 0 1 2 | * 0 # | * 0 # |
+| 68 52 61 69 | 8,3 6,3 7,4 8,4 | Up Down Left Right | arrows |
+| 60 | 7, 3 | Return | OK |
+| 53 | 6, 4 | F13 | X |
+| 36 | 4, 3 | F10 | Speakerphone |
+| 45 44 | 5,4 5,3 | F14 F15 | **guess**: volume down, up |
+| 25 26 | 3,0 3,1 | F7 F20 | **unknown** |
+| 33 34 35 37 | 4,0 4,1 4,2 4,4 | F17 F16 F9 F8 | **unknown** |
+| 89 | (not in the matrix) | F11 | hook |
+
+The six unknown ones are Headset, Mute, Message, Hold, Redial and Transfer in some order.
 
 ## Address and IRQ conventions (Yealink's 2.6.27 kernel)
 
