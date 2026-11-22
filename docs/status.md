@@ -4,6 +4,7 @@ Last updated 2026-11-22.
 
 ## Done
 
+- **Keys, hook switch and the keypad chip's watchdog in our kernel** (2026-11-22, issue #3): `kernel/drivers/t48s_keypad.c` (keys and hook as Linux input devices, polled) and `kernel/drivers/t48s_holtek.c` (reads the chip's version, turns its watchdog off at boot). The drivers load, read "no key pressed", and the watchdog is proven both ways. **No key has been pressed yet**: see the test steps in `kernel/README.md`. Six function keys still need their labels matched.
 - **Screen console in our kernel** (2026-11-22, issue #2): `kernel/drivers/t48s_fb.c` makes the screen U-Boot leaves running into `/dev/fb0`; kernel messages, status and a login prompt show on it (`docs/img/fbcon-2026-11-22.png`). The loader now stops all DMA before jumping: Yealink's audio DMA kept writing into RAM our kernel uses, which crashed one boot and probably caused the earlier network trouble.
 - **Ethernet in our kernel** (2026-11-22, issue #1): our own driver (`kernel/drivers/t48s_eth.c`) for the on-chip switch. Our kernel gets its address by DHCP and runs SSH (dropbear, key login): `tools/ourkernel.sh ssh`. A 4 MB copy over SSH takes 1.5 s and arrives intact.
 - **Hands-off kernel iteration** (2026-11-22): `tools/kexec-boot.sh` starts our kernel from Yealink's running system (module `kmod/t48kexec.ko`), its shell is driven over serial (`sercmd.py` on proxmox0), and `back-to-yealink` returns to Yealink with SSH. No key presses, no flash writes. See `kmod/README.md`.
@@ -13,7 +14,7 @@ Last updated 2026-11-22.
 
 - **Network boot of our own userspace** (2026-11-22): recovery mode (Speakerphone at power-on, menu option 1, TFTP from `tools/tftpd.py`) boots `T48S.bin` and our `T48S.rfs`. Serial console works both ways; no watchdog resets. USB recovery hangs with our stick. Details in own-kernel.md.
 
-- Touch test passed (2026-11-22): taps land on the buttons, keys and the handset drop back to Yealink. Linux keycodes are keypad matrix positions (digits 1-9 = 57 58 59 / 49 50 51 / 41 42 43, hook = 89); U-Boot's scan codes use different numbers.
+- Touch test passed (2026-11-22): taps land on the buttons, keys and the handset drop back to Yealink. Linux keycodes under Yealink are keypad matrix positions (digits 1-3 = 65 66 67, 4-6 = 57 58 59, 7-9 = 49 50 51, * 0 # = 41 42 43, hook = 89; from Yealink's own keymap, see keypad-touch-hw.md. An earlier version of this note was one row off); U-Boot's scan codes use different numbers.
 
 - Root shell on the phone, over the network, no hardware needed.
 - Our own compiled program running on the phone and drawing the whole screen.
@@ -30,7 +31,7 @@ Last updated 2026-11-22.
 ## Next
 
 1. **More pages and the keypad:** map the keys once Tom has pressed them; more packet views (heard lists, per-port traffic); maybe a page switcher.
-2. **Our own kernel: drivers.** It boots to a shell (kernel/README.md). Ethernet and SSH work. The screen console works too. Next: keypad (#3) and touch (#4).
+2. **Our own kernel: drivers.** It boots to a shell (kernel/README.md). Ethernet and SSH work. The screen console works too. Keys and hook have drivers (#3, key presses still to be tried). Next: touch (#4).
 3. **Our own SIP phone.** Later, and only if the audio path can be driven without Yealink's software.
 
 ## How we got root

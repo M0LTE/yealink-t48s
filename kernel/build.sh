@@ -80,6 +80,11 @@ cp ../kernel/drivers/t48s_fb.c drivers/video/t48s_fb.c
 grep -q "FB_T48S" drivers/video/Kconfig || sed -i 's/^config FB_ARMCLCD$/config FB_T48S\n\tbool "Yealink T48S screen (PL111 left running by U-Boot)"\n\tdepends on FB = y\n\tselect FB_CFB_FILLRECT\n\tselect FB_CFB_COPYAREA\n\tselect FB_CFB_IMAGEBLIT\n\nconfig FB_ARMCLCD/' drivers/video/Kconfig
 grep -q "FB_T48S" drivers/video/Kconfig
 grep -q "t48s_fb.o" drivers/video/Makefile || echo 'obj-$(CONFIG_FB_T48S) += t48s_fb.o' >> drivers/video/Makefile
+# our keypad and hook switch driver, and the Holtek chip (its watchdog)
+cp ../kernel/drivers/t48s_keypad.c drivers/input/t48s_keypad.c
+grep -q "t48s_keypad.o" drivers/input/Makefile || echo 'obj-$(CONFIG_INPUT) += t48s_keypad.o' >> drivers/input/Makefile
+cp ../kernel/drivers/t48s_holtek.c drivers/misc/t48s_holtek.c
+grep -q "t48s_holtek.o" drivers/misc/Makefile || echo "obj-y += t48s_holtek.o" >> drivers/misc/Makefile
 # put the delay loop on an 8-byte boundary. On this ARM1176 the two-instruction loop
 # takes 2 cycles per pass there and 3 at the other word alignment, and where it lands is
 # an accident of the link: unaligned, 3.6 measured 331.77 BogoMIPS against the 498.07
