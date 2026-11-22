@@ -1,2 +1,2 @@
-obj-m += hello.o t48kexec.o
+obj-m += hello.o t48kexec.o regprobe.o
 t48kexec-objs := t48kexec_main.o t48kexec_stub.o
