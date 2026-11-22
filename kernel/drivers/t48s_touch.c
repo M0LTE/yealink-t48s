@@ -441,6 +441,7 @@ static int __init t48s_touch_init(void)
 	touch_dev->phys = "t48s/touch";
 	touch_dev->id.bustype = BUS_SPI;
 	input_set_capability(touch_dev, EV_KEY, BTN_TOUCH);
+	__set_bit(EV_ABS, touch_dev->evbit);	/* 3.6: input_set_abs_params does not */
 	input_set_abs_params(touch_dev, ABS_X, 0, TSC_MAX, 0, 0);
 	input_set_abs_params(touch_dev, ABS_Y, 0, TSC_MAX, 0, 0);
 	input_set_abs_params(touch_dev, ABS_PRESSURE, 0, TSC_MAX, 0, 0);
