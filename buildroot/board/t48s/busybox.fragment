@@ -1,2 +1,4 @@
 # Added to Buildroot's default busybox config: clock from NTP (servers from DHCP)
 CONFIG_NTPD=y
+# No flash or UBI applets while flash access is read-only (issue #5)
+# CONFIG_UBIRENAME is not set
