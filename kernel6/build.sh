@@ -19,17 +19,38 @@
 #   EXTRA_CONFIG     one more config fragment
 #   OUT              name of the result (default zImage-t48s)
 #   SLOT=1           fail if the result is larger than the 2.5 MB kernel partition
+#   LIVE=1           build T48S.bin for the live image instead (issue 7,
+#                    docs/live-image.md): the same kernel as a U-Boot image, for
+#                    recovery mode from a USB stick or TFTP. ROOTFS is the first
+#                    stage; the system image is not in it (it comes in T48S.rfs,
+#                    which tools/mkliveimage.py makes); keys go in only if
+#                    AUTHORIZED_KEYS names a file. See "Started by U-Boot" below.
+#   LOADADDR         LIVE=1: where U-Boot is told to copy and enter the kernel
+#                    (default 0x00408000)
 set -e
 KVER=6.18.65
 KSHA=c92606f956f09dc50b5a0e2af9e86763fce27ada1647de97f8d1ac8cfc95801d
 HERE=$(cd "$(dirname "$0")" && pwd)
 WORK=$(mkdir -p "${1:-.}" && cd "${1:-.}" && pwd)
+LIVE=${LIVE:-0}
+if [ "$LIVE" = 1 ]; then
+    # the live kernel is the one handed to other people: no system image inside
+    # (U-Boot's 4 MB would not hold it) and no keys unless a file is named
+    [ -z "$SYSTEM" ] || { echo "LIVE=1: the system image goes in T48S.rfs (tools/mkliveimage.py), not in the kernel" >&2; exit 2; }
+    DTS=${DTS:-bcm11188-yealink-t48s-live}
+    OUT=${OUT:-T48S.bin}
+    KEYS=${AUTHORIZED_KEYS:-}
+    LOADADDR=${LOADADDR:-0x00408000}
+fi
 DTS=${DTS:-bcm11188-yealink-t48s}
 OUT=${OUT:-zImage-t48s}
+[ "$LIVE" = 1 ] || KEYS=${AUTHORIZED_KEYS:-$WORK/root.authorized_keys}
 CROSS=${CROSS_COMPILE:-arm-linux-gnueabi-}
 [ -n "$ROOTFS" ] || { echo "set ROOTFS to Buildroot's rootfs.cpio(.gz) or firststage.cpio" >&2; exit 2; }
 SRC="$WORK/linux-$KVER"
-BUILD="$WORK/build-${DTS}"
+# a live build differs from the ordinary one in its device tree and built-in
+# files only, so it shares that build directory and costs a relink
+BUILD="$WORK/build-${DTS%-live}"
 
 # the source: the pinned release, checked, with our patches. Unpacked afresh
 # whenever the patches change.
@@ -61,7 +82,7 @@ fi
 python3 "$HERE/mkinitramfs.py" "$WORK/initramfs-$DTS.cpio" "$ROOTFS" \
     ${OVERLAY:+--overlay "$OVERLAY"} \
     ${SYSTEM:+--file "system.img=$SYSTEM:444"} \
-    $( [ -f "${AUTHORIZED_KEYS:-$WORK/root.authorized_keys}" ] && echo "--file etc/t48-dev/authorized_keys=${AUTHORIZED_KEYS:-$WORK/root.authorized_keys}:600" )
+    $( [ -n "$KEYS" ] && [ -f "$KEYS" ] && echo "--file etc/t48-dev/authorized_keys=$KEYS:600" )
 
 # the configuration: allnoconfig plus our fragments
 mkdir -p "$BUILD"
@@ -106,6 +127,29 @@ else
 fi
 
 $M -s -j"$(nproc)" zImage "broadcom/$DTS.dtb"
+if [ "$LIVE" = 1 ]; then
+    # Started by U-Boot. Recovery mode reads this file to 0x02680000 and T48S.rfs to
+    # 0x02a80000, copies the kernel to the load address in its header and enters
+    # it there with r1 = 2342 and r2 = a tag list (one memory bank and Yealink's
+    # command line; no ramdisk tag, no device tree). None of that is used: the
+    # kernel takes memory, command line and ramdisk from the device tree on its
+    # own end (dts/t48s-live.dtsi), exactly as on a kexec start.
+    #
+    # The load address is 0x00408000, where the kexec loader puts the same kind of
+    # file, so the unpacker runs the path already proven on the phone: it finds
+    # RAM at 0x00400000 from the device tree (patches/0003), moves itself and the
+    # device tree clear of where the kernel will go, and unpacks. Yealink's own
+    # images (and our 3.6 one) name 0x0e000000, which this kernel must not: the
+    # device tree would stay there, outside the RAM the kernel is told about, and
+    # nothing would keep its memory from being handed out.
+    # tools/mkliveimage.py checkbin proves the addresses from the finished file.
+    cat "$BUILD/arch/arm/boot/zImage" "$BUILD/arch/arm/boot/dts/broadcom/$DTS.dtb" > "$WORK/$OUT.zimage"
+    mkimage -A arm -O linux -T kernel -C none -a "$LOADADDR" -e "$LOADADDR" -n "Linux-$KVER-t48s" -d "$WORK/$OUT.zimage" "$WORK/$OUT" >/dev/null
+    rm -f "$WORK/$OUT.zimage"
+    ls -l "$BUILD/arch/arm/boot/Image" "$BUILD/arch/arm/boot/zImage" "$WORK/$OUT" | awk '{print $5, $9}'
+    python3 "$HERE/../tools/mkliveimage.py" checkbin "$WORK/$OUT" kernel=6.18
+    exit 0
+fi
 cat "$BUILD/arch/arm/boot/zImage" "$BUILD/arch/arm/boot/dts/broadcom/$DTS.dtb" > "$WORK/$OUT"
 ls -l "$BUILD/arch/arm/boot/Image" "$BUILD/arch/arm/boot/zImage" "$WORK/$OUT" | awk '{print $5, $9}'
 # SLOT=1: the result must fit the kernel partition (2.5 MB). Meant for a build with

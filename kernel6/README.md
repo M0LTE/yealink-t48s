@@ -32,9 +32,12 @@ docker run --rm -u $(id -u):$(id -g) -v $PWD:/w -w /w -e ROOTFS=/w/rootfs.cpio.g
 ```
 ROOTFS=firststage.cpio SYSTEM=system.img OUT=Image6-kexec   # the whole system, for kexec (what CI publishes)
 ROOTFS=firststage.cpio SLOT=1                               # first stage alone; fails if over the 2.5 MB kernel slot
+ROOTFS=firststage.cpio LIVE=1                               # T48S.bin for U-Boot's recovery mode (stick or TFTP)
 ```
 
-CI (`.github/workflows/build.yml`) builds both of those after the 3.6 image, from the same first stage and system image, and publishes `Image6-kexec` beside `Image-kexec`.
+`LIVE=1` makes the kernel file of the live image ([docs/live-image.md](../docs/live-image.md), "The same with Linux 6.18"): a U-Boot image of the same kernel with `dts/bcm11188-yealink-t48s-live.dts`, which adds the ramdisk U-Boot loads and `t48boot=live` to the device tree. U-Boot's own hand-over (tags, no device tree) is not used. The build ends by checking the file's addresses (`tools/mkliveimage.py checkbin`).
+
+CI (`.github/workflows/build.yml`) builds all three after the 3.6 image, from the same first stage and system image, and publishes `Image6-kexec` beside `Image-kexec`.
 
 ## Booting
 
@@ -49,6 +52,8 @@ The loader copies the file to 0x00408000 and jumps to it. This file is a self-ex
 ## Testing without the phone
 
 `qemu-test.sh` builds the same configuration for QEMU's `versatilepb` machine with an ARM1176 and boots it to the shell. That machine has the same kinds of parts at other addresses, so it checks the configuration, the boot without platform code, and that the root filesystem runs on this kernel. It says nothing about the phone's own hardware.
+
+`qemu-live-test.sh` does the same for a live start: it lays `T48S.bin` and `T48S.rfs` out in memory as the phone's U-Boot does, enters the kernel with U-Boot's registers and a copy of its tag list, and passes if the system image from the ramdisk ends up running, unchanged, with our command line.
 
 ## Status (2026-11-23)
 
@@ -103,7 +108,7 @@ Done here: the flash, the watchdog from userspace, CI, the boot-mode reader, one
 Needs someone at the phone:
 
 - real key presses, the hook, a finger on the screen, the lamps by eye, sound out of the handset and speaker (the hands-on list is in issue #55);
-- a cold start through U-Boot. Only the kexec start has been run. U-Boot passes no device tree; the appended one is used. A `live` build for 6.18 (a U-Boot image with `t48boot=live`, as `kernel/build.sh live` makes) does not exist yet, and is best written with the phone on the bench in recovery mode.
+- a cold start through U-Boot. Only the kexec start has been run on the phone. The live build exists (`LIVE=1`) and passes its checks on a PC; the test to run, with what to watch on the serial port, is "Cold-boot test for Linux 6.18" in [docs/live-image.md](../docs/live-image.md).
 
 Then: make 6.18 the default in CI and `tools/ourkernel.sh`, move `t48s_bootmode.c` here, build the root filesystem against 6.18 headers (`buildroot/configs/kernel6.fragment`), drop the `/dev/mem` half of `t48-watchdog`, and remove `kernel/`.
 

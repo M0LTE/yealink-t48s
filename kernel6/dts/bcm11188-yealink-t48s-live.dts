@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Yealink SIP-T48S started by U-Boot's recovery mode from a USB stick or TFTP
+ * (kernel6/build.sh with LIVE=1): the phone's device tree with the ramdisk
+ * and the live command line.
+ */
+#include "bcm11188-yealink-t48s.dts"
+#include "t48s-live.dtsi"

@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * What a live start through U-Boot's recovery mode adds to the device tree
+ * (issue 7, docs/live-image.md). U-Boot loads T48S.rfs at 0x02a80000 and tells
+ * the kernel nothing we can use: its tags hold one memory bank and Yealink's
+ * own command line (root=/dev/ram0, no console), and no ramdisk tag. So the
+ * ramdisk is named here, as the 8 MB tools/mkliveimage.py pads the file to,
+ * and U-Boot's tags are not read at all. t48boot=live tells userspace how it
+ * was started (t48-live, t48-data). tools/mkliveimage.py checks these values
+ * in the finished image.
+ */
+/ {
+	chosen {
+		bootargs = "console=tty0 console=ttyAMA0,115200 earlycon t48boot=live loglevel=8";
+		linux,initrd-start = <0x02a80000>;
+		linux,initrd-end = <0x03280000>;
+	};
+};

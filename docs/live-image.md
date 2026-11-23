@@ -9,7 +9,7 @@ Issue [#7](https://github.com/M0LTE/yealink-t48s/issues/7). This is the "try it"
 | File | What |
 |---|---|
 | `T48S.rom` | a 4 KB label, built by `tools/mkliveimage.py`. U-Boot checks it before it will start anything. Not Yealink firmware |
-| `T48S.bin` | our kernel with the first stage built in (U-Boot legacy image), `kernel/build.sh live`. 2.5 MB; must stay under 4 MB |
+| `T48S.bin` | our kernel with the first stage built in (U-Boot legacy image), `kernel/build.sh live`. 2.5 MB; must stay under 4 MB. Linux 6.18 can be the kernel instead: see [The same with Linux 6.18](#the-same-with-linux-618) |
 | `T48S.rfs` | the system image: Buildroot's `system.img` as the one file in a cpio archive, padded with zeros to exactly 8 MB |
 | `README.txt` | the owner's instructions, plain text |
 
@@ -71,6 +71,37 @@ Why this way round:
 U-Boot's `bootstorage` loads the kernel at 0x02680000 and the ramdisk 4 MB higher at 0x02a80000, then starts the kernel with no word about the ramdisk's size. Our kernel's built-in command line says `initrd=0x02a80000,0x800000`: it takes 8 MB from there whatever the file's length. So `T48S.rfs` is the archive followed by zeros up to 8 MB. Linux unpacks the archive and skips zeros after it; with anything else after it (whatever was in RAM) it gives up. Both cases were run under QEMU with this archive and Linux 3.6.11 (2026-11-23): padded, it unpacks without a word; with a random tail the kernel says "rootfs image is not initramfs (junk in compressed archive)", puts the first stage back, and that comes up as rescue. What QEMU did not show is the step after it, the first stage mounting the image: the test board's kernel stopped before starting any init, with or without a ramdisk. That step is the same script and the same file name as a kexec boot, which runs on the phone daily; the first real proof is test 4 below.
 
 Limits: the kernel file under 4 MB (or the ramdisk lands on its end; `kernel/build.sh` and the generator both check), the system image under 8 MB (today 2.4 MB). There is room above that: about 15 MB lies between the ramdisk address and U-Boot's own stack, if the kernel's command line is changed to match.
+
+## The same with Linux 6.18
+
+Issue [#55](https://github.com/M0LTE/yealink-t48s/issues/55). The stick or TFTP folder is the same three files; only `T48S.bin` differs. Linux 3.6 stays the default until #55 switches it. **Built and checked on a PC (2026-11-23); not yet started on the phone**: the [cold-boot test](#cold-boot-test-for-linux-618) below is that first start.
+
+```
+ROOTFS=firststage.cpio LIVE=1 sh kernel6/build.sh WORKDIR     # in the kernel6 container: WORKDIR/T48S.bin
+tools/mkliveimage.py usb STICK bin=WORKDIR/T48S.bin system=system.img kernel=6.18     # or: build OUT ... for TFTP
+```
+
+Without `kernel=6.18` the generator refuses a 6.18 file, and with it refuses anything else, so the two cannot be mixed up by accident. `T48S.rom` and `T48S.rfs` come out byte for byte the same as for 3.6.
+
+**What U-Boot hands over, and what we do with it.** Read from U-Boot's code (0x03B20448) and its serial log: it copies the kernel from 0x02680000 to the load address named in the file's header, and enters it there with the machine number 2342 and a short list of "tags": one block of memory and Yealink's own command line (`root=/dev/ram0`, `mem=124M`, no console). There is **no tag for the ramdisk and no device tree**. Linux 6.18 needs a device tree, and nothing in those tags is of use to us, so the 6.18 live kernel **ignores them entirely**: memory, command line and the ramdisk's place (the 8 MB at 0x02a80000) are all in the device tree that rides on the end of the kernel file (`kernel6/dts/t48s-live.dtsi`), the same arrangement the kexec start already uses on the phone every day. Merging U-Boot's tags into the device tree, which the kernel can do, was rejected: it would bring in Yealink's command line and gain nothing.
+
+**Where it is loaded.** Yealink's kernels and our 3.6 one tell U-Boot to copy them to 0x0e000000, which is above the phone's 128 MB (U-Boot does it, and it works, so that address reaches RAM some other way). A 6.18 kernel must not go there: its device tree would be left at an address outside the memory the kernel is told about, and the kernel would later hand that memory out with the device tree still in it. So the 6.18 file names **0x00408000**, where the kexec loader puts the same kind of file. From there the kernel's unpacker does what it does on every kexec start: finds from the device tree that RAM starts at 0x00400000, moves itself and the device tree up out of the way, and unpacks the kernel underneath.
+
+| | Address |
+|---|---|
+| U-Boot reads `T48S.bin` (2.05 MB) | 0x02680000 to 0x0288d000 |
+| U-Boot reads `T48S.rfs` (8 MB) | 0x02a80000 to 0x03280000 |
+| U-Boot copies the kernel to, and enters it at | 0x00408000 |
+| The unpacked kernel and its zeroed data | 0x00408000 to 0x00a18008 |
+| The unpacker, moved clear, with the device tree, its stack and heap | below 0x00c46000 |
+| Free between that and the ramdisk | 30 MB |
+| U-Boot itself | 0x03b00000 |
+
+`tools/mkliveimage.py checkbin T48S.bin kernel=6.18` works this table out from the finished file (the sizes the kernel records about itself, and the device tree on its end) and refuses a file in which anything would overlap, the ramdisk is not the 8 MB U-Boot loads, the load address is outside declared RAM, or the command line lacks `t48boot=live`. `kernel6/build.sh` runs it on every live build.
+
+**Checked under QEMU** (`kernel6/qemu-live-test.sh`, a test board with the same kind of processor): the files are placed in memory as U-Boot places them, and the kernel is entered as U-Boot enters it, with a copy of U-Boot's tag list including Yealink's command line. The kernel placed itself at 0x00400000, took the ramdisk from the device tree, used our command line and nothing of U-Boot's, unpacked the system image, and the first stage started it: the whole system came up to its shell, and the running system image had the same SHA-256 as the file that went in. Also run with the kernel left where U-Boot reads it (load address 0x02680040, the fallback in the test below), and with rubbish after the archive in the ramdisk. In that last case 6.18 differs from 3.6: it reports `Initramfs unpacking failed` but keeps what it had already unpacked, so the system image still starts.
+
+**What QEMU cannot show**: that this U-Boot copies a kernel to 0x00408000 as happily as to 0x0e000000 (it is ordinary U-Boot code, and Yealink's own kernel unpacks itself to the same place, so the memory is free), and every phone driver starting cold. The cold-start table further down applies to 6.18 as well; its drivers are ports of the same code.
 
 ## What U-Boot does on the USB route
 
@@ -214,6 +245,48 @@ After 4, the going-back check: power off, stick out, power on. Watch serial for 
 - Nothing here can brick the phone: recovery mode lives in U-Boot, and U-Boot is never written.
 
 **What to bring back:** the serial log section for each attempt, which sticks worked (make, model, size), and for the old stick the `lsusb -v` output from a PC.
+
+## Cold-boot test for Linux 6.18
+
+Goal: see Linux 6.18 start from U-Boot with no Yealink kernel before it, which only the kexec start has done so far (item 6 of the hands-on list in issue #55). Fifteen minutes. The procedure is the 3.6 one with a different `T48S.bin`.
+
+**Before starting**, build two sets (they differ only in where U-Boot is told to put the kernel):
+
+```
+ROOTFS=firststage.cpio LIVE=1 sh kernel6/build.sh W                                    # W/T48S.bin
+ROOTFS=firststage.cpio LIVE=1 LOADADDR=0x02680040 OUT=T48S-inplace.bin sh kernel6/build.sh W
+tools/mkliveimage.py build B6  bin=W/T48S.bin         system=system.img kernel=6.18
+tools/mkliveimage.py build B6i bin=W/T48S-inplace.bin system=system.img kernel=6.18
+```
+
+**By TFTP** (the route proven on this phone): `sudo tools/tftpd.py B6 69 --rom-once` on 10.45.0.183, serial log on screen (`ssh root@proxmox0 tail -f /root/t48s/session4.log`). Power off, hold **Speakerphone**, power on, let go at the menu, press **1**, and enter the addresses as before (phone 10.45.0.214, mask 255.255.255.0, gateway 10.45.0.1, server 10.45.0.183). **By stick**, once a stick is known to work (tests 1 to 3 above): `mkliveimage.py usb` instead of `build`, `mkusbstick.sh`, and press **2**. That is test 4 above with the 6.18 files.
+
+**What to watch on serial, in order**
+
+| Line | Means |
+|---|---|
+| `Rom check ok` | U-Boot accepted the label |
+| `Image Name: Linux-6.18.65-t48s`, `Load Address: 00408000`, `Entry Point: 00408000` | it has our file. (Yealink's and 3.6 say `0e000000` here; `00408000` is right for 6.18) |
+| `Loading Kernel Image ... OK`, `Starting kernel ...` | U-Boot copied it and jumped |
+| `Uncompressing Linux... done, booting the kernel.` | the unpacker ran from 0x00408000 and found RAM from the device tree |
+| `Booting Linux on physical CPU 0x0`, `Linux version 6.18.65` | the kernel is running |
+| `Kernel command line: console=tty0 console=ttyAMA0,115200 earlycon t48boot=live loglevel=8` | our command line, not U-Boot's. If `root=/dev/ram0` or `mem=124M` shows here, something is wrong: keep the log |
+| `Unpacking initramfs...` then `Freeing initrd memory: 8192K` | the ramdisk was found at 0x02a80000 and unpacked |
+| `t48 boot: starting the system image /system.img` | the first stage found the system image |
+| the shell prompt on serial; the clock and the "Running from" note on the screen | done |
+
+**Where it can stop**
+
+- Nothing after `Starting kernel ...`: U-Boot's copy to 0x00408000, or the jump, did not work. Power off and repeat with set `B6i` (the kernel runs where U-Boot read it; expect `Load Address: 02680040`). If that starts, the low address is what U-Boot dislikes, and `B6i` becomes the default.
+- `Uncompressing Linux...` and no `done`: the unpacker. Keep the log; it is the same code path as kexec, so this would be a surprise.
+- `Initramfs unpacking failed`, or "RESCUE" on the screen: the kernel is fine and the ramdisk is not where or what it expects. Keep the lines around `Unpacking initramfs`.
+- The log runs but stops at a driver: note the last driver named. This is a cold start, so the table in "Cold start" applies.
+
+**Once it is up**, on the serial shell: `cat /proc/cmdline`; `t48-live status` (expect `from=network` over TFTP, `from=usb` from a stick, and the flag not cleared); `t48-data status` (expect RAM); `dmesg | grep -i -e t48s -e initrd`; `ip addr` and a ping; then keys, touch and the lamps by hand, and `aplay` if audio came up (cold audio is not expected to work yet).
+
+**Going back.** From a stick: power off, stick out, power on. After TFTP the flag U-Boot saved is `resumemode`, and Yealink's next start would reset its settings and with them the kexec boot hook in `/config`. So before any normal power-up, do one more recovery start with the rescue set (`tools/mkrescue.sh`, as on 2026-11-22), which clears the flag; then power up normally.
+
+**What to bring back:** the serial log from `Rom check ok` to the prompt, which set started (B6 or B6i), and what worked of network, keys, touch, lamps and sound.
 
 ## Decisions (Tom, 2026-11-23)
 
