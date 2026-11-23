@@ -24,7 +24,7 @@ Last updated 2026-11-23.
 
 - **Our own kernel runs** (2026-11-22): Linux 3.6.11 for the board, network-booted via recovery mode, busybox shell on the serial console, banner on the screen. See `kernel/README.md`.
 
-- **Network boot of our own userspace** (2026-11-22): recovery mode (Speakerphone at power-on, menu option 1, TFTP from `tools/tftpd.py`) boots `T48S.bin` and our `T48S.rfs`. Serial console works both ways; no watchdog resets. USB recovery hangs with our stick. Details in own-kernel.md.
+- **Network boot of our own userspace** (2026-11-22): recovery mode (Speakerphone at power-on, menu option 1, TFTP from `tools/tftpd.py`) boots `T48S.bin` and our `T48S.rfs`. Serial console works both ways; no watchdog resets. USB recovery hangs with both sticks tried (2026-11-22 and 2026-11-23), before U-Boot reads anything from them: [live-image.md](live-image.md#why-the-sticks-froze). Details in own-kernel.md.
 
 - Touch test passed (2026-11-22): taps land on the buttons, keys and the handset drop back to Yealink. Linux keycodes under Yealink are keypad matrix positions (digits 1-3 = 65 66 67, 4-6 = 57 58 59, 7-9 = 49 50 51, * 0 # = 41 42 43, hook = 89; from Yealink's own keymap, see keypad-touch-hw.md. An earlier version of this note was one row off); U-Boot's scan codes use different numbers.
 

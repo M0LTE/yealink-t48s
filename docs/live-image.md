@@ -2,7 +2,7 @@
 
 Issue [#7](https://github.com/M0LTE/yealink-t48s/issues/7). This is the "try it" path from [architecture.md](architecture.md): an owner copies four files to a USB stick, holds Speakerphone while powering the phone up, presses 2, and our firmware runs from RAM. Nothing of ours is written to the phone, and a normal power-up brings Yealink back. The same files also work from a TFTP server (menu option 1), which is how we tested first.
 
-**Where this stands (2026-11-23).** Proven on the phone: our kernel and root filesystem boot through recovery mode over TFTP. Done offline since: a ROM file we are allowed to share, the stick generator and checker, the formatting script, the live boot step and its screen note, and the move onto the first stage and system image of [boot.md](boot.md) (built and checked; not yet started on the phone in this form). **Not yet proven: U-Boot reading a stick at all.** The one attempt (2026-11-22, a 4 GB stick) froze inside U-Boot. The section "Why the first stick froze" has what is known, and the [test plan](#test-plan-for-a-daytime-session) is built to settle it.
+**Where this stands (2026-11-23).** Proven on the phone: our kernel and root filesystem boot through recovery mode over TFTP. Done offline since: a ROM file we are allowed to share, the stick generator and checker, the formatting script, the live boot step and its screen note, and the move onto the first stage and system image of [boot.md](boot.md) (built and checked; not yet started on the phone in this form). **Not working: the USB stick.** Two different sticks (a 4 GB one on 2026-11-22, a 32 GB SanDisk Ultra Fit on 2026-11-23) both froze U-Boot at the same line, before it read anything from them. It is not the files, the format or anything the stick says: see [Why the sticks froze](#why-the-sticks-froze). **Until a stick is seen to work, the way to try our firmware is TFTP** (menu option 1), which works.
 
 ## The stick
 
@@ -28,7 +28,7 @@ For TFTP, `tools/mkliveimage.py build OUT bin=... system=...` writes the same th
 
 ### What kind of stick, and how to format it
 
-What U-Boot 2.5.3.0-T48S needs is read from its code (`dumps/uboot.dis`); what it likes is Yealink's own advice plus caution, because one stick has already failed.
+What U-Boot 2.5.3.0-T48S needs is read from its code (`dumps/uboot.dis`); what it likes is Yealink's own advice plus caution. **No stick has worked on our phone yet**: two have frozen U-Boot before it looked at their contents ([Why the sticks froze](#why-the-sticks-froze)), so nothing in this section is proven and none of it can cure that freeze.
 
 | | Needed (from the code) | Why |
 |---|---|---|
@@ -109,7 +109,7 @@ From the code at 0x03B1581C, in order, with what the serial port and the screen 
 
 1. Speakerphone held: `scan key=40` twenty times, then the menu "1. TFTP / 2. USB" on the screen.
 2. **2** pressed: "Start Updating..." on the screen. Serial: `usb_detect start`, `USB: Port 1 has been brought up as Host`, `scanning bus 1 for devices...`, `2 USB Device(s) found` (the phone's own port and the stick).
-3. `scanning usb for storage devices...` then `1 Storage Device(s) found`. **This is where the first stick froze.**
+3. `scanning usb for storage devices...` then `1 Storage Device(s) found`. **This is where both sticks froze**, after the first of these two lines.
 4. `Usb detect,dev:0 part:1`. If instead it prints `Usb no detect` lines and the screen says **"Usb failed(-4)"**, the stick was read but has no usable partition: wrong format. "Usb failed(-1)" is the USB port failing to start. After "Usb failed" U-Boot just stops; power-cycle.
 5. It reads the first 128 bytes of `T48S.rom` and checks them: `Rom check ok`, or "Update failed(N)" on the screen.
 6. Only now does it write anything: `BOOTMODE=usbmode` into its settings partition (`userenv`), one save.
@@ -117,19 +117,48 @@ From the code at 0x03B1581C, in order, with what the serial port and the screen 
 
 So a stick that fails at steps 3 to 5 has changed nothing in the phone: power-cycle and it is an ordinary Yealink start. (If `T48S.bin` is missing from an otherwise good stick, U-Boot boots Yealink's safe-mode system instead, which then tries to install the `.rom`. The generator never makes such a stick and the checker rejects one.)
 
-## Why the first stick froze
+## Why the sticks froze
 
-What the serial log of 2026-11-22 shows (`/root/t48s/session4.log` on proxmox0): the stick was found and identified at high speed in 2.7 s (`2 USB Device(s) found`), `scanning usb for storage devices...` was printed, and then nothing at all for the 230 seconds until the power was pulled. No error, no timeout message, no reset.
+**In short.** Two different sticks stop U-Boot dead at the same line. We have ruled out, with high confidence, everything a stick owner can change: the files, the partition table, the filesystem, and every answer the stick gives. U-Boot's own code, run on a PC with the second stick's real answers, finishes the scan and reports the stick. So the processor is being stopped by something below what software on a PC can see: how this U-Boot drives the phone's real USB controller once it starts talking to a stick's storage side. **Exactly what, we do not know**, and it cannot be found without the phone on the bench. No stick layout avoids it, and no U-Boot setting touches it.
 
-What the code shows:
+**What the serial log shows** (`/root/t48s/session4.log` on proxmox0). Both times: `2 USB Device(s) found` (2.75 s and 2.70 s after `usb_detect start`), `scanning usb for storage devices...`, then nothing at all until the power was pulled, 230 s later the first time. No error, no timeout message, no reset.
 
-- The USB stack is mainline U-Boot of about 2013 to 2014: an EHCI (USB 2.0 high-speed) host driver and the usual mass-storage code. The scan asks the stick, in order, for its number of units (GET MAX LUN), INQUIRY, TEST UNIT READY (ten tries, with REQUEST SENSE between), READ CAPACITY, then reads sector 0 to look for a partition table.
-- **Every way that can fail or time out prints a message.** A stick that does not answer gets `EHCI timed out on TD` after 10 s (1 s for control requests); refused commands print `error in inquiry`, `Device NOT ready`, `READ_CAP ERROR`, `usb_bulk_msg error status`. None appeared. So this was not a slow or unresponsive stick in the ordinary sense, and not a formatting problem either: nothing on the stick is interpreted before the point where the count of storage devices is printed, which never came.
-- **This U-Boot freezes silently on any processor fault.** Its start-up code never points the processor's exception vectors at its own handlers (they stay at address 0, which is not U-Boot), and it runs with alignment checking switched on. A bad pointer or an odd-aligned access anywhere therefore gives exactly what was seen: a dead stop with no message.
+| | Stick | Format |
+|---|---|---|
+| 2026-11-22 | a 4 GB stick, make not recorded | as it came |
+| 2026-11-23 17:33 UTC | SanDisk Ultra Fit 32 GB (0781:5583, a USB 3 stick running at USB 2.0 speed, 224 mA) | `tools/mkusbstick.sh`: MBR, one FAT32 partition at sector 2048, checked `PASS` |
 
-So the best explanation is that something this particular stick answered during the scan drove U-Boot's code into a fault, and the fault was silent. **Which answer, we do not know**: the code paths are the standard ones and read correctly for a well-behaved stick, and the stick itself has not been examined (when this was written the phone was running our kernel, which has no USB). Confidence: high that it is a property of that stick (or its kind) meeting old code rather than of the files or the format; low on the exact trigger. Sticks with a second "CD" unit, USB 3 sticks and card readers are the usual suspects with code of this age, which is why the recipe above avoids them, and Yealink's own notes single out Kingston for a reason.
+**What the second stick answers.** `tools/usbreplay.py` asks a stick, from a PC, exactly what U-Boot's scan asks, with U-Boot's lengths, and shows each answer. Run on proxmox0 against the Ultra Fit (read-only), every answer is the plainest one possible:
 
-To learn more from the failed stick, plug it into a Linux PC and keep the output of `lsusb -v -d VENDOR:PRODUCT`, `dmesg | tail -30` and `sudo tools/mkliveimage.py checkstick /dev/sdX`.
+| U-Boot asks | The Ultra Fit answers |
+|---|---|
+| GET MAX LUN (how many units) | `00`: one unit, not refused |
+| INQUIRY, 36 bytes | exactly 36 bytes: a removable disk, "SanDisk", "Ultra Fit", "1.00"; status good |
+| TEST UNIT READY | ready first time; no REQUEST SENSE needed |
+| READ CAPACITY, 8 bytes | 62566488 sectors of 512 bytes (under the 2 TB limit of this request) |
+| READ sector 0, 512 bytes | our partition table, signature `55 aa` |
+
+No answer is longer than the buffer U-Boot gave, none is short, nothing is refused, every status block is the right 13 bytes with the right tag. One caveat: the PC asked a stick that had been powered for a while, and the phone asks 2.7 s after power comes on. The variants below cover what a just-powered stick might say instead.
+
+**What U-Boot's code does with those answers.** `tools/ubootusbsim.py` runs the phone's own U-Boot code (`usb_init`, then `usb_stor_scan`, straight from `dumps/mtd1-uboot.bin`) in a processor emulator, against a model of the USB controller and a stick that gives the answers above. It applies the phone's rule that any unaligned access or stray pointer is a silent freeze (and has a self-test showing that check fires). The result:
+
+- **With the Ultra Fit's answers the scan completes**: `1 Storage Device(s) found`, one unit, MBR partition table seen, right size and name. No unaligned access, nothing read or written outside U-Boot's own memory. The emulated first phase takes 2725 ms of U-Boot's own delays, against 2.70 s on the phone, which fits the phone having run the same path up to the scan.
+- **Every awkward stick we could invent ends in a printed message, never a freeze**: not ready (3 or 30 times), GET MAX LUN refused, 4 or 8 units, answers that never come (`EHCI timed out on TD` after 10 s each), a stick that goes silent altogether (`error in inquiry` after 105 s), 4096-byte sectors, zero or absurd capacity, a non-disk INQUIRY, random leftovers in U-Boot's stack and heap, a controller reporting more ports.
+- Reading the disassembly agrees: every buffer the scan hands the controller is 32-byte aligned and padded (so the "Misaligned buffer address" warning never prints), the data cache and MMU are off (`enable_caches` is never called), interrupts are never enabled, a division by zero prints `raise: Signal # 8 caught` and carries on, and every wait on the controller is bounded by a timer that prints when it expires.
+
+**So what is left.** The stick's partition table and files are never the cause: sector 0 is the last thing the scan reads and the scan handles any content. What the PC cannot reproduce is the phone's real controller, its PHY and its power, driven by this U-Boot. The scan is the first time U-Boot sends anything but small set-up requests: the first traffic on the stick's two bulk endpoints, the first 512-byte packets. Something in that stops the processor (no exception handlers are installed, so any fault is silent), and it happened with two unrelated sticks. Whether a different stick would get through is unknown: Yealink's support notes say Kingston sticks "have better compatibility", which suggests some do.
+
+Confidence: high that it is not the files, the format or the stick's answers; high that no layout can fix it; low on the actual mechanism.
+
+**Is there a setting?** No. Nothing in U-Boot's environment is read by its USB start-up or its storage scan, and we do not write U-Boot's environment anyway.
+
+**What would tell us more** (each is one power-up with the serial log running; none writes anything to the phone):
+
+1. **No stick at all**: hold Speakerphone, power on, press 2 with the socket empty. The emulator predicts `1 USB Device(s) found`, `scanning usb for storage devices...`, `0 Storage Device(s) found`, then `Usb no detect` lines and "Usb failed" on the screen. If that is what happens, the freeze needs real traffic to a stick. If it freezes even so, the stick was never involved.
+2. **The same Ultra Fit through a mains-powered USB 2.0 hub** (U-Boot has hub support; expect `3 USB Device(s) found`). If it then prints `1 Storage Device(s) found`, the cause is the power the stick draws from the phone.
+3. **A plain low-power USB 2.0 stick of another make**, a Kingston DataTraveler for choice, formatted by `tools/mkusbstick.sh`. If it works, the freeze depends on the stick at the electrical level, and the recipe becomes "this kind of stick".
+
+To record a stick that froze: `lsusb -v -d VENDOR:PRODUCT`, `sudo tools/usbreplay.py VENDOR:PRODUCT` and `sudo tools/mkliveimage.py checkstick /dev/sdX` on a Linux PC.
 
 ## What U-Boot checks in the ROM
 
@@ -204,6 +233,8 @@ On a recovery boot the chain is **boot ROM -> U-Boot -> our kernel**; Yealink's 
 So a live boot should show the UI, keypad, touch, screen and LEDs with no Yealink. Calls need the audio cold start, and on the USB route the network is an open question; neither blocks "try the phone's interface".
 
 ## Test plan for a daytime session
+
+**After the second freeze (2026-11-23):** the plan below was written when one stick had failed. Its first three rows are now a search for any stick that gets past `scanning usb for storage devices...`; do the three checks at the end of [Why the sticks froze](#why-the-sticks-froze) first, the empty socket before anything else. Row 3's "the format was the cause" is settled: it was not.
 
 Goal: find a stick U-Boot will read, see our firmware come up from it, and confirm the phone comes back with its settings. Allow an hour. The phone must not be in use by anything else, and it should be on Yealink's firmware with its settings backed up (`tools/nandbackup.sh` on the issue #29 branch) before starting.
 
@@ -294,3 +325,5 @@ tools/mkliveimage.py build B6i bin=W/T48S-inplace.bin system=system.img kernel=6
 2. Settings are typed on the phone. No settings file is fetched from anywhere; a web configuration page is issue #37.
 3. The public image ships with SSH off until enabled at the screen.
 4. USB is the preferred route; TFTP stays as the developer's one.
+
+Note on 4 (2026-11-23): two sticks have frozen U-Boot and none has worked, so today TFTP is the only route that runs. The decision stands as the aim; it needs a stick that works before it can be the instruction.
