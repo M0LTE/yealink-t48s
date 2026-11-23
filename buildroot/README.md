@@ -4,8 +4,10 @@ Issue [#16](https://github.com/M0LTE/yealink-t48s/issues/16). A Buildroot extern
 
 ```
 buildroot/build.sh WORKDIR          # root filesystem: WORKDIR/output/images/rootfs.cpio
-buildroot/build.sh WORKDIR sdk      # the SDK tarball, also in output/images
+buildroot/build.sh WORKDIR sdk      # Buildroot's SDK tarball, also in output/images
 ```
+
+`sdk/assemble.sh` turns Buildroot's SDK into the app SDK by adding the simulator, the packaging tool and the make rules; CI publishes it ([sdk/README.md](../sdk/README.md)).
 
 `build.sh` downloads the pinned Buildroot release (the 2026.02.x long-term line), checks its SHA-256 and builds `t48s_defconfig`. Set `BR2_DL_DIR` and `BR2_CCACHE_DIR` to share downloads and the compiler cache between builds. The host needs Buildroot's usual packages and nothing else. A first build takes about half an hour on 8 cores.
 
