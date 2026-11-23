@@ -41,3 +41,5 @@ slink /usr/bin/dropbearkey dropbearmulti 0777 0 0
 slink /usr/bin/scp dropbearmulti 0777 0 0
 slink /usr/bin/dbclient dropbearmulti 0777 0 0
 file /usr/bin/keytest /w/kexec-rootfs/usr/bin/keytest 0755 0 0
+file /usr/bin/t48rec /w/kexec-rootfs/usr/bin/t48rec 0755 0 0
+file /usr/bin/t48mix /w/kexec-rootfs/usr/bin/t48mix 0755 0 0

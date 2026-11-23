@@ -28,15 +28,18 @@ grep -q '.dev_id = "uartA"' arch/arm/mach-bcmring/core.c
 # under the boot console
 sed -i 's/^\t.rate_hz = HW_CFG_UART_CLK_HZ,$/\t.rate_hz = HW_CFG_UART_CLK_HZ,\n\t.use_cnt = 1, \/* T48S: on from U-Boot *\//' arch/arm/mach-bcmring/core.c
 grep -q "use_cnt = 1, /\* T48S" arch/arm/mach-bcmring/core.c
-# DMA: controller 0 belongs to the voice DSP, which keeps running after a kexec boot
-# with channels active; writing an active channel's registers faults. Leave controller
-# 0 alone, and stop each controller 1 channel before resetting its configuration.
+# DMA: controller 0 carries audio. Yealink's firmware runs four of its channels for the
+# APM codecs, and writing an active channel's registers faults. The kexec loader stops
+# them all, but the DMA framework still must not reset or claim anything there: the
+# only user is drivers/t48s_audio.c, which programs its own channels (3 and 5) directly
+# and touches no other. So leave controller 0 alone here, and stop each controller 1
+# channel before resetting its configuration.
 python3 - <<'EOP'
 p = "arch/arm/mach-bcmring/csp/dmac/dmacHw.c"
 s = open(p).read()
 old = "\tpCblk->channel = channel;\n\n\t/* Enable DMA controller */"
 new = ("\tpCblk->channel = channel;\n\n"
-       "\t/* T48S: controller 0 belongs to the voice DSP; do not touch it */\n"
+       "\t/* T48S: controller 0 is left to t48s_audio; do not touch it */\n"
        "\tif (module == 0)\n\t\treturn 0;\n"
        "\t/* T48S: stop the channel before resetting its configuration */\n"
        "\t{\n\t\tint n = 100000;\n"
@@ -46,19 +49,19 @@ new = ("\tpCblk->channel = channel;\n\n"
 assert s.count(old) == 1
 open(p, "w").write(s.replace(old, new))
 EOP
-grep -q "controller 0 belongs to the voice DSP" arch/arm/mach-bcmring/csp/dmac/dmacHw.c
-# ... and register no interrupt handlers for controller 0's channels: the DSP's
-# transfers keep raising them, and with no owner here they storm
+grep -q "controller 0 is left to t48s_audio" arch/arm/mach-bcmring/csp/dmac/dmacHw.c
+# ... and register no interrupt handlers for controller 0's channels: t48s_audio
+# requests the ones it uses, and the rest stay masked
 python3 - <<'EOP'
 p = "arch/arm/mach-bcmring/dma.c"
 s = open(p).read()
 old = "\t\t\tif ((channel->flags & DMA_CHANNEL_FLAG_NO_ISR) == 0) {\n\t\t\t\tsnprintf(channel->name"
-new = ("\t\t\tif (controllerIdx != 0 && /* T48S: controller 0 is the DSP's */\n"
+new = ("\t\t\tif (controllerIdx != 0 && /* T48S: controller 0 is t48s_audio's */\n"
        "\t\t\t    (channel->flags & DMA_CHANNEL_FLAG_NO_ISR) == 0) {\n\t\t\t\tsnprintf(channel->name")
 assert s.count(old) == 1, s.count(old)
 open(p, "w").write(s.replace(old, new))
 EOP
-grep -q "controller 0 is the DSP's" arch/arm/mach-bcmring/dma.c
+grep -q "controller 0 is t48s_audio's" arch/arm/mach-bcmring/dma.c
 # the ESW channels (DMA1 2 and 3) belong to drivers/t48s_eth.c, which programs them
 # directly: keep the DMA framework from requesting their interrupts
 python3 - <<'EOP'
@@ -88,6 +91,11 @@ grep -q "t48s_holtek.o" drivers/misc/Makefile || echo "obj-y += t48s_holtek.o" >
 # our touchscreen driver (TSC2046 on the PL022 SPI host, polled)
 cp ../kernel/drivers/t48s_touch.c drivers/input/t48s_touch.c
 grep -q "t48s_touch.o" drivers/input/Makefile || echo 'obj-$(CONFIG_INPUT) += t48s_touch.o' >> drivers/input/Makefile
+# our microphone capture driver (ALSA; the APM codecs over DMA0 channels 3 and 5), with
+# a Kconfig entry so the ALSA PCM core gets selected
+cp ../kernel/drivers/t48s_audio.c sound/arm/t48s_audio.c
+grep -q "SND_T48S" sound/arm/Kconfig || printf '\nconfig SND_T48S\n\tbool "Yealink T48S audio (BCM11188 APM codecs)"\n\tdepends on SND = y\n\tselect SND_PCM\n' >> sound/arm/Kconfig
+grep -q "t48s_audio.o" sound/arm/Makefile || echo 'obj-$(CONFIG_SND_T48S) += t48s_audio.o' >> sound/arm/Makefile
 # put the delay loop on an 8-byte boundary. On this ARM1176 the two-instruction loop
 # takes 2 cycles per pass there and 3 at the other word alignment, and where it lands is
 # an accident of the link: unaligned, 3.6 measured 331.77 BogoMIPS against the 498.07
@@ -114,7 +122,7 @@ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- bcmring_defconfig
 ./scripts/kconfig/merge_config.sh -m .config ../kernel/t48s.config >/dev/null
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kernel/kexec.config >/dev/null
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig >/dev/null 2>&1 || make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- oldnoconfig >/dev/null
-for o in CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
+for o in CONFIG_SND_T48S CONFIG_SND_PCM= CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
 if [ "$VARIANT" = kexec ]; then
     make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j12 Image 2>&1 | tail -n 3
     cp arch/arm/boot/Image ../Image-kexec

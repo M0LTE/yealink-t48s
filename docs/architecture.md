@@ -71,7 +71,7 @@ This is also where the unknown in [#6](https://github.com/M0LTE/yealink-t48s/iss
 - **Plain PCM to the codec, no DSP.** Codecs run in baresip. Speakerphone echo cancelling is ours to do in the daemon (speexdsp, fixed-point); if the CPU cannot manage it, speakerphone starts as half-duplex.
 - **The voice DSP is required.** A kernel driver loads the DSP's firmware and exposes PCM; the DSP does echo cancelling and possibly the codecs. The firmware is Yealink's and is not ours to publish: the plan is to copy it from the owner's own phone at install time (see [Decisions for Tom](#decisions-for-tom)).
 
-Until #6 reports, a null backend and a file backend let SIP and the phone UI go ahead.
+Until #6 reports, a null backend and a file backend let SIP and the phone UI go ahead. (2026-11-23: #6 found the first backend is enough, and the microphone half exists as an ALSA capture driver, `kernel/drivers/t48s_audio.c`; see `docs/audio.md`.)
 
 ### The shell
 

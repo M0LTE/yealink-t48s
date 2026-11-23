@@ -12,6 +12,8 @@ Research for issue #6, done 2026-11-22/23 at night with a hard rule of making no
 
 Recommended path: write a small ALSA driver for our 3.6 kernel that drives the APM codecs over DMA controller 0 directly, capture first (testable in silence), then playback and path switching with Tom listening.
 
+**Update, night of 2026-11-23 (issue #24): the capture half of that driver exists and works.** `kernel/drivers/t48s_audio.c` gives an ALSA card with one capture device per codec and mixer controls for the capture side. See "The capture driver" below. Playback and cold start are still to do, both need someone listening.
+
 ## How Yealink's audio is put together
 
 **Measured** from `/proc/halaudio`, `/proc/amxr`, `/proc/bcmapm/*`, `/proc/dma/*`, `/proc/interrupts` and `lsmod` on firmware 66.82.0.31 at idle:
@@ -97,7 +99,7 @@ Register map of the APM block (physical 0x30600000 + offset), from the `ApmHw_*`
 | Offset | Idle value | What it is |
 |---|---|---|
 | 0x000 | 0 | FIFO flush strobe (`ApmHw_ChEnable` writes 0xa, 0xc or 0xf) |
-| 0x004 | 0x0f running, 0xf0 once DMA stops | interrupt status, write 1 to clear; bits 4-7 are the FIFO error flags |
+| 0x004 | 0x0f running, 0xf0 once DMA stops | interrupt status, write 1 to clear; FIFO error flags: bit 4 DAC A underflow, 5 DAC B underflow, 6 ADC A overflow, 7 ADC B overflow (bits 6 and 7 **measured**: each stays clear while its capture runs) |
 | 0x008 | 0xf0 | interrupt enable |
 | 0x00c | 0xf0810204 | global control; top four bits are the enables: 0x5 codec A, 0xa codec B |
 | 0x020 / 0x050 | 0x0c887f7f / 0x8c887f7f | codec A / B control; bit 31 held set while disabled |
@@ -105,12 +107,12 @@ Register map of the APM block (physical 0x30600000 + offset), from the `ApmHw_*`
 | 0x02c / 0x05c | 0x00330000 / 0x00345a67 | DAC digital gain in the low 16 bits (A is muted) |
 | 0x040 / 0x070 | 0x03130000 / 0x031329f1 | ADC digital gain in the low 16 bits (A is muted: exact zeros) |
 | 0x044 / 0x074, 0x080, 0x084 | | sample-rate dividers and their load strobes (`ApmHw_SampleFreqSet`) |
-| 0x120 | 0x40 | analog power-down bits (`ApmHw_AmpSetPowerDown`: bits 2-3, 5-6) and microphone bias (bits 1 and 4) |
-| 0x124 / 0x12c | 0 / 0x02780000 | ADC analog front end of codec A / B: bit 25 selects input B, the preamp gain sits below it (`ApmHW_SetTxMux`, `ApmHw_PGAGainSet`, 0 to 42 dB in 3 dB steps) |
+| 0x120 | 0x40 | ADC analog front end power (`ApmHw_AmpSetPowerDown`): bits 2-3 codec A, bits 5-6 codec B, value 2 = on, 0 = off (so at idle B is on and A is off; Broadcom's driver uses this as the microphone mute). Bits 1 (codec A) and 4 (codec B) switch the input B microphone bias **off** when set (`ApmHw_SetMicBias`) |
+| 0x124 / 0x12c | 0 / 0x02780000 | ADC analog front end of codec A / B: bit 25 selects input B (`ApmHW_SetTxMux`), bits 19-24 hold the preamp gain in dB (`ApmHw_PGAGainSet`, 0 to 42; 15 dB on codec B at idle) |
 | 0x134 | 0x00053333 | output mute bits: 16 = B/out A, 17 = B/out B, 18 = A/out A, 19 = A/out B |
 | 0x138 | 0xfdff3000 | output mode, two bits each (3 = off): bits 12-13 B/out A, 14-15 B/out B, 16-17 A/out A, 18-19 A/out B; output gains in the low bits |
 | 0x200-0x284 | | codec C (ADC only) |
-| 0x420-0x438 / 0x520-0x538 | 4, 4, 1, 1, 4 | FIFO thresholds and DMA request enables, codec A / B |
+| 0x420-0x438 / 0x520-0x538 | 4, 4, 1, 1, 4 | FIFO thresholds and DMA request enables, codec A / B. Bit 1 of 0x42c / 0x52c switches the input A microphone bias off when set (it shares circuitry with microphone detection) |
 
 FIFOs are separate 64 KB windows: 0x30670000 (A ADC), 0x30680000 (A DAC), 0x30690000 (B ADC), 0x306A0000 (B DAC).
 
@@ -120,7 +122,9 @@ The clocks are `APM200` (200 MHz from PLL2) and `APM100`, both shown enabled in 
 
 ### What is likely but not proven
 
-At idle Yealink keeps exactly one path alive: codec B, input B, preamp near maximum, ADC and DAC gains set, output B on and unmuted, mixer connected to the endpoint. Everything on codec A is muted.
+At idle Yealink keeps exactly one path alive: codec B, input B, preamp at 15 dB, ADC and DAC gains set, output B on and unmuted, sidetone on, mixer connected to the endpoint. Everything on codec A is muted and its ADC front end is powered off.
+
+**Measured** with the capture driver, in a silent room: with the same 15 dB preamp, codec A's input A gives the same kind of noise floor as codec B's input B (about 15 counts rms), and it grows with the preamp gain, so something microphone-like is connected to both. Codec A's input B is ten times quieter (1.4 counts), as an input with nothing plugged in would be. That fits Reading 1 (codec A input B = the empty headset jack) but does not prove it.
 
 - **Reading 1 (guess, about 60%):** this is the speakerphone, kept ready. It matches a Snom D375 on the same chip family with the same Broadcom modules, where input B of codec B was measured as the base microphone, codec A input A as the handset microphone and codec A input B as the headset jack (see "Other people's work"). The loudspeaker would then be codec B output B.
 - **Reading 2 (guess, about 40%):** this is the handset path, the default device. In its favour: sidetone is switched on for codec B (register 0x54), which is a handset or headset feature and makes no sense for a speakerphone, and GPIO31, named "handfree" by Yealink, follows codec A output A, which would make codec A the speakerphone codec.
@@ -134,21 +138,70 @@ An ALSA driver (`kernel/drivers/t48s_audio.c`), not a private character device: 
 | Step | What | Size | Test | Needs Tom awake? |
 |---|---|---|---|---|
 | 0 | User-space capture proof (`native/apmcap.c`) | done | done | no |
-| 1 | ALSA capture: one card, two capture devices (codec A, codec B), 16 kHz, 16-bit mono, 5 ms periods, DMA0 channels 3 and 5 with their block interrupts (IRQ 3, 5), error interrupt (IRQ 28). Leaves the analog setup as Yealink left it. | 1 to 2 days | `arecord` from codec B, compare with `apmcap` | no |
-| 2 | Capture controls: input select, preamp gain, ADC digital gain, microphone bias, as ALSA mixer controls. Port of five short `ApmHw_*` functions. | 1 day | record each input | mostly no, see note |
+| 1 | **Done 2026-11-23.** ALSA capture: one card, two capture devices (codec A, codec B), 16 kHz, 16-bit mono, 5 ms periods, DMA0 channels 3 and 5 with their block interrupts (IRQ 3, 5), error interrupt (IRQ 28). Leaves the analog setup as Yealink left it. | 1 to 2 days | `arecord` from codec B, compare with `apmcap` | no |
+| 2 | **Done 2026-11-23, tested on codec A only.** Capture controls: input select, preamp gain, ADC digital gain, ADC power, microphone bias, as ALSA mixer controls. Port of five short `ApmHw_*` functions. | 1 day | record each input | mostly no, see note |
 | 3 | Playback: two playback devices on DMA0 channels 2 and 4, DAC digital gain, output mode and mute, amplifier power-down, GPIO31, ramp-down on stop (`ApmHw_AmpDacRampDown`) to avoid clicks. | 1 to 2 days | tone to each output at low level | **yes** |
-| 4 | Cold start, so the live image (#7) works without Yealink having run first: clocks, chipc audio enable, APM soft reset, the `ApmHw_init` table (about 70 constant writes, already extracted), sample rate, FIFO setup. | 1 to 2 days | boot through U-Boot recovery, record and play | **yes** (possible click) |
+| 4 | **Not started: cannot be tested in silence** (see below). Cold start, so the live image (#7) works without Yealink having run first: clocks, chipc audio enable, APM soft reset, the `ApmHw_init` table (about 70 constant writes, already extracted), sample rate, FIFO setup. | 1 to 2 days | boot through U-Boot recovery, record and play | **yes** (possible click) |
 | 5 | Paths as named ALSA controls ("Handset", "Headset", "Speaker"), sidetone for handset and headset, 8 kHz as a second rate. | 1 day | switch during a call | **yes** |
 | 6 | In user space, with the SIP stack (#12): G.711/G.722 on the ARM, echo cancelling for the speakerphone (speexdsp is the first thing to try on this 500 MHz ARM11), ringer through the loudspeaker. | with #12 | calls | **yes** |
 
 Note on step 2: capture-side writes are silent unless sidetone is on and an output is live, because sidetone feeds the microphone into the earpiece. The driver should switch sidetone off and mute the outputs before touching input settings in a night-time test; I did not try it tonight because I could not prove every output stage was off.
 
+Why step 4 waits for daytime: a cold start begins with a soft reset of the whole APM block, and after a kexec boot codec B's output B is switched on and unmuted. What the analog output stage does across that reset is unknown (a click is likely), `ApmHw_init` then writes the DAC digital gains to full (0x2c and 0x5c = 0x00337fff), and it never writes the output mode and mute registers (0x134, 0x138), so their state after reset is whatever the chip's defaults are. None of that can be shown to be silent beforehand. The sequence is known: clocks, `chipcHw_audioChannelEnable`, `chipcHw_softReset(APM)`, the `ApmHw_init` writes (`tools/regsum.py ... c003f3e4 c003fa84` lists them), `ApmHw_SampleFreqSet`, `ApmHw_ChEnable`.
+
 Risks: the equaliser coefficients (`ApmHw_WriteCoeff`) are loaded by Yealink at start-up and will be lost on a cold start; flat is fine to begin with. The speakerphone will need real echo-cancelling work. Codec C and the I2S/PCM ports are out of scope.
+
+## The capture driver (2026-11-23, issue #24)
+
+`kernel/drivers/t48s_audio.c`, built into our kernel by `kernel/build.sh` (copied to `sound/arm/`; `CONFIG_SND_T48S`). No DSP, no vendor module. If the voice DSP is still running after the kexec jump the driver halts it, with the same two writes as Yealink's `vpmHw_Halt`.
+
+- Card 0, "T48S". `hw:0,0` is codec A, `hw:0,1` is codec B. Capture only: S16_LE, mono, 16000 Hz, nothing else offered. Periods are whole 5 ms blocks (multiples of 80 frames), buffers up to 2.56 s. mmap is supported.
+- Controls, for each codec ("Codec A ...", "Codec B ..."): `Capture Switch` (ADC front end power, the microphone mute), `Capture Source` (0 = input A, 1 = input B), `Preamp Capture Volume` (0 to 14, 3 dB each, 0 to 42 dB), `Capture Volume` (digital: 0 = mute, n = n - 36 dB, so 36 is 0 dB and 48 is +12 dB), `Mic Bias A Switch`, `Mic Bias B Switch`.
+- Counters and a register dump: `cat /proc/asound/card0/t48s`.
+- The phone has no `arecord` or `amixer` yet, so two small static tools stand in, both in the kexec image: `t48rec` (`native/t48rec.c`, records a WAV and reports the measured rate, level and overruns) and `t48mix` (`native/t48mix.c`, lists or sets controls). They use the plain ALSA ioctls, so the real tools will work the same once the Buildroot image has them.
+
+**It cannot make a sound by itself, with one caveat.** It never writes a DAC FIFO, DAC gain, output mode or mute, amplifier bit, sidetone or GPIO31. But codec B idles with its output B on and its sidetone on, so on codec B the microphone already reaches that output, and changing codec B's capture controls changes what goes there. On codec A nothing is connected through: its outputs are off, its DAC is muted and its sidetone is off. So tonight only codec A's controls were exercised; codec B was recorded as found and its controls only read. The playback step should take over sidetone and remove this trap.
+
+How it takes DMA controller 0: our kernel's DMA framework stays patched to leave controller 0 completely alone (no channel reset at boot, no interrupt handlers), as before. The driver programs its two channels (3 and 5) directly, like `t48s_eth.c` does on controller 1, requests only their two interrupts, and uses the per-channel write-enable form of the shared registers, so channels 0, 1, 2, 4, 6 and 7 are never written. The kexec loader has already stopped all eight before our kernel starts.
+
+**Measured** on the phone (kexec boot from Yealink 66.82.0.31, silent room):
+
+| Check | Result |
+|---|---|
+| Rate, codec B, 5 s | 80000 frames in 5.016 s; 16000.0 frames/s between first and last read |
+| Both codecs at once, 3 minutes | 2,880,000 frames each, 15999.5 and 16000.1 frames/s, no overruns |
+| Interrupts over those 3 minutes | 9017 and 9465 period interrupts where 9001 each were expected (50 a second at 20 ms periods); APM error interrupt 0, DMA errors 0, ADC FIFO overflows 0, kernel "Err" count 0. No storm, but the DMA controller raises a few block interrupts nobody asked for: about 5 extra per 1000 with one codec recording, 50 per 1000 on the first-started codec when both record, none with 5 ms periods. They do no harm (ALSA checks the position and waits) |
+| Period sizes | 80 frames (5 ms) x 2 up to 1600 frames x 2 all record cleanly |
+| Noise floor, codec B as Yealink left it | rms 13.5 to 15.8 counts (-66 to -68 dBFS), mean -6; the same as `apmcap` and as Yealink's own `/proc/bcmapm/apm1` showed |
+| Network while recording | 40 pings to the router at 4 a second, none lost; SSH stayed up throughout |
+| Touchscreen and keypad | input devices still registered, touch chip still answers (`diag`: 36 C, 0 SPI errors); nobody was awake to press anything |
+| GPIO31, output and sidetone registers | unchanged before and after (0x134 = 0x00053333, 0x138 = 0xfdff3000, 0x13c = 0x60000000, 0x54 = 0x8000, 0x5c = 0x00345a67, GPIO31 low) |
+| CPU while both record | idle 100% in `top` |
+
+Controls, on codec A:
+
+- `Capture Switch`: off gives exact zeros even with gain set; on gives signal.
+- `Capture Volume`: the DC level follows the dB steps to within 1% from -35 dB to +12 dB (137 counts at 0 dB, 275 at +6, 433 at +10, 545 at +12, 68.5 at -6, 13.8 at -20), including across the point where the register's shift field changes. 0 mutes to exact zeros.
+- `Preamp Capture Volume`: noise on input A rises from 3.6 counts at 0 dB to 16 at 15 dB, 114 at 30 dB and 461 at 42 dB, about 3 dB a step. Above 18 dB a large DC offset appears (645 counts at 21 dB, 9000 at 42 dB): software will want a high-pass filter, or the gain kept at 18 dB or less.
+- `Capture Source`: input A and input B give clearly different signals (16 against 1.4 counts at 15 dB).
+- `Mic Bias A/B Switch`: the register bits change as intended, but in a silent room switching them made no measurable difference. Whether they really are the bias supplies needs a voice (daytime test 2).
+
+Two things found on the way. The ADC never stops, so its FIFO sits full of old samples while nobody records: exactly 64 samples of whatever was last heard came out first. The driver now reads one 5 ms block into a scrap buffer at every start, which removes them. And `apmcap` and this driver cannot run at the same time (same DMA channels); `apmcap` is now only a historical proof.
+
+Recordings from tonight (silent room, so only the noise floor): `dumps/audio/capture-2026-11-23-codecB.wav` (codec B as Yealink left it) and `-codecA.wav` (codec A, input A, 15 dB preamp, 0 dB digital), 10 s each, plus `-x100.wav` copies with the DC removed and the level raised 40 dB so there is something to hear.
+
+Not done, and why: playback (out of scope and audible), cold start (above), sample rates other than 16 kHz, codec C.
 
 ## Daytime tests for Tom
 
 1. **Which path is which (5 minutes, makes dial tone).** Under Yealink (`sh tools/ourkernel.sh back`), run `sh tools/audio-modes.sh idle`, then lift the handset and run it with `handset`, put it back and press Speaker (`speaker`), press Headset (`headset`). It only reads registers. The result lands in `dumps/audio/modes.txt` and fills in the table above, with Yealink's gains per mode.
-2. **Hear the capture (2 minutes, silent on the phone).** Under our kernel: `apmcap -c 1 -s 5 -o /tmp/m.raw` while talking near the base, then near the handset. Copy the file off and play it (`aplay -f S16_LE -r 16000`). `apmcap` is not in the kernel image yet; `make -C native apmcap` and scp it to `/tmp`.
+2. **Hear the capture and find the microphones (5 minutes, silent on the phone).** Under our kernel, talk near the base, then into the handset, during each of these:
+   - `t48rec -d 1 -s 10 -o /tmp/b.wav` (codec B exactly as Yealink left it);
+   - `t48mix "Codec A Capture Switch" 1; t48mix "Codec A Preamp Capture Volume" 5; t48mix "Codec A Capture Volume" 36`, then `t48rec -d 0 -s 10 -o /tmp/a-inA.wav`;
+   - `t48mix "Codec A Capture Source" 1`, then `t48rec -d 0 -s 10 -o /tmp/a-inB.wav` (plug a headset in for this one if there is one).
+
+   Copy the files off (`sh tools/ourkernel.sh ssh 'cat /tmp/b.wav' > b.wav`) and listen. This says which input is which microphone. Then, on whichever codec A input has a voice on it, switch its `Mic Bias` control off and record again: the voice should go, which confirms the bias controls.
+2b. **Codec B's controls (2 minutes, may be faintly audible).** `t48mix "Codec B Preamp Capture Volume" 3`, record, set it back to 5; the same with `Codec B Capture Source` 0 then 1. These change what the sidetone sends to codec B's live output, which is why they were not tried at night.
 3. **Playback**, when step 3 exists: a quiet 1 kHz tone to each output in turn, saying which transducer sounds.
 4. **Cold start**, when step 4 exists: boot the live image from power-off and repeat 2 and 3.
 
@@ -168,7 +221,9 @@ Risks: the equaliser coefficients (`ApmHw_WriteCoeff`) are loaded by Yealink at 
 
 ## Files
 
-- `native/apmcap.c`: the capture proof. Records only.
+- `kernel/drivers/t48s_audio.c`: the ALSA capture driver.
+- `native/t48rec.c`, `native/t48mix.c`: record and set controls on the phone without alsa-utils.
+- `native/apmcap.c`: the first capture proof, from user space. Records only. Not for use alongside the driver.
 - `tools/regsum.py`: lists the register accesses of each function in Yealink's kernel image.
 - `tools/audio-modes.sh`: daytime test 1.
 - `dumps/audio/` (not committed): the six modules, the DSP image, `kallsyms.txt`, the idle register dump, the `ApmHw_*` and `vpmHw_*` register summaries (`apmhw.sum`, `vpmhw.sum`), the `/proc` captures and the oops log.
