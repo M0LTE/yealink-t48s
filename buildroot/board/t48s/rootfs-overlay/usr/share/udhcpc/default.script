@@ -1,0 +1,20 @@
+#!/bin/sh
+# busybox udhcpc hook: apply the lease
+case "$1" in
+deconfig)
+    ifconfig "$interface" 0.0.0.0 ;;
+bound|renew)
+    ifconfig "$interface" "$ip" netmask "${subnet:-255.255.255.0}"
+    if [ -n "$router" ]; then
+        while route del default gw 0.0.0.0 dev "$interface" 2>/dev/null; do :; done
+        for r in $router; do route add default gw "$r" dev "$interface"; break; done
+    fi
+    : > /etc/resolv.conf
+    for d in $dns; do echo "nameserver $d" >> /etc/resolv.conf; done
+    # clock: NTP servers from DHCP (option 42), else the public pool
+    killall ntpd 2>/dev/null
+    srv=""; for n in ${ntpsrv:-pool.ntp.org}; do srv="$srv -p $n"; done
+    ntpd $srv
+    echo "dhcp: $interface $ip" > /dev/console; [ -e /dev/tty1 ] && echo "  network: $ip" > /dev/tty1 ;;
+esac
+exit 0

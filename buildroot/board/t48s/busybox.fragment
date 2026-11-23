@@ -1,0 +1,2 @@
+# Added to Buildroot's default busybox config: clock from NTP (servers from DHCP)
+CONFIG_NTPD=y

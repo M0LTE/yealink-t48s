@@ -32,6 +32,14 @@ Board changes:
 
 Pitfalls found on the way, in boot order: RAM must end on a 1 MB boundary or 3.6 hangs in `paging_init`; overlapping static mappings hit `BUG()` in `vm_area_add_early`; a UART clock gated off during `amba_device_add` leaves the early console spinning on a full FIFO (a silent hang).
 
+Root filesystem from Buildroot (issue #16): `buildroot/` is a Buildroot external tree (pinned release, musl, ARM1176 soft-float, 3.6 headers, everything static) that builds the same userspace as the hand list: busybox with DHCP and NTP, dropbear (key login only), getty on the screen, our programs from `native/`, plus curl with mbedTLS, CA certificates and mtd-utils. `buildroot/build.sh WORKDIR` leaves `WORKDIR/output/images/rootfs.cpio`; add `sdk` for the SDK tarball. To build it into the kexec kernel, put `rootfs.cpio` beside `linux-3.6.11/` and run
+
+```
+docker run --rm -u $(id -u):$(id -g) -v $PWD:/w -w /w -e ROOTFS=rootfs.cpio t48s-kbuild:trusty sh kernel/build.sh kexec
+```
+
+`kexec-rootfs/root.authorized_keys` is added as root's SSH keys if it exists (it is gitignored, never published); without it there is no SSH, only the serial console. `build.sh` patches a fresh `linux-3.6.11/` each time. CI (`.github/workflows/build.yml`) builds the root filesystem, SDK and kernel image on pushes to main and publishes them on a `v*` tag. The container's recipe is `kernel/Dockerfile`.
+
 Userspace for testing: `tools/mkrfs-bb.sh` builds `T48S.rfs` with a static busybox (musl), a shell on the serial console and `native/membanner` drawing on the screen. Boot it with U-Boot's recovery mode, option 1 (TFTP), served by `tools/tftpd.py DIR 69 --rom-once`.
 
 ## Memory map and DMA on the BCM11188 (2026-11-22)

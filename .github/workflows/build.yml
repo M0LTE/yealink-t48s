@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Builds the root filesystem and SDK (Buildroot) and the kexec kernel image with
+# that root filesystem built in. Artifacts on pushes to main; a release on a v* tag.
+# No SSH keys go into anything built here.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      BR2_DL_DIR: ${{ github.workspace }}/../br-dl
+      BR2_CCACHE_DIR: ${{ github.workspace }}/../br-ccache
+      LINUX_SHA256: b0208020e64cb79f05ec40b9d9cf6ff57be3bc459062871f21b4f5fe346ccb32
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Host packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bc cpio rsync unzip file python3-pil fonts-dejavu-core >/dev/null
+
+      - name: Buildroot downloads cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BR2_DL_DIR }}
+          key: br-dl-${{ hashFiles('buildroot/build.sh', 'buildroot/configs/*') }}
+          restore-keys: br-dl-
+
+      - name: ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BR2_CCACHE_DIR }}
+          key: br-ccache-${{ github.run_id }}
+          restore-keys: br-ccache-
+
+      - name: Root filesystem and SDK
+        run: buildroot/build.sh "$RUNNER_TEMP/br" all sdk
+
+      - name: Linux source cache
+        uses: actions/cache@v4
+        with:
+          path: linux-3.6.11.tar.xz
+          key: linux-3.6.11
+
+      - name: Kernel (kexec image, Buildroot root filesystem built in)
+        run: |
+          [ -f linux-3.6.11.tar.xz ] || curl -fsSLO https://cdn.kernel.org/pub/linux/kernel/v3.x/linux-3.6.11.tar.xz
+          echo "$LINUX_SHA256  linux-3.6.11.tar.xz" | sha256sum -c -
+          docker build -q -t t48s-kbuild:trusty kernel/
+          mkdir -p "$RUNNER_TEMP/k"
+          tar -C "$RUNNER_TEMP/k" -xf linux-3.6.11.tar.xz
+          cp -r kernel "$RUNNER_TEMP/k/"
+          cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" "$RUNNER_TEMP/k/"
+          docker run --rm -u "$(id -u):$(id -g)" -v "$RUNNER_TEMP/k:/w" -w /w -e ROOTFS=rootfs.cpio \
+            t48s-kbuild:trusty sh kernel/build.sh kexec
+
+      - name: Collect outputs
+        run: |
+          mkdir out
+          cp "$RUNNER_TEMP/k/Image-kexec" out/
+          cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" out/
+          cp "$RUNNER_TEMP"/br/output/images/*_sdk-buildroot.tar.gz out/t48s-sdk.tar.gz
+          gzip -9 out/rootfs.cpio
+          (cd out && sha256sum * > SHA256SUMS)
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t48s-${{ github.sha }}
+          path: out/
+          retention-days: 30
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
+            --notes "Image-kexec boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). It carries no SSH keys: use the serial console. rootfs.cpio.gz is the root filesystem built into it; t48s-sdk.tar.gz is the cross toolchain."

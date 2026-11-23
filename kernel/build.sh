@@ -4,8 +4,41 @@
 #   sh kernel/build.sh          -> T48S.bin   (U-Boot image, for recovery-mode TFTP boot)
 #   sh kernel/build.sh kexec    -> Image-kexec (raw Image with built-in initramfs,
 #                                  for kmod/t48kexec; needs kexec-rootfs.list)
+#   ROOTFS=rootfs.cpio sh kernel/build.sh kexec
+#                               -> Image-kexec with Buildroot's root filesystem
+#                                  (buildroot/build.sh) instead of the hand list.
+#                                  If AUTHORIZED_KEYS (default
+#                                  kexec-rootfs/root.authorized_keys) exists, it
+#                                  is added as /root/.ssh/authorized_keys.
 set -e
 VARIANT=${1:-tftp}
+if [ "$VARIANT" = kexec ] && [ -n "$ROOTFS" ]; then
+    # the initramfs is Buildroot's cpio with a second cpio holding the keys appended
+    # (the kernel unpacks concatenated archives in turn); the keys never enter the
+    # Buildroot output, so a published root filesystem carries none
+    python3 - "$ROOTFS" kexec-initramfs.cpio "${AUTHORIZED_KEYS:-kexec-rootfs/root.authorized_keys}" <<'EOP'
+import os, sys
+src, dst, keys = sys.argv[1:4]
+out = bytearray(open(src, "rb").read())
+def entry(ino, name, mode, nlink, body=b""):
+    name = name.encode() + b"\0"
+    hdr = "070701" + "".join("%08X" % v for v in
+        (ino, mode, 0, 0, nlink, 0, len(body), 0, 0, 0, 0, len(name), 0))
+    rec = hdr.encode() + name
+    rec += b"\0" * (-len(rec) % 4)
+    return rec + body + b"\0" * (-len(body) % 4)
+if os.path.exists(keys):
+    out += b"\0" * (-len(out) % 4)
+    out += entry(1, "root/.ssh", 0o40700, 2)
+    out += entry(2, "root/.ssh/authorized_keys", 0o100600, 1, open(keys, "rb").read())
+    out += entry(0, "TRAILER!!!", 0, 1)
+    print("initramfs: added %s as /root/.ssh/authorized_keys" % keys)
+else:
+    print("initramfs: no %s, so no SSH keys (serial console only)" % keys)
+open(dst, "wb").write(out)
+EOP
+    echo "CONFIG_INITRAMFS_SOURCE=\"$(pwd)/kexec-initramfs.cpio\"" > kexec-initramfs.config
+fi
 cd linux-3.6.11
 # mainline gives bcmring machine number 2289; the phone's U-Boot passes 2342
 sed -i 's/^\(bcmring[[:space:]]*MACH_BCMRING[[:space:]]*BCMRING[[:space:]]*\)2289$/\12342/' arch/arm/tools/mach-types
@@ -113,6 +146,7 @@ EOD
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- bcmring_defconfig
 ./scripts/kconfig/merge_config.sh -m .config ../kernel/t48s.config >/dev/null
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kernel/kexec.config >/dev/null
+[ "$VARIANT" = kexec ] && [ -n "$ROOTFS" ] && ./scripts/kconfig/merge_config.sh -m .config ../kexec-initramfs.config >/dev/null
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig >/dev/null 2>&1 || make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- oldnoconfig >/dev/null
 for o in CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
 if [ "$VARIANT" = kexec ]; then
