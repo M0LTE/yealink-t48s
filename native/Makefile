@@ -5,7 +5,7 @@ FREE = clang --target=armv6-linux-gnueabi -march=armv6 -mfloat-abi=soft -marm -O
        -ffreestanding -fno-builtin -nostdlib -fuse-ld=lld
 MUSLCC = $(T)/bin/armcc -Os -Wall
 
-all: fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner cpubench keytest touchtest waterfall
+all: fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner cpubench keytest touchtest waterfall apmcap
 
 fbtest: fbtest.c
 	$(FREE) -static -Wl,-e,_start -o $@ $<
@@ -25,6 +25,10 @@ gen/wf_fonts.h: ../tools/mkfont.py
 
 t48ui: t48ui.c gen/fonts.h
 	$(MUSLCC) -o $@ t48ui.c
+
+# Microphone capture straight from the APM block, no DSP (issue #6, docs/audio.md)
+apmcap: apmcap.c
+	$(MUSLCC) -static -o $@ $< -lm
 
 clean:
 	rm -f fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner cpubench touchtest waterfall waterfall-host
