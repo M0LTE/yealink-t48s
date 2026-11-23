@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config BR2_PACKAGE_T48_SHELL
+	bool "t48-shell"
+	select BR2_PACKAGE_LIBT48
+	help
+	  The T48S shell, from shell/ in this repo: owns the screen and
+	  the input devices, shows the idle screen and the launcher and
+	  runs the apps in /usr/share/t48/apps and /data/apps.
+	  Installed as /usr/bin/t48-shell; the board's inittab starts it
+	  on tty1.

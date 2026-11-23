@@ -1,7 +1,10 @@
 ::sysinit:/etc/init.d/rcS
 ttyAMA0::respawn:-/bin/sh
-# the screen: GB7RDG's receive waterfall (off for now, Tom 2026-11-23) (issue 13)
+# the screen: t48-shell owns it and the keys, hook and touch (issue 19, docs/shell.md).
+# Its log: /var/log/t48-shell.log
+tty1::respawn:/usr/bin/t48-shell >>/var/log/t48-shell.log 2>&1
+# or GB7RDG's receive waterfall (off for now, Tom 2026-11-23) (issue 13)
 #tty1::respawn:/usr/bin/waterfall -n GB7RDG ws://10.45.0.37:8099/ 2>/dev/null
 # or the login prompt on the screen console (the keypad types on it: digits, *, arrows, OK, X)
-tty1::respawn:/sbin/getty 0 tty1
+#tty1::respawn:/sbin/getty 0 tty1
 ::ctrlaltdel:/sbin/reboot

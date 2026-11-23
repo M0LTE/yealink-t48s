@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config BR2_PACKAGE_BARESIP
+	bool "baresip"
+	select BR2_PACKAGE_LIBRE
+	select BR2_PACKAGE_LIBG722
+	select BR2_PACKAGE_MBEDTLS
+	help
+	  baresip built as in sip/build.sh: static, with the modules
+	  listed there compiled in, including our t48audio from
+	  sip/modules. Installs /usr/bin/baresip, the t48-sip start
+	  script, the config as /usr/share/t48/sip/config, the settings
+	  template sip.example beside it and the licence texts. Nothing
+	  starts it at boot.
+
+	  https://github.com/baresip/baresip

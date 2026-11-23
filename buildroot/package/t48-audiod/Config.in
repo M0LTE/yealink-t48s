@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config BR2_PACKAGE_T48_AUDIOD
+	bool "t48-audiod"
+	help
+	  The audio service and its control tool, from audiod/ in this
+	  repo: /usr/bin/t48-audiod and /usr/bin/t48-audioctl. Installed
+	  only; nothing starts it at boot.

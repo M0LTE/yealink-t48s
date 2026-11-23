@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config BR2_PACKAGE_LIBT48
+	bool "libt48"
+	help
+	  The app library for the T48S, from libt48/ in this repo: a
+	  static library and its headers in staging (so the SDK has
+	  them), and the example clock app installed on the target as
+	  /usr/share/t48/apps/clock.

@@ -1,6 +1,8 @@
 # Programs for the T48S (ARMv6, Linux 2.6.27, EABI soft-float).
 # Freestanding ones use raw syscalls; the rest link musl built by build-dropbear.sh.
-# The Buildroot package (buildroot/package/t48s-tools) sets CROSS_CC and MKFONT.
+# The Buildroot package (buildroot/package/t48s-tools) sets CROSS_CC.
+# gen/fonts.h and gen/wf_fonts.h are committed; "make fonts" regenerates them
+# (needs python3-pil and the DejaVu fonts).
 T ?= $(HOME)/src-build/t48s
 CROSS_CC ?= $(T)/bin/armcc
 MKFONT ?= ../tools/mkfont.py
@@ -20,11 +22,10 @@ fbswap.so: fbswap.c
 envexec fbinfo tap sertest usbinit keytest touchtest: %: %.c
 	$(MUSLCC) -o $@ $<
 
-gen/fonts.h: $(MKFONT)
-	mkdir -p gen && python3 $(MKFONT) $@
+fonts:
+	mkdir -p gen && python3 $(MKFONT) gen/fonts.h && python3 $(MKFONT) gen/wf_fonts.h wf
 
-gen/wf_fonts.h: $(MKFONT)
-	mkdir -p gen && python3 $(MKFONT) $@ wf
+.PHONY: all clean fonts
 
 t48ui: t48ui.c gen/fonts.h
 	$(MUSLCC) -o $@ t48ui.c

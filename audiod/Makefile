@@ -6,13 +6,15 @@
 #   make CC=$$HOME/src-build/t48s/bin/armcc O=build-arm    the phone: static ARM
 O ?= build
 CC ?= cc
+# the call stream's protocol header, shared with baresip's module
+T48AUDIO ?= ../sip/modules/t48audio
 CFLAGS ?= -O2
-CFLAGS += -Wall -Wextra -std=gnu99 -D_GNU_SOURCE -I. -I../sip/modules/t48audio
+CFLAGS += -Wall -Wextra -std=gnu99 -D_GNU_SOURCE -I. -I$(T48AUDIO)
 LDFLAGS += -static
 
 CORE = dsp.c tone.c echo.c pace.c engine.c routes.c msg.c
 SRCS = main.c hw_null.c hw_alsa.c $(CORE)
-HDRS = $(wildcard *.h include/*.h) ../sip/modules/t48audio/t48audio_proto.h
+HDRS = $(wildcard *.h include/*.h) $(T48AUDIO)/t48audio_proto.h
 TESTS = test_dsp test_tone test_pace test_echo test_engine test_msg
 
 all: $(O)/t48-audiod $(O)/t48-audioctl

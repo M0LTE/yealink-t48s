@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Builds the root filesystem and SDK (Buildroot) and the kexec kernel image with
-# that root filesystem built in. Artifacts on pushes to main; a release on a v* tag.
+# Builds the root filesystem (Buildroot) and the kexec kernel image with that root
+# filesystem built in. Artifacts on pushes to main; a release on a v* tag. The SDK
+# is built only for tags and runs started by hand.
 # No SSH keys go into anything built here.
 name: build
 
@@ -33,7 +34,7 @@ jobs:
       - name: Host packages
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bc cpio rsync unzip file python3-pil fonts-dejavu-core >/dev/null
+          sudo apt-get install -y -qq bc cpio rsync unzip file >/dev/null
 
       - name: Buildroot downloads cache
         uses: actions/cache@v4
@@ -49,8 +50,12 @@ jobs:
           key: br-ccache-${{ github.run_id }}
           restore-keys: br-ccache-
 
-      - name: Root filesystem and SDK
-        run: buildroot/build.sh "$RUNNER_TEMP/br" all sdk
+      - name: Root filesystem
+        run: buildroot/build.sh "$RUNNER_TEMP/br" all
+
+      - name: SDK
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: buildroot/build.sh "$RUNNER_TEMP/br" sdk
 
       - name: Linux source cache
         uses: actions/cache@v4
@@ -75,7 +80,9 @@ jobs:
           mkdir out
           cp "$RUNNER_TEMP/k/Image-kexec" out/
           cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" out/
-          cp "$RUNNER_TEMP"/br/output/images/*_sdk-buildroot.tar.gz out/t48s-sdk.tar.gz
+          for f in "$RUNNER_TEMP"/br/output/images/*_sdk-buildroot.tar.gz; do
+            if [ -f "$f" ]; then cp "$f" out/t48s-sdk.tar.gz; fi
+          done
           gzip -9 out/rootfs.cpio
           (cd out && sha256sum * > SHA256SUMS)
           ls -l out

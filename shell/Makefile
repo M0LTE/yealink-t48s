@@ -3,17 +3,21 @@
 #   make            for this PC: build/t48-shell, build/t48-sim
 #   make check      run the simulator tests (pictures land in build/shots/)
 #   make CC=~/src-build/t48s/bin/armcc O=build-arm     for the phone (static, musl)
+#   make LIB=/path/to/libt48.a $(O)/t48-shell   against an installed libt48 (Buildroot)
 CC ?= cc
 O ?= build
 CFLAGS ?= -O2
 CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections -I../libt48/include
-LIB = ../libt48/$(O)/libt48.a
+LIB ?= ../libt48/$(O)/libt48.a
 SRC = main.c app.c manifest.c be_fb.c be_sim.c
 
 all: $(O)/t48-shell $(O)/t48-sim
 
+# build ../libt48 unless LIB was given
+ifeq ($(origin LIB),file)
 $(LIB): FORCE
 	$(MAKE) -C ../libt48 CC="$(CC)" O=$(O)
+endif
 
 $(O)/t48-shell: $(SRC) shell.h $(LIB)
 	@mkdir -p $(O)

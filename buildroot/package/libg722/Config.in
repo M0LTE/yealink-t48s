@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config BR2_PACKAGE_LIBG722
+	bool "libg722"
+	help
+	  sippy's G.722 codec (two C files), for baresip's libg722
+	  module. Static library and headers in staging only.
+
+	  https://github.com/sippy/libg722

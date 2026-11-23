@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config BR2_PACKAGE_LIBRE
+	bool "libre"
+	select BR2_PACKAGE_MBEDTLS
+	help
+	  libre, baresip's SIP, RTP and networking library, built as in
+	  sip/build.sh: static, mbedTLS for the hashes SIP digest login
+	  and STUN need (no TLS), and the patch in sip/patches for our
+	  3.6 kernel headers. Staging only.
+
+	  https://github.com/baresip/re
