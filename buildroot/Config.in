@@ -2,6 +2,7 @@
 source "$BR2_EXTERNAL_T48S_PATH/package/t48s-tools/Config.in"
 source "$BR2_EXTERNAL_T48S_PATH/package/libt48/Config.in"
 source "$BR2_EXTERNAL_T48S_PATH/package/t48-shell/Config.in"
+source "$BR2_EXTERNAL_T48S_PATH/package/t48-web/Config.in"
 source "$BR2_EXTERNAL_T48S_PATH/package/t48-audiod/Config.in"
 source "$BR2_EXTERNAL_T48S_PATH/package/libg722/Config.in"
 source "$BR2_EXTERNAL_T48S_PATH/package/libre/Config.in"

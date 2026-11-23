@@ -1,0 +1,8 @@
+config BR2_PACKAGE_T48_WEB
+	bool "t48-web"
+	select BR2_PACKAGE_LIBT48
+	select BR2_PACKAGE_T48_SHELL
+	help
+	  The phone's web setup page, from webconfig/ in this repo: a small
+	  HTTP server for the LAN, off until the owner turns it on at
+	  the phone's screen. See docs/web.md.

@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The web setup page (docs/web.md). It runs only while the owner has it turned
+# on (Settings, Access, at the phone's screen): otherwise this service puts
+# itself down, and "t48-apply access" brings it up when the setting changes.
+# t48-web also looks at the setting itself, every second, and leaves when it
+# says off.
+exec 2>&1 </dev/null
+[ "$(t48-config get access web 2>/dev/null)" = on ] || exec sv down /run/service/web
+exec t48-web
