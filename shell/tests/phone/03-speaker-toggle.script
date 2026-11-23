@@ -1,0 +1,32 @@
+# Speakerphone: answer with the Speaker key, move to the handset and back, end with Speaker.
+waitstate reg ok 8000
+waitstate audio up 3000
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+key speaker
+waitstate phone incall 5000
+expectstate route speaker
+waitstate audio.route speaker 2000
+expectstate led.speaker on
+wait 1100
+shot shots/phone-in-call-speaker.png
+# lifting the handset takes the call off the loudspeaker
+hook off
+expectstate phone incall
+waitstate audio.route handset 2000
+expectstate led.speaker off
+# Speaker with the handset in the hand: back to the loudspeaker
+key speaker
+waitstate audio.route speaker 2000
+# the handset can now go down without ending the call
+hook on
+expectstate phone incall
+expectstate route speaker
+# Speaker again, handset down: that hangs up
+key speaker
+expectstate phone ended
+run $FAR $BOB waitcall none 5
+waitstate phone idle 4000
+waitstate audio.route none 2000
+expectstate led.speaker off
+quit

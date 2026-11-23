@@ -1,0 +1,36 @@
+# Mute, then hold and resume, in a call on the headset.
+waitstate reg ok 8000
+waitstate audio up 3000
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+key headset
+waitstate phone incall 5000
+waitstate audio.route headset 2000
+expectstate led.headset on
+run $FAR $BOB waitcall established 3
+# mute: the audio service silences the microphone
+key mute
+expectstate mute 1
+waitstate audio.mute 1 2000
+expectstate led.mute on
+wait 600
+shot shots/phone-in-call-muted.png
+key mute
+waitstate audio.mute 0 2000
+expectstate led.mute off
+# hold: the far end is told
+key hold
+expectstate hold 1
+run $FAR waitlog $BOBLOG CALL_HOLD 5
+wait 400
+shot shots/phone-in-call-held.png
+key hold
+expectstate hold 0
+run $FAR waitlog $BOBLOG CALL_RESUME 5
+expectstate phone incall
+# the Headset key again ends the call
+key headset
+expectstate phone ended
+run $FAR $BOB waitcall none 5
+waitstate phone idle 4000
+quit

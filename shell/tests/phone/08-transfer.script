@@ -1,0 +1,29 @@
+# Blind transfer: in a call with 1002, send them to 1003.
+waitstate reg ok 8000
+waitstate audio up 3000
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+hook off
+waitstate phone incall 5000
+run $FAR $BOB waitcall established 3
+key transfer
+expectstate xfer 1
+key 1
+key 0
+key 0
+key 3
+expectstate number 1003
+wait 300
+shot shots/phone-transfer.png
+key transfer
+# 1003 rings, with 1002 calling; our call ends as transferred
+run $FAR waitlog $CAROLLOG CALL_INCOMING.*1002 8
+run $FAR $CAROL accept
+waitstate phone ended 8000
+expectstate ended Call_transferred
+shot shots/phone-transferred.png
+hook on
+waitstate phone idle 4000
+run $FAR $BOB waitcall established 5
+run $FAR $CAROL waitcall established 5
+quit

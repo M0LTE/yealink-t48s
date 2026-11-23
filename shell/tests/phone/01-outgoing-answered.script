@@ -1,0 +1,42 @@
+# Outgoing call, answered: type a number, lift the handset, the far end answers, hang up.
+waitstate reg ok 8000
+waitstate audio up 3000
+expect idle
+wait 300
+shot shots/phone-idle.png
+key 1
+key 0
+key 0
+key 2
+expectstate phone dial
+expectstate number 1002
+expectstate route none
+shot shots/phone-dialler.png
+# lifting the handset sends the number
+hook off
+expectstate phone outgoing
+expectstate route handset
+waitstate audio.route handset 2000
+# ringback (tone 2) once the far end is ringing
+waitstate audio.tone 2 5000
+shot shots/phone-outgoing.png
+run $FAR $BOB accept
+waitstate phone incall 5000
+waitstate audio.tone 0 2000
+expectstate audio.call 1
+expectstate peer 1002
+run $FAR $BOB waitcall established 3
+wait 2200
+shot shots/phone-in-call.png
+# hang up
+hook on
+expectstate phone ended
+expectstate ended Call_ended
+shot shots/phone-ended.png
+run $FAR waitlog $BOBLOG CALL_CLOSED 5
+waitstate phone idle 4000
+expect idle
+waitstate audio.route none 2000
+expectstate last o:1002
+expectstate missed 0
+quit

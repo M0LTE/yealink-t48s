@@ -1,0 +1,30 @@
+# Incoming call, answered by lifting the handset; the far end hangs up.
+waitstate reg ok 8000
+waitstate audio up 3000
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+expect call
+expectstate peer 1002
+waitstate audio.ring 1 2000
+expectstate audio.route none
+expectstate led.power blink
+shot shots/phone-incoming.png
+hook off
+waitstate phone incall 5000
+waitstate audio.ring 0 2000
+expectstate audio.route handset
+expectstate led.power off
+run $FAR $BOB waitcall established 3
+wait 1200
+# the far end hangs up
+run $FAR $BOB cmd hangup
+waitstate phone ended 5000
+expectstate ended Call_ended
+waitstate phone idle 4000
+waitstate audio.route none 2000
+expect idle
+hook on
+expect idle
+expectstate last i:1002
+expectstate missed 0
+quit

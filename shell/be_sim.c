@@ -15,9 +15,10 @@ static char *at;            /* next line */
 static int line_no, failures;
 static long long resume_at; /* nothing happens before this */
 static int release_key;     /* key to let go at resume_at, 0: none */
-static enum { W_NONE, W_FRAME, W_SCREEN } waiting;
+static enum { W_NONE, W_FRAME, W_SCREEN, W_STATE } waiting;
 static unsigned frame_mark;  /* the app's picture count at the last input or waitframe */
 static char wait_screen[16];
+static char wait_key[32], wait_value[100];
 static long long wait_until;
 
 static const struct { const char *name; int code; } keys[] = {
@@ -86,15 +87,15 @@ static void fail(const char *what)
 /* run one line of the script */
 static void step(long long now)
 {
-    char line[300], cmd[32] = "", a[200] = "", b[32] = "";
+    char line[300], cmd[32] = "", a[200] = "", b[100] = "", c[32] = "";
     size_t n = strcspn(at, "\n");
 
     if (!*at) { shell_stop(failures ? 1 : 0); return; }
     snprintf(line, sizeof line, "%.*s", (int)n, at);
     at += n + (at[n] == '\n');
     line_no++;
-    line[strcspn(line, "#")] = 0;
-    if (sscanf(line, "%31s %199s %31s", cmd, a, b) < 1) return;
+    if (strncmp(line, "run ", 4)) line[strcspn(line, "#")] = 0;
+    if (sscanf(line, "%31s %199s %99s %31s", cmd, a, b, c) < 1 || cmd[0] == '#') return;
     if (!strncmp(cmd, "key", 3) || !strncmp(cmd, "touch", 5) || !strcmp(cmd, "hook")) frame_mark = shell_app_frames();
 
     if (!strcmp(cmd, "wait")) {
@@ -132,6 +133,21 @@ static void step(long long now)
         waiting = W_SCREEN;
         snprintf(wait_screen, sizeof wait_screen, "%s", a);
         wait_until = now + (b[0] ? atoi(b) : 3000);
+    } else if (!strcmp(cmd, "expectstate")) {
+        const char *v = shell_state(a);
+        if (!v || strcmp(v, b)) {
+            char m[200];
+            snprintf(m, sizeof m, "expected %s to be %s, it is %s", a, b, v ? v : "(no such thing)");
+            fail(m);
+        }
+    } else if (!strcmp(cmd, "waitstate")) {
+        waiting = W_STATE;
+        snprintf(wait_key, sizeof wait_key, "%s", a);
+        snprintf(wait_value, sizeof wait_value, "%s", b);
+        wait_until = now + (c[0] ? atoi(c) : 3000);
+    } else if (!strcmp(cmd, "run")) {
+        /* a command for the PC's shell, such as making the far end of a test call do something */
+        if (system(line + 4) != 0) fail("the command failed");
     } else if (!strcmp(cmd, "waitframe")) {
         waiting = W_FRAME;  /* until the app has drawn since the last input */
         wait_until = now + (a[0] ? atoi(a) : 3000);
@@ -145,11 +161,14 @@ static void step(long long now)
 static void sim_tick(long long now)
 {
     if (waiting) {
-        int done = waiting == W_FRAME ? shell_app_frames() != frame_mark : !strcmp(wait_screen, shell_screen_name());
+        const char *v = waiting == W_STATE ? shell_state(wait_key) : NULL;
+        int done = waiting == W_FRAME ? shell_app_frames() != frame_mark :
+                   waiting == W_STATE ? v && !strcmp(v, wait_value) : !strcmp(wait_screen, shell_screen_name());
         if (!done && now < wait_until) return;
         if (!done) {
-            char m[80];
+            char m[240];
             if (waiting == W_FRAME) snprintf(m, sizeof m, "the app drew nothing in time");
+            else if (waiting == W_STATE) snprintf(m, sizeof m, "waited for %s to be %s, it is still %s", wait_key, wait_value, v ? v : "(no such thing)");
             else snprintf(m, sizeof m, "waited for the %s screen, still showing %s", wait_screen, shell_screen_name());
             fail(m);
         }

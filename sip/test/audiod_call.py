@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The shell's part in sip/test/audiod-test.sh: drives two baresip instances
-over ctrl_tcp and their two t48-audiod services over the control socket, then
+over t48ctrl and their two t48-audiod services over the control socket, then
 checks what each service "played" (a WAV file) for what should and should not
 be in it.
 
@@ -50,9 +50,9 @@ def make_wavs(d):
 
 
 class Side:
-    def __init__(self, d, name, port, audioctl):
+    def __init__(self, d, name, audioctl):
         self.name, self.dir, self.audioctl = name, os.path.join(d, name), audioctl
-        self.sip = Ctrl(name, port)
+        self.sip = Ctrl(name, os.path.join(self.dir, "run", "ctrl.sock"))
         self.sip.events = []
 
     def audio(self, *args):
@@ -78,7 +78,7 @@ def main():
         return 0
     scenario, d, audioctl = sys.argv[1], sys.argv[2], sys.argv[3]
     slow = 3 if scenario == "call-slow" else 1      # qemu needs longer to settle
-    alice, bob = Side(d, "alice", 4441, audioctl), Side(d, "bob", 4442, audioctl)
+    alice, bob = Side(d, "alice", audioctl), Side(d, "bob", audioctl)
 
     for s in (alice, bob):
         check("OK" in s.sip.cmd("reginfo")["data"], f"{s.name} registered")

@@ -1,0 +1,37 @@
+# A call arrives while an app is open: the app is paused and the call screen
+# takes over; when the call is over the app comes back.
+waitstate reg ok 8000
+waitstate audio up 3000
+key ok
+expect launcher
+key ok
+waitframe 3000
+expect app
+wait 300
+shot shots/phone-app-before-call.png
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+expect call
+shot shots/phone-incoming-over-app.png
+# after its second of grace the app is frozen
+wait 1300
+expectstate app stopped
+key speaker
+waitstate phone incall 5000
+wait 1100
+# keys now go to the call (5 is sent as a tone), not to the app
+key 5
+run $FAR waitlog $BOBLOG CALL_DTMF_START.*5 5
+key speaker
+expectstate phone ended
+waitstate phone idle 4000
+expect app
+expectstate app running
+waitframe 3000
+wait 300
+shot shots/phone-app-after-call.png
+key x
+waitscreen launcher 2000
+key x
+expect idle
+quit

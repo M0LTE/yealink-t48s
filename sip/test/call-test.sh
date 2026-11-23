@@ -3,7 +3,7 @@
 #
 # Calls between two baresip instances through a throwaway Kamailio registrar,
 # all on loopback (issue #25, docs/sip.md). Both register with a password,
-# alice dials bob over ctrl_tcp, bob answers over ctrl_tcp, each sends a tone
+# alice dials bob over t48ctrl, bob answers over t48ctrl, each sends a tone
 # and records what it hears, and the recordings are checked.
 #
 #   sip/test/call-test.sh        in the sip/Dockerfile container, after
@@ -34,7 +34,6 @@ instance() {
     d=$W/$1
     mkdir -p $d
     sed -e "s|^sip_listen.*|sip_listen\t\t127.0.0.1:$3|" \
-        -e "s|^ctrl_tcp_listen.*|ctrl_tcp_listen\t\t127.0.0.1:$(( $3 - 5071 + 4441 ))|" \
         -e "s|^rtp_ports.*|rtp_ports\t\t$(( ($3 - 5070) * 1000 + 20000 ))-$(( ($3 - 5070) * 1000 + 20099 ))|" \
         -e "s|^audio_source.*|audio_source\t\t$6|" \
         -e "s|^audio_player.*|audio_player\t\t$7|" \

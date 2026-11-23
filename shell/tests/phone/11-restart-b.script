@@ -1,0 +1,22 @@
+# keep-state
+# A new shell finds the call from part a still up, on the speaker and muted, and can end it.
+run $FAR $BOB waitcall established 3
+waitstate phone incall 4000
+expect call
+expectstate peer 1002
+expectstate route speaker
+expectstate mute 1
+expectstate audio.route speaker
+expectstate audio.call 1
+wait 3500
+# still there after the shell has settled
+expectstate phone incall
+expectstate audio.route speaker
+shot shots/phone-restart-picked-up.png
+key speaker
+expectstate phone ended
+run $FAR $BOB waitcall none 5
+waitstate phone idle 4000
+waitstate audio.route none 2000
+expectstate last i:1002
+quit

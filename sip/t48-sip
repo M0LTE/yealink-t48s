@@ -10,7 +10,8 @@
 #   T48_SIP_SETTINGS  default /data/config/sip
 #   T48_SIP_CONFIG    default /data/local/sip/config if present,
 #                     else /usr/share/t48/sip/config
-#   T48_SIP_RUN       default /run/t48-sip (holds the password: mode 0700)
+#   T48_SIP_RUN       default /run/t48-sip (holds the password: mode 0700).
+#                     The shell's control socket is ctrl.sock in here.
 #   BARESIP           default baresip
 set -e
 SETTINGS=${T48_SIP_SETTINGS:-/data/config/sip}
@@ -58,7 +59,8 @@ case "$display_name" in *[\"\<\>]*) die "settings: display_name cannot hold \" <
 umask 077
 mkdir -p "$RUN"
 chmod 700 "$RUN"
-cp "$CONFIG" "$RUN/config"
+grep -v '^t48ctrl_socket' "$CONFIG" > "$RUN/config"
+printf 't48ctrl_socket\t\t%s\n' "$RUN/ctrl.sock" >> "$RUN/config"
 
 line="<sip:$user@$domain;transport=$transport>"
 [ -n "$display_name" ] && line="\"$display_name\" $line"

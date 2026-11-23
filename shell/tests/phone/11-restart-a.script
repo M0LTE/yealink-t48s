@@ -1,0 +1,14 @@
+# leave-call
+# The shell stops in the middle of a call (as if it had crashed). The call
+# belongs to baresip and the audio service, so it carries on. Part b picks it up.
+waitstate reg ok 8000
+waitstate audio up 3000
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+key speaker
+waitstate phone incall 5000
+waitstate audio.route speaker 2000
+key mute
+waitstate audio.mute 1 2000
+wait 1500
+quit

@@ -1,0 +1,67 @@
+# The phone screens with no SIP service and no audio service running:
+# everything still answers the keys, and a call fails politely.
+wait 300
+expect idle
+expectstate phone idle
+expectstate sip down
+# typing a digit on the idle screen starts the dialler, with the phone still on the hook
+key 1
+expect call
+expectstate phone dial
+expectstate route none
+key 0
+key 0
+key 2
+expectstate number 1002
+shot shots/phone-alone-dial.png
+# X rubs out a digit; touch works on the keypad too (the 5 key)
+key x
+expectstate number 100
+touch 630 180
+expectstate number 1005
+# OK calls: with nothing to call through, that ends at once
+key ok
+expectstate phone ended
+expectstate ended No_phone_service
+shot shots/phone-alone-failed.png
+key x
+expect idle
+expectstate last o:1005
+# lifting the handset gives the dialler and (were there an audio service) dial tone
+hook off
+expect call
+expectstate route handset
+expectstate phone dial
+hook on
+expect idle
+expectstate route none
+# Speaker starts on-hook dialling; pressing it again gives up
+key speaker
+expectstate phone dial
+expectstate route speaker
+expectstate led.speaker on
+key speaker
+expect idle
+expectstate led.speaker off
+# volume keys with the phone on the hook change the ringer
+expectstate vol.ringer 10
+key volup
+expectstate vol.ringer 11
+shot shots/phone-alone-volume.png
+key voldown
+expectstate vol.ringer 10
+# call history: Up on the idle screen; OK puts the number in the dialler
+wait 1700
+key up
+expect history
+shot shots/phone-alone-history.png
+key ok
+expect call
+expectstate number 1005
+key x 
+key x
+key x
+key x
+key x
+expect idle
+quit
