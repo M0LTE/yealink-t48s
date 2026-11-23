@@ -30,3 +30,6 @@ shell/build*/
 
 # webconfig: build output
 webconfig/build*/
+# SSH keys never go in the repository
+phone/authorized_keys*
+*.authorized_keys

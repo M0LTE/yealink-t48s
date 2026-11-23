@@ -15,7 +15,7 @@ ln -s ld.so.1 $S/lib/ld-linux.so.3
 cp "$HERE/dumps/userenv-usr-sbin" $S/usr/sbin/userenv
 cp $T/busybox-1.36.1/busybox $S/bin/busybox && ln -s busybox $S/bin/sh
 cp $T/dropbear-2025.88/dropbearmulti $S/payload/ssh/
-cat ~/.ssh/id_ed25519.pub "$HERE/phone/authorized_keys.extra" > $S/payload/ssh/authorized_keys
+cat ~/.ssh/id_ed25519.pub "${EXTRA_KEYS:-$HOME/.config/yealink-t48s/authorized_keys.extra}" > $S/payload/ssh/authorized_keys  # extra owner keys live outside the repo
 cp "$HERE"/phone/simulator.sh "$HERE"/phone/start.sh "$HERE"/phone/rearm.sh $S/payload/custom/
 (cd "$HERE/native" && make -s fbswap.so envexec tap >/dev/null && cp fbswap.so envexec tap $S/payload/custom/)
 cp "$HERE/tools/rescue-init.sh" $S/sbin/init
