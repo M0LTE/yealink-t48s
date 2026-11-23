@@ -1,0 +1,5 @@
+# kernel6 spike: the serial shell only. Everything else is started by hand
+# (or by rcS when the driver it needs is there).
+::sysinit:/etc/init.d/rcS
+ttyAMA0::respawn:-/bin/sh
+::ctrlaltdel:/sbin/reboot

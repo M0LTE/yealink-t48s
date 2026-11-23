@@ -1,0 +1,208 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Broadcom BCM11188 (BCM11107 "bcmring" family): ARM1176JZF-S VoIP SoC.
+ *
+ * Addresses and interrupt numbers are from Linux 3.6's mach-bcmring
+ * (mm_addr.h, irqs.h), checked against the page tables and registers of the
+ * vendor kernel running on a Yealink SIP-T48S.
+ *
+ * There is no clock driver: the boot loader sets up the PLLs and gates, and
+ * the rates below are what it leaves running (measured on the T48S).
+ */
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	compatible = "brcm,bcm11188", "brcm,bcm11107";
+	interrupt-parent = <&intc0>;
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,arm1176jzf-s";
+			reg = <0>;
+		};
+	};
+
+	clocks {
+		/* the 25 MHz crystal: timers 0 and 1, the watchdog */
+		clk_xtal: clk-xtal {
+			compatible = "fixed-clock";
+			#clock-cells = <0>;
+			clock-frequency = <25000000>;
+		};
+
+		/* UART clock, measured from the divider the boot loader programs */
+		clk_uart: clk-uart {
+			compatible = "fixed-clock";
+			#clock-cells = <0>;
+			clock-frequency = <100000000>;
+		};
+
+		/* SPI clock, as the boot loader and Yealink's kernel set it */
+		clk_spi: clk-spi {
+			compatible = "fixed-clock";
+			#clock-cells = <0>;
+			clock-frequency = <100000000>;
+		};
+
+		/* bus clock (APB peripherals): 166.67 MHz */
+		clk_bus: clk-bus {
+			compatible = "fixed-clock";
+			#clock-cells = <0>;
+			clock-frequency = <166666666>;
+		};
+	};
+
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* INTC0: interrupts 0 to 31 of the old numbering */
+		intc0: interrupt-controller@80200000 {
+			compatible = "arm,pl192-vic";
+			reg = <0x80200000 0x1000>;
+			interrupt-controller;
+			#interrupt-cells = <1>;
+		};
+
+		/* INTC1: interrupts 32 to 58 of the old numbering */
+		intc1: interrupt-controller@80201000 {
+			compatible = "arm,pl192-vic";
+			reg = <0x80201000 0x1000>;
+			interrupt-controller;
+			#interrupt-cells = <1>;
+			valid-mask = <0x07ffffff>;
+		};
+
+		/*
+		 * Four SP804-style timers, 0x20 apart, one interrupt each.
+		 * Timers 0 and 1 run from the crystal and are laid out like
+		 * one ARM dual timer: 0 ticks, 1 is the clock source.
+		 */
+		timer01: timer@80017000 {
+			compatible = "arm,sp804";
+			reg = <0x80017000 0x40>;
+			interrupts = <22>, <23>;
+			clocks = <&clk_xtal>, <&clk_xtal>, <&clk_bus>;
+			clock-names = "timer1", "timer2", "apb_pclk";
+		};
+
+		/*
+		 * Two GPIO banks, pins 0 to 31 and 32 to 61: a data register
+		 * and a direction register each, no set or clear registers,
+		 * and one interrupt line per bank. Which function a pin has
+		 * is set in the chip control block (0x80000118 on, 4 bits per
+		 * pin); the boot loader does it.
+		 */
+		gpio0: gpio@80004000 {
+			compatible = "brcm,bcm11107-gpio";
+			reg = <0x80004000 0x800>;
+			interrupt-parent = <&intc1>;
+			interrupts = <0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			ngpios = <32>;
+		};
+
+		gpio1: gpio@80004800 {
+			compatible = "brcm,bcm11107-gpio";
+			reg = <0x80004800 0x800>;
+			interrupt-parent = <&intc1>;
+			interrupts = <1>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			ngpios = <30>;
+		};
+
+		/*
+		 * An SP805 whose lock register is at 0x400 (the block decodes
+		 * 11 address bits). Counts the 25 MHz crystal.
+		 */
+		watchdog: watchdog@80017800 {
+			compatible = "brcm,bcm11107-wdt", "arm,sp805", "arm,primecell";
+			arm,primecell-periphid = <0x00141805>;
+			reg = <0x80017800 0x800>;
+			interrupt-parent = <&intc1>;
+			interrupts = <13>;
+			clocks = <&clk_xtal>, <&clk_bus>;
+			clock-names = "wdog_clk", "apb_pclk";
+			status = "disabled";
+		};
+
+		/*
+		 * The CPU port of the on-chip Ethernet switch. Frames move
+		 * through channels 2 (receive) and 3 (transmit) of DMA
+		 * controller 1, a Synopsys DW AHB DMAC at 0x30300000 that the
+		 * driver programs itself.
+		 */
+		ethernet: ethernet@30400000 {
+			compatible = "brcm,bcm11107-esw-cpu";
+			reg = <0x30400000 0xb0000>;
+			interrupts = <10>, <11>;
+			interrupt-names = "rx", "tx";
+			status = "disabled";
+		};
+
+		/*
+		 * The two audio codecs of the APM block. Samples move through
+		 * channels 2 to 5 of DMA controller 0 (0x30200000), which the
+		 * driver programs itself. Interrupts: the APM block, then
+		 * those four channels (A out, A in, B out, B in).
+		 */
+		audio: audio@30600000 {
+			compatible = "brcm,bcm11107-apm";
+			reg = <0x30600000 0x100000>;
+			interrupts = <28>, <2>, <3>, <4>, <5>;
+			status = "disabled";
+		};
+
+		/* the UMI block: NAND controller with a hardware BCH engine */
+		nand: nand-controller@80001000 {
+			compatible = "brcm,bcm11107-umi-nand";
+			reg = <0x80001000 0x1000>;
+			status = "disabled";
+		};
+
+		/* SPI host: an ARM PL022 on a 100 MHz clock */
+		spi: spi@80015000 {
+			compatible = "arm,pl022", "arm,primecell";
+			reg = <0x80015000 0x1000>;
+			interrupts = <26>;
+			clocks = <&clk_spi>, <&clk_bus>;
+			clock-names = "sspclk", "apb_pclk";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		uarta: serial@80012000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x80012000 0x1000>;
+			interrupt-parent = <&intc1>;
+			interrupts = <14>;
+			clocks = <&clk_uart>, <&clk_bus>;
+			clock-names = "uartclk", "apb_pclk";
+			status = "disabled";
+		};
+
+		uartb: serial@80013000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x80013000 0x1000>;
+			interrupt-parent = <&intc1>;
+			interrupts = <12>;
+			clocks = <&clk_uart>, <&clk_bus>;
+			clock-names = "uartclk", "apb_pclk";
+			status = "disabled";
+		};
+	};
+};

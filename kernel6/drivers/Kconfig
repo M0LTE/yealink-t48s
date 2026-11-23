@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: GPL-2.0
+menu "Yealink SIP-T48S drivers"
+	depends on ARCH_BCMRING
+
+config GPIO_BCMRING
+	bool "GPIO banks of the BCM11107 family"
+	depends on GPIOLIB
+	select GPIOLIB_IRQCHIP
+
+config T48S_KEYPAD
+	bool "T48S keypad and hook switch"
+	depends on INPUT
+
+config T48S_HOLTEK
+	bool "T48S Holtek chip (its watchdog, the message lamp)"
+	depends on NEW_LEDS && LEDS_CLASS
+
+config T48S_BACKLIGHT
+	bool "T48S screen backlight"
+	depends on BACKLIGHT_CLASS_DEVICE
+
+config T48S_TOUCH
+	bool "T48S touchscreen (TSC2046 on the PL022, polled)"
+	depends on INPUT
+
+config T48S_ETH
+	bool "T48S Ethernet (CPU port of the on-chip switch)"
+	depends on NETDEVICES && ETHERNET
+
+config T48S_AUDIO
+	bool "T48S audio (BCM11188 APM codecs, ALSA)"
+	depends on SND = y
+	select SND_PCM
+
+config T48S_NAND
+	bool "T48S NAND flash, read-only"
+	depends on MTD_RAW_NAND = y
+
+endmenu
