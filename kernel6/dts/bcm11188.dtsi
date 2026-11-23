@@ -87,25 +87,23 @@
 		};
 
 		/*
-		 * Two GPIO banks: a data register and a direction register
-		 * (1 = output) each, no set or clear registers. Pins 0 to 31
-		 * and 32 to 61. Their interrupts are not described yet.
-		 * Which function a pin has is set in the chip control block
-		 * (0x80000118 on, 4 bits per pin); the boot loader does it.
+		 * Two GPIO banks, pins 0 to 31 and 32 to 61: a data register
+		 * and a direction register each, no set or clear registers.
+		 * Their interrupts are not described yet. Which function a
+		 * pin has is set in the chip control block (0x80000118 on,
+		 * 4 bits per pin); the boot loader does it.
 		 */
 		gpio0: gpio@80004000 {
-			compatible = "brcm,bcm6345-gpio";
-			reg = <0x80004000 4>, <0x80004400 4>;
-			reg-names = "dat", "dirout";
+			compatible = "brcm,bcm11107-gpio";
+			reg = <0x80004000 0x800>;
 			gpio-controller;
 			#gpio-cells = <2>;
 			ngpios = <32>;
 		};
 
 		gpio1: gpio@80004800 {
-			compatible = "brcm,bcm6345-gpio";
-			reg = <0x80004800 4>, <0x80004c00 4>;
-			reg-names = "dat", "dirout";
+			compatible = "brcm,bcm11107-gpio";
+			reg = <0x80004800 0x800>;
 			gpio-controller;
 			#gpio-cells = <2>;
 			ngpios = <30>;

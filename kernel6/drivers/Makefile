@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
+obj-$(CONFIG_GPIO_BCMRING)	+= gpio-bcmring.o
 obj-$(CONFIG_T48S_KEYPAD)	+= t48s_keypad.o
 obj-$(CONFIG_T48S_HOLTEK)	+= t48s_holtek.o
 obj-$(CONFIG_T48S_BACKLIGHT)	+= t48s_backlight.o

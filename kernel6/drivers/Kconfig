@@ -2,6 +2,10 @@
 menu "Yealink SIP-T48S drivers"
 	depends on ARCH_BCMRING
 
+config GPIO_BCMRING
+	bool "GPIO banks of the BCM11107 family"
+	depends on GPIOLIB
+
 config T48S_KEYPAD
 	bool "T48S keypad and hook switch"
 	depends on INPUT
