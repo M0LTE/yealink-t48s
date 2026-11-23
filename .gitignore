@@ -20,3 +20,7 @@ kernel/kexec-rootfs/bin/busybox
 kernel/kexec-rootfs/usr/bin/
 kernel/kexec-rootfs/root.authorized_keys
 .claude/worktrees/
+
+# libt48, shell: build output
+libt48/build*/
+shell/build*/
