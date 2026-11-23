@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 config BR2_PACKAGE_BARESIP
 	bool "baresip"
+	depends on BR2_INSTALL_LIBSTDCPP # CMake checks atomics in C++
 	select BR2_PACKAGE_LIBRE
 	select BR2_PACKAGE_LIBG722
 	select BR2_PACKAGE_MBEDTLS

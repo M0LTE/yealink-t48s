@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 config BR2_PACKAGE_LIBRE
 	bool "libre"
+	depends on BR2_INSTALL_LIBSTDCPP # CMake checks atomics in C++
 	select BR2_PACKAGE_MBEDTLS
 	help
 	  libre, baresip's SIP, RTP and networking library, built as in

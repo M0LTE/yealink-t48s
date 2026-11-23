@@ -11,10 +11,12 @@ T48_SHELL_SITE_METHOD = local
 T48_SHELL_LICENSE = AGPL-3.0-or-later
 T48_SHELL_DEPENDENCIES = libt48
 
-# linked against the libt48 in staging (LIB=...), not a copy built here
+# linked against the libt48 in staging (LIB=...), not a copy built here; the
+# audio service's control header comes from audiod/include
 define T48_SHELL_BUILD_CMDS
 	$(TARGET_MAKE_ENV) CFLAGS="$(TARGET_CFLAGS)" $(MAKE) -B -C $(@D) \
 		CC="$(TARGET_CC)" O=build-br LIB=$(STAGING_DIR)/usr/lib/libt48.a \
+		AUDIOD_INCLUDE=$(BR2_EXTERNAL_T48S_PATH)/../audiod/include \
 		build-br/t48-shell
 endef
 
