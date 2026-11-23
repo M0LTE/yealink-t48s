@@ -17,9 +17,9 @@ To boot it, build it into the kernel (`kernel/README.md`), then `tools/ourkernel
 
 musl, ARM1176 soft-float, Linux 3.6 headers, everything static.
 
-- busybox (init, DHCP, NTP from the DHCP servers), dropbear (key login only), curl with mbedTLS and a CA bundle, mtd-utils.
+- busybox (init, DHCP, NTP from the DHCP servers), dropbear (key login only), curl with mbedTLS and a CA bundle. No mtd-utils and no flash applets in busybox while flash access is read-only (issue #5): nothing in the image can erase or write the NAND.
 - `t48-shell` on the screen at boot, with the clock app in `/usr/share/t48/apps` (packages `t48-shell`, `libt48`). libt48's static library and headers are in staging, so the SDK has them.
-- Our tools from `native/` (package `t48s-tools`): keytest, touchtest, membanner, cpubench, t48rec, t48mix. The waterfall is an app now ([M0LTE/yealink-t48s-apps](https://github.com/M0LTE/yealink-t48s-apps)).
+- Our tools from `native/` (package `t48s-tools`): keytest, touchtest, membanner, cpubench, t48rec, t48mix, nandread (read-only flash dumps, `docs/nand.md`). The waterfall is an app now ([M0LTE/yealink-t48s-apps](https://github.com/M0LTE/yealink-t48s-apps)).
 - `t48-audiod` and `t48-audioctl` (package `t48-audiod`). Installed, not started.
 - baresip with `t48-sip`, the config and the `sip.example` settings template in `/usr/share/t48/sip` (packages `libre`, `libg722`, `baresip`, built as `sip/build.sh` builds them). Installed, not started.
 
