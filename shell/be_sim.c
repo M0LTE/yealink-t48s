@@ -2,6 +2,7 @@
 /* t48-shell as the PC simulator: the screen is a picture in memory, input
  * comes from a script, and the script can save the picture and check which
  * screen is showing. The script language is described in docs/shell.md. */
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,10 +16,12 @@ static char *at;            /* next line */
 static int line_no, failures;
 static long long resume_at; /* nothing happens before this */
 static int release_key;     /* key to let go at resume_at, 0: none */
-static enum { W_NONE, W_FRAME, W_SCREEN, W_STATE } waiting;
+static enum { W_NONE, W_FRAME, W_SCREEN, W_STATE, W_PIXEL } waiting;
 static unsigned frame_mark;  /* the app's picture count at the last input or waitframe */
 static char wait_screen[16];
 static char wait_key[32], wait_value[100];
+static int wait_x, wait_y;
+static uint32_t wait_colour;
 static long long wait_until;
 
 static const struct { const char *name; int code; } keys[] = {
@@ -84,10 +87,28 @@ static void fail(const char *what)
     failures++;
 }
 
+static uint32_t pixel(int x, int y) { return screen_px[y * SW + x] & 0xFFFFFF; }
+
+/* RRGGBB, or the name of one of the theme's colours */
+static int colour_named(const char *name, uint32_t *out)
+{
+    static const struct { const char *name; size_t at; } roles[] = {
+        {"bg", offsetof(t48_theme, bg)}, {"panel", offsetof(t48_theme, panel)}, {"text", offsetof(t48_theme, text)},
+        {"key", offsetof(t48_theme, key)}, {"sel", offsetof(t48_theme, sel)}, {"head", offsetof(t48_theme, head)},
+        {"accent", offsetof(t48_theme, accent)}, {"good", offsetof(t48_theme, good)}, {"bad", offsetof(t48_theme, bad)},
+        {"ring", offsetof(t48_theme, ground_ring)}, {"call", offsetof(t48_theme, ground_call)}, {"hold", offsetof(t48_theme, ground_hold)},
+    };
+    char *end;
+    for (unsigned i = 0; i < sizeof roles / sizeof roles[0]; i++)
+        if (!strcmp(roles[i].name, name)) { memcpy(out, (const char *)T + roles[i].at, sizeof *out); return 1; }
+    *out = (uint32_t)strtoul(name, &end, 16);
+    return strlen(name) == 6 && !*end;
+}
+
 /* run one line of the script */
 static void step(long long now)
 {
-    char line[300], cmd[32] = "", a[200] = "", b[100] = "", c[32] = "";
+    char line[300], cmd[32] = "", a[200] = "", b[100] = "", c[32] = "", d[32] = "";
     size_t n = strcspn(at, "\n");
 
     if (!*at) { shell_stop(failures ? 1 : 0); return; }
@@ -95,7 +116,7 @@ static void step(long long now)
     at += n + (at[n] == '\n');
     line_no++;
     if (strncmp(line, "run ", 4)) line[strcspn(line, "#")] = 0;
-    if (sscanf(line, "%31s %199s %99s %31s", cmd, a, b, c) < 1 || cmd[0] == '#') return;
+    if (sscanf(line, "%31s %199s %99s %31s %31s", cmd, a, b, c, d) < 1 || cmd[0] == '#') return;
     if (!strncmp(cmd, "key", 3) || !strncmp(cmd, "touch", 5) || !strcmp(cmd, "hook")) frame_mark = shell_app_frames();
 
     if (!strcmp(cmd, "wait")) {
@@ -145,6 +166,19 @@ static void step(long long now)
         snprintf(wait_key, sizeof wait_key, "%s", a);
         snprintf(wait_value, sizeof wait_value, "%s", b);
         wait_until = now + (c[0] ? atoi(c) : 3000);
+    } else if (!strcmp(cmd, "expectpixel") || !strcmp(cmd, "waitpixel")) {
+        /* the colour of one pixel of the screen: RRGGBB, or a role of the theme in use (bg, text, sel, ...) */
+        wait_x = atoi(a);
+        wait_y = atoi(b);
+        if (wait_x < 0 || wait_x >= SW || wait_y < 0 || wait_y >= SH || !colour_named(c, &wait_colour)) { fail("no such pixel or colour"); return; }
+        if (cmd[0] == 'w') {
+            waiting = W_PIXEL;
+            wait_until = now + (d[0] ? atoi(d) : 3000);
+        } else if (pixel(wait_x, wait_y) != wait_colour) {
+            char m[120];
+            snprintf(m, sizeof m, "expected the pixel at %d, %d to be %06X, it is %06X", wait_x, wait_y, (unsigned)wait_colour, (unsigned)pixel(wait_x, wait_y));
+            fail(m);
+        }
     } else if (!strcmp(cmd, "run")) {
         /* a command for the PC's shell, such as making the far end of a test call do something */
         if (system(line + 4) != 0) fail("the command failed");
@@ -163,11 +197,13 @@ static void sim_tick(long long now)
     if (waiting) {
         const char *v = waiting == W_STATE ? shell_state(wait_key) : NULL;
         int done = waiting == W_FRAME ? shell_app_frames() != frame_mark :
+                   waiting == W_PIXEL ? pixel(wait_x, wait_y) == wait_colour :
                    waiting == W_STATE ? v && !strcmp(v, wait_value) : !strcmp(wait_screen, shell_screen_name());
         if (!done && now < wait_until) return;
         if (!done) {
             char m[240];
             if (waiting == W_FRAME) snprintf(m, sizeof m, "the app drew nothing in time");
+            else if (waiting == W_PIXEL) snprintf(m, sizeof m, "waited for the pixel at %d, %d to be %06X, it is still %06X", wait_x, wait_y, (unsigned)wait_colour, (unsigned)pixel(wait_x, wait_y));
             else if (waiting == W_STATE) snprintf(m, sizeof m, "waited for %s to be %s, it is still %s", wait_key, wait_value, v ? v : "(no such thing)");
             else snprintf(m, sizeof m, "waited for the %s screen, still showing %s", wait_screen, shell_screen_name());
             fail(m);

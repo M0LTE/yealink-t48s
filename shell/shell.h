@@ -68,25 +68,10 @@ void logmsg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /* ---------- drawing shared by the shell's own screens ---------- */
 
-/* The look is ui.c's: a palette and the parts screens are made of (docs/design/README.md). */
-enum { EDGE_NONE, EDGE_OUTLINE, EDGE_LIP };          /* how a key or a plain button is finished */
-enum { ROWS_BLOCK, ROWS_RULED, ROWS_SOFT };          /* how the rows of a list are told apart */
-struct theme {
-    const char *name;
-    uint32_t bg, panel, key, line;                   /* the ground, a quiet box, a key, a rule */
-    uint32_t text, dim, faint;                       /* ink on the ground */
-    uint32_t accent, on_accent;                      /* lit: something is switched on, or wants attention */
-    uint32_t good, on_good, bad, on_bad;             /* go and stop */
-    uint32_t sel, on_sel, on_sel_dim;                /* the selected row */
-    uint32_t head, on_head, on_head_dim;             /* the header */
-    uint32_t first, on_first;                        /* the one button that matters most */
-    uint32_t ground[3];                              /* the ground while a call rings, is up, is on hold */
-    int r, r_key;                                    /* corner radii; r_key 100 is a round key */
-    int edge;
-    uint32_t edge_c;
-    int rows, head_rule;
-};
-extern const struct theme *T;
+/* The look is libt48's (theme.c, ui.c: docs/design/README.md), so that apps have it too:
+ * a theme, and the parts screens are made of. Here they are under the names the screens
+ * use, drawing on the shell's own picture. ui.c picks the theme and tells the app. */
+#define T (t48_theme_now())
 #define C_BG (T->bg)
 #define C_PANEL (T->panel)
 #define C_KEY (T->key)
@@ -98,35 +83,45 @@ extern const struct theme *T;
 #define C_GOOD (T->good)
 #define C_BAD (T->bad)
 
-#define HEAD_H 48                            /* the header */
-#define TAG_H 34
-enum { B_PLAIN, B_FIRST, B_GO, B_STOP, B_LIT, B_OFF };   /* what a button is for */
-struct row_ink { uint32_t text, dim, faint; };
+#define HEAD_H T48_UI_HEAD_H                 /* the header */
+#define TAG_H T48_UI_TAG_H
+enum { B_PLAIN = T48_UI_PLAIN, B_FIRST = T48_UI_FIRST, B_GO = T48_UI_GO, B_STOP = T48_UI_STOP, B_LIT = T48_UI_LIT,
+       B_OFF = T48_UI_OFF };                 /* what a button is for */
+#define row_ink t48_ui_ink
 
 extern t48_surface ui;                       /* the shell's own picture of the screen */
-void ui_init(void);
-void ui_clear(uint32_t ground);
-uint32_t ui_ground(void);
-void ui_header(const char *title, int back, int lamp);   /* lamp: 0, or B_GO, B_LIT, B_STOP */
+#define ui_clear(ground) t48_ui_clear(&ui, ground)
+#define ui_ground() t48_ui_ground()
+#define ui_header(title, back, lamp) t48_ui_header(&ui, title, back, lamp)   /* lamp: 0, or B_GO, B_LIT, B_STOP */
+#define ui_btn(x, y, w, h, label, role) t48_ui_btn(&ui, x, y, w, h, label, role)
+#define ui_key(x, y, w, h, label) t48_ui_key(&ui, x, y, w, h, label)
+#define ui_panel(x, y, w, h) t48_ui_panel(&ui, x, y, w, h)
+#define ui_row(x, y, w, h, selected, ink) t48_ui_row(&ui, x, y, w, h, selected, ink)
+#define ui_tag(x, y, text, role) t48_ui_tag(&ui, x, y, text, role)
+#define ui_tag_width(text) t48_ui_tag_width(text)
+#define ui_switch(rx, y, h, on, selected) t48_ui_switch(&ui, rx, y, h, on, selected)
+#define ui_level(x, y, w, h, level, max, disabled, selected) t48_ui_level(&ui, x, y, w, h, level, max, disabled, selected)
+#define ui_lamp(x, y, colour) t48_ui_lamp(&ui, x, y, colour)
+#define ui_chevron(cx, cy, n, dir, t, c) t48_ui_chevron(&ui, cx, cy, n, dir, t, c)
+#define ui_dialog(x, y, w, h, tone) t48_ui_dialog(&ui, x, y, w, h, tone)
+#define ui_popup(x, y, w, h, tone) t48_ui_popup(&ui, x, y, w, h, tone)
+#define ui_dialog_ink(ink) t48_ui_dialog_ink(ink)
+#define ui_dialog_btn(x, y, w, h, label, role) t48_ui_dialog_btn(&ui, x, y, w, h, label, role)
+#define ui_notice(x, y, text, role) t48_ui_notice(&ui, x, y, text, role)
+#define ui_notice_width(text) t48_ui_notice_width(text)
+#define ui_tile(x, y, w, h, selected, ink) t48_ui_tile(&ui, x, y, w, h, selected, ink)
+#define ui_icon(x, y, n, letter) t48_ui_icon(&ui, x, y, n, letter)
+
+void ui_init(void);                          /* the theme in the settings store */
 void ui_header_idle(void);
-void ui_btn(int x, int y, int w, int h, const char *label, int role);
-void ui_key(int x, int y, int w, int h, const char *label);
-void ui_panel(int x, int y, int w, int h);
-void ui_row(int x, int y, int w, int h, int selected, struct row_ink *ink);
-int ui_tag(int x, int y, const char *text, int role);
-int ui_tag_width(const char *text);
-void ui_switch(int rx, int y, int h, int on, int selected);
-void ui_level(int x, int y, int w, int h, int level, int max, int disabled, int selected);
-void ui_lamp(int x, int y, uint32_t colour);
-void ui_chevron(int cx, int cy, int s, int dir, int t, uint32_t c);
-void ui_dialog(int x, int y, int w, int h, int tone);
-void ui_popup(int x, int y, int w, int h, int tone);
-void ui_dialog_ink(struct row_ink *ink);
-void ui_dialog_btn(int x, int y, int w, int h, const char *label, int role);
-int ui_notice(int x, int y, const char *text, int role);
-int ui_notice_width(const char *text);
-void ui_tile(int x, int y, int w, int h, int selected, struct row_ink *ink);
-void ui_icon(int x, int y, int s, const char *letter);
+int ui_theme_set(const char *name);          /* at once, here and in the open app; -1: no such theme */
+const char *ui_theme_label(const char *name);   /* "Two-tone" */
+int ui_theme_reload(void);                   /* the store may have changed: 1 if the theme did */
+const t48_font_family *ui_fonts(const char *name);   /* a theme's family; B612 if we have not got it */
+/* the font file an app is given (docs/app-protocol.md): every family, malloc'd; NULL: no memory */
+unsigned char *ui_fonts_file(size_t *len);
+/* a small picture of a theme, for choosing one */
+void ui_theme_preview(const t48_theme *t, int x, int y, int w, int h, int current);
 void ui_network_status(char *out, size_t n, int *up);
 int ui_inside(int x, int y, int bx, int by, int bw, int bh);
 
@@ -220,6 +215,7 @@ const char *settings_state(const char *key);
 const char *settings_tz(void);               /* the TZ string for the zone in the store */
 void settings_reload(void);                  /* the store changed under the screens: time zone, and the page showing */
 /* from settings.c back to the shell */
+void shell_theme_changed(void);              /* draw everything again */
 void shell_settings_changed(void);           /* redraw, if the settings are showing */
 void shell_settings_closed(int to_launcher);
 void shell_settings_open_app(const char *id);
@@ -324,6 +320,7 @@ void app_quit(void);
 void app_kill_now(void);
 void app_key(int code, int down);
 void app_touch(int state, int x, int y);
+void app_theme(void);                      /* tell it the look, which has changed */
 int app_fd(void);                          /* -1 if none */
 void app_readable(void);
 int app_timeout(long long now);

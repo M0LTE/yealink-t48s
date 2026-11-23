@@ -12,7 +12,7 @@
 #define REVEAL_MS 1200  /* how long the last character of a password shows */
 #define FLASH_MS 120
 
-/* as the shell's Switchboard look has it (shell/ui.c); the shell sets this at start */
+/* Switchboard, until t48_theme_use (theme.c) dresses it in the theme in use */
 t48_kbd_look t48_kbd_style = {
     .bg = 0x000000, .field = 0x171715, .field_text = 0xF4F3EE, .label = 0xA3A299,
     .key = 0x24241F, .side = 0x171715, .text = 0xF4F3EE, .dim = 0xA3A299,

@@ -63,23 +63,35 @@ static uid_t uid_for(const char *id)
     return 20000 + h % 10000;
 }
 
-/* A file nobody else can open, to share as the screen buffer. Kernel 3.6 has
- * no memfd, so: a temporary file on a RAM disk, unlinked at once. */
-static int make_buffer(void)
+/* A file nobody else can open, to share with the app: the screen buffer, the
+ * fonts. Kernel 3.6 has no memfd, so: a temporary file on a RAM disk, unlinked
+ * at once. */
+static int make_file(const char *what, size_t size)
 {
     static const char *dirs[] = {NULL, "/dev/shm", "/run", "/tmp"};
     dirs[0] = getenv("T48_RUNDIR");
     for (unsigned i = 0; i < sizeof dirs / sizeof dirs[0]; i++) {
         char path[200];
         if (!dirs[i]) continue;
-        snprintf(path, sizeof path, "%s/t48-screen-XXXXXX", dirs[i]);
+        snprintf(path, sizeof path, "%s/t48-%s-XXXXXX", dirs[i], what);
         int fd = mkstemp(path);
         if (fd < 0) continue;
         unlink(path);
-        if (ftruncate(fd, BUF_BYTES) == 0) return fd;
+        if (ftruncate(fd, (off_t)size) == 0) return fd;
         close(fd);
     }
     return -1;
+}
+
+/* the font file, for the app to map (docs/app-protocol.md): -1 if it cannot be made */
+static int make_fonts(void)
+{
+    size_t n;
+    unsigned char *b = ui_fonts_file(&n);
+    int fd = b ? make_file("fonts", n) : -1;
+    if (fd >= 0 && pwrite(fd, b, n, 0) != (ssize_t)n) { close(fd); fd = -1; }
+    free(b);
+    return fd;
 }
 
 static void kill_app(int sig)
@@ -114,7 +126,7 @@ static void send_msg(int type, const void *payload, size_t len)
 
 int app_launch(const struct manifest *m)
 {
-    int sv[2], buf_fd;
+    int sv[2], buf_fd, fonts_fd;
     char path[400], data[400], conf[400];
 
     if (app.state != APP_NONE) { snprintf(errbuf, sizeof errbuf, "Another app is running"); return -1; }
@@ -123,13 +135,15 @@ int app_launch(const struct manifest *m)
         snprintf(errbuf, sizeof errbuf, "Program missing: %s", m->exec);
         return -1;
     }
-    buf_fd = make_buffer();
+    buf_fd = make_file("screen", BUF_BYTES);
     if (buf_fd < 0) { snprintf(errbuf, sizeof errbuf, "No memory for the screen"); return -1; }
+    fonts_fd = make_fonts();   /* an app that gets none still has B612 */
     uint32_t *buf = mmap(NULL, BUF_BYTES, PROT_READ, MAP_SHARED, buf_fd, 0);
     if (buf == MAP_FAILED || socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) < 0) {
         snprintf(errbuf, sizeof errbuf, "Out of memory");
         if (buf != MAP_FAILED) munmap(buf, BUF_BYTES);
         close(buf_fd);
+        if (fonts_fd >= 0) close(fonts_fd);
         return -1;
     }
 
@@ -145,16 +159,18 @@ int app_launch(const struct manifest *m)
         snprintf(errbuf, sizeof errbuf, "Cannot start: %s", strerror(errno));
         munmap(buf, BUF_BYTES);
         close(buf_fd); close(sv[0]); close(sv[1]);
+        if (fonts_fd >= 0) close(fonts_fd);
         return -1;
     }
     if (pid == 0) {
         char num[16];
         setpgid(0, 0);
-        /* socket on 3, buffer on 4, nothing else of ours */
-        int s = fcntl(sv[1], F_DUPFD, 10), b = fcntl(buf_fd, F_DUPFD, 10);
+        /* socket on 3, buffer on 4, fonts on 5, nothing else of ours */
+        int s = fcntl(sv[1], F_DUPFD, 10), b = fcntl(buf_fd, F_DUPFD, 10), f = fonts_fd < 0 ? -1 : fcntl(fonts_fd, F_DUPFD, 10);
         dup2(s, 3);
         dup2(b, 4);
-        for (int fd = 5; fd < 256; fd++) close(fd);
+        if (f >= 0) dup2(f, 5); else close(5);
+        for (int fd = 6; fd < 256; fd++) close(fd);
         if (geteuid() == 0 && (setgroups(0, NULL) < 0 || setgid(uid) < 0 || setuid(uid) < 0)) _exit(126);
         prctl(PR_SET_PDEATHSIG, SIGKILL);  /* an app is no use without its shell (set after the change of user, which clears it) */
         if (chdir(m->dir) < 0) _exit(126);
@@ -162,6 +178,7 @@ int app_launch(const struct manifest *m)
         setenv(T48_ENV_SOCKET, num, 1);
         snprintf(num, sizeof num, "%d", 4);
         setenv(T48_ENV_BUFFER, num, 1);
+        if (f >= 0) setenv(T48_ENV_FONTS, "5", 1);
         setenv(T48_ENV_APP_ID, m->id, 1);
         setenv(T48_ENV_APP_DATA, data, 1);
         setenv("HOME", data, 1);
@@ -173,6 +190,7 @@ int app_launch(const struct manifest *m)
     setpgid(pid, pid);
     close(sv[1]);
     close(buf_fd);
+    if (fonts_fd >= 0) close(fonts_fd);   /* the app's copy keeps the file for as long as the app lives */
 
     memset(&app, 0, sizeof app);
     app.state = APP_STARTING;
@@ -201,8 +219,16 @@ int app_launch(const struct manifest *m)
         else snprintf(kv, sizeof kv, "%s", m->settings[i]);
         send_msg(T48_MSG_SETTING, kv, strlen(kv));
     }
+    app_theme();
     send_msg(T48_MSG_START, NULL, 0);
     return 0;
+}
+
+/* The look: before START, and again whenever the owner changes it. An app that
+ * is frozen finds it waiting, ahead of RESUME. A level 1 app skips it. */
+void app_theme(void)
+{
+    send_msg(T48_MSG_THEME, T, sizeof *T);
 }
 
 void app_pause(void)

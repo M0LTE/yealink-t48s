@@ -56,14 +56,23 @@ typedef struct t48_font {
     const unsigned char *a;    /* 8-bit coverage */
 } t48_font;
 
-extern const t48_font t48_font_tiny;    /* 12 px fixed width */
-extern const t48_font t48_font_small;   /* 15 px */
-extern const t48_font t48_font_normal;  /* 19 px */
-extern const t48_font t48_font_bold;    /* 19 px bold */
-extern const t48_font t48_font_mono;    /* 15 px fixed width */
-extern const t48_font t48_font_head;    /* 26 px bold */
-extern const t48_font t48_font_big;     /* 40 px bold */
-extern const t48_font t48_font_huge;    /* 104 px bold; digits, colon, dot, minus and space only */
+/* The faces in use. They follow the theme (below), so take a face's height
+ * when drawing, not once at start. */
+extern t48_font t48_font_tiny;    /* 12 px fixed width */
+extern t48_font t48_font_small;   /* 15 px */
+extern t48_font t48_font_normal;  /* 19 px */
+extern t48_font t48_font_bold;    /* 19 px bold */
+extern t48_font t48_font_mono;    /* 15 px fixed width */
+extern t48_font t48_font_head;    /* 26 px bold */
+extern t48_font t48_font_big;     /* 40 px bold */
+extern t48_font t48_font_huge;    /* 104 px bold; digits, colon, dot, minus and space only */
+
+/* A family: the eight faces, in the order of T48_FACE_*. B612 is in every
+ * program. The shell has the others and hands them to apps in the font file
+ * (docs/app-protocol.md), so an app does not carry them. */
+typedef struct t48_font_family { char name[16]; t48_font face[T48_FACES]; } t48_font_family;
+extern const t48_font_family t48_fonts_b612, t48_fonts_plex, t48_fonts_figtree;
+void t48_fonts_use(const t48_font_family *f);
 
 /* Text with its top at y. Returns the x after the last character. ASCII only;
  * anything else is drawn as '?'. */
@@ -73,6 +82,63 @@ int t48_text_width(const t48_font *f, const char *str);
 void t48_text_fit(t48_surface *s, int x, int y, int maxw, const t48_font *f, uint32_t c, const char *str);
 void t48_text_centre(t48_surface *s, int cx, int y, const t48_font *f, uint32_t c, const char *str);
 void t48_text_right(t48_surface *s, int rx, int y, const t48_font *f, uint32_t c, const char *str);
+
+/* ---------- the theme ---------- */
+
+/* The look the owner chose (Settings, Screen, Theme): colours by what they are
+ * for, shapes, and the font family. An app started by the shell is given it,
+ * and again when it changes (T48_EV_THEME: draw everything again). The
+ * keyboard, the parts below and the fonts follow it by themselves; an app that
+ * takes its own colours from t48_theme_now() matches too. Until the shell
+ * says otherwise it is Switchboard. */
+typedef struct t48_msg_theme t48_theme;
+const t48_theme *t48_theme_now(void);
+extern const t48_theme t48_themes[];          /* every theme there is */
+extern const int t48_theme_count;
+const t48_theme *t48_theme_named(const char *name);   /* NULL: no such theme */
+/* Make this the theme: the colours, the keyboard and, if fonts is not NULL, the faces. */
+void t48_theme_use(const t48_theme *t, const t48_font_family *fonts);
+
+/* ---------- parts in the theme's look ---------- */
+
+/* What the shell's own screens are made of, for an app that wants to look like
+ * them. Each draws on s in the current theme. */
+#define T48_UI_HEAD_H 48                      /* the header */
+#define T48_UI_TAG_H 34
+enum { T48_UI_PLAIN, T48_UI_FIRST, T48_UI_GO, T48_UI_STOP, T48_UI_LIT, T48_UI_OFF };   /* what a button is for */
+typedef struct t48_ui_ink { uint32_t text, dim, faint; } t48_ui_ink;
+
+/* fill the surface; later parts mix with this ground where the theme asks */
+void t48_ui_clear(t48_surface *s, uint32_t ground);
+uint32_t t48_ui_ground(void);
+void t48_ui_ground_is(uint32_t ground);       /* the same without filling: what is under the parts drawn next */
+/* the header: the screen's name, the time, a way back (a touch left of x 130)
+ * or a lamp (T48_UI_GO, T48_UI_LIT, T48_UI_STOP; 0: none) */
+void t48_ui_header(t48_surface *s, const char *title, int back, int lamp);
+void t48_ui_header_ground(t48_surface *s);
+/* a button. The labels "<x", "+", "-", "^" and "v" are drawn as marks */
+void t48_ui_btn(t48_surface *s, int x, int y, int w, int h, const char *label, int role);
+void t48_ui_key(t48_surface *s, int x, int y, int w, int h, const char *label);   /* a key of a number pad */
+void t48_ui_panel(t48_surface *s, int x, int y, int w, int h);                    /* a quiet box that holds something */
+/* the ground of one row of a list, and the inks to write on it */
+void t48_ui_row(t48_surface *s, int x, int y, int w, int h, int selected, t48_ui_ink *ink);
+int t48_ui_tag(t48_surface *s, int x, int y, const char *text, int role);         /* a short word in a box; the x after it */
+int t48_ui_tag_width(const char *text);
+void t48_ui_switch(t48_surface *s, int rx, int y, int h, int on, int selected);   /* On or Off, its right edge at rx */
+void t48_ui_level(t48_surface *s, int x, int y, int w, int h, int level, int max, int disabled, int selected);
+void t48_ui_lamp(t48_surface *s, int x, int y, uint32_t colour);
+/* dir: -1 points left, 1 right, -2 up, 2 down; size is half its length, t its weight */
+void t48_ui_chevron(t48_surface *s, int cx, int cy, int size, int dir, int t, uint32_t c);
+/* a box over the dimmed screen (tone: T48_UI_PLAIN, T48_UI_LIT, T48_UI_STOP), the
+ * same with the screen left showing, and the inks and buttons to use inside */
+void t48_ui_dialog(t48_surface *s, int x, int y, int w, int h, int tone);
+void t48_ui_popup(t48_surface *s, int x, int y, int w, int h, int tone);
+void t48_ui_dialog_ink(t48_ui_ink *ink);
+void t48_ui_dialog_btn(t48_surface *s, int x, int y, int w, int h, const char *label, int role);
+int t48_ui_notice(t48_surface *s, int x, int y, const char *text, int role);      /* a wide tag; the x after it */
+int t48_ui_notice_width(const char *text);
+void t48_ui_tile(t48_surface *s, int x, int y, int w, int h, int selected, t48_ui_ink *ink);
+void t48_ui_icon(t48_surface *s, int x, int y, int size, const char *letter);     /* a square with a letter, or "+" */
 
 /* ---------- images ---------- */
 
@@ -137,7 +203,7 @@ typedef struct t48_kbd {
     int w, h;                        /* the surface last drawn on */
 } t48_kbd;
 
-/* The keyboard's colours and shapes. The shell sets them to its own; an app may too. */
+/* The keyboard's colours and shapes. They follow the theme; an app may set its own after. */
 typedef struct t48_kbd_look {
     uint32_t bg, field, field_text, label;   /* the ground, the box typed into and its ink, the title */
     uint32_t key, side, text, dim;           /* a letter key, a key that is not a letter, their ink, "Space" */
@@ -168,6 +234,7 @@ enum {
     T48_EV_QUIT,       /* leave now */
     T48_EV_TIMER,      /* id: the timer that fired */
     T48_EV_FD,         /* id: a watched descriptor is readable */
+    T48_EV_THEME,      /* the owner changed the look (t48_theme_now): draw everything again */
 };
 
 typedef struct t48_event {

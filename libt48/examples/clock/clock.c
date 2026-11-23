@@ -7,10 +7,11 @@
 #include <time.h>
 #include "t48.h"
 
-#define C_BG T48_RGB(10, 14, 26)
-#define C_TEXT T48_RGB(232, 238, 246)
-#define C_DIM T48_RGB(130, 146, 170)
-#define C_ACCENT T48_RGB(120, 196, 255)
+/* colours from the theme the owner chose, so the clock looks like the rest of the phone */
+#define C_BG (t48_theme_now()->bg)
+#define C_TEXT (t48_theme_now()->text)
+#define C_DIM (t48_theme_now()->dim)
+#define C_MARK (t48_theme_now()->good)
 
 static t48_surface *s;
 static char last_input[64] = "Press a key or touch the screen";
@@ -37,14 +38,14 @@ static void draw_time(int force)
 static void draw_input(void)
 {
     t48_fill(s, 0, 350, s->w, 40, C_BG);
-    t48_text_centre(s, s->w / 2, 356, &t48_font_normal, C_ACCENT, last_input);
+    t48_text_centre(s, s->w / 2, 356, &t48_font_normal, C_DIM, last_input);
     t48_damage(0, 350, s->w, 40);
 }
 
 static void draw_all(void)
 {
     t48_fill(s, 0, 0, s->w, s->h, C_BG);
-    t48_text(s, 24, 20, &t48_font_head, C_ACCENT, t48_setting("title", "Clock"));
+    t48_text(s, 24, 20, &t48_font_head, C_TEXT, t48_setting("title", "Clock"));
     t48_text_centre(s, s->w / 2, 440, &t48_font_small, C_DIM, "X: close     hold X: home");
     draw_time(1);
     draw_input();
@@ -87,7 +88,7 @@ int main(void)
             break;
         case T48_EV_TOUCH:
             if (ev.state == T48_TOUCH_UP) break;
-            t48_round_fill(s, ev.x - 6, ev.y - 6, 12, 12, 6, C_ACCENT);
+            t48_round_fill(s, ev.x - 6, ev.y - 6, 12, 12, 6, C_MARK);
             t48_damage(ev.x - 6, ev.y - 6, 12, 12);
             snprintf(last_input, sizeof last_input, "Touch at %d, %d", ev.x, ev.y);
             draw_input();
@@ -99,6 +100,9 @@ int main(void)
         case T48_EV_RESUME:
             paused = 0;
             draw_all();
+            break;
+        case T48_EV_THEME:   /* the owner changed the look: the colours and fonts are already the new ones */
+            if (!paused) draw_all();
             break;
         case T48_EV_QUIT:
             return 0;

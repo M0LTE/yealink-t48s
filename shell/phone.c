@@ -1497,8 +1497,8 @@ static void draw_ended(void)
 
 void phone_draw(void)
 {
-    ui_clear(P.st == PH_INCOMING ? T->ground[0] : P.st == PH_INCALL && P.c.held ? T->ground[2] :
-             P.st == PH_INCALL || P.st == PH_OUTGOING ? T->ground[1] : C_BG);
+    ui_clear(P.st == PH_INCOMING ? T->ground_ring : P.st == PH_INCALL && P.c.held ? T->ground_hold :
+             P.st == PH_INCALL || P.st == PH_OUTGOING ? T->ground_call : C_BG);
     switch (P.st) {
     case PH_IDLE: break;
     case PH_DIAL: draw_dial(); break;

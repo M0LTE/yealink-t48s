@@ -27,7 +27,7 @@ JSON
     $PACK "$d" "$O/feeds/$5" >/dev/null 2>&1
 }
 app demo Demo 1.0.0 1 1
-app future Future 3.0.0 2 1
+app future Future 3.0.0 9 1
 app broken Broken 1.0.0 1 1
 app demo Demo 1.1.0 1 2
 $PACK --index "$O/feeds/1" >/dev/null

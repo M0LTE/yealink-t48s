@@ -415,6 +415,12 @@ static void open_tile(int i)
     show(SCR_SETTINGS);
 }
 
+/* the look has changed: an app in front draws itself again when it is told, the shell's screens here */
+void shell_theme_changed(void)
+{
+    if (scr != SCR_APP || !app_shown) redraw();
+}
+
 void shell_settings_changed(void)
 {
     if (scr == SCR_SETTINGS) redraw();
@@ -669,6 +675,8 @@ const char *shell_state(const char *key)
     if (!strcmp(key, "screen")) return screen_names[scr];
     if (!strcmp(key, "app")) return app_states[app_state()];
     if (!strcmp(key, "appid")) return app_id()[0] ? app_id() : "-";
+    if (!strcmp(key, "theme")) return T->name;
+    if (!strcmp(key, "font")) return T->font;
     const char *v = contacts_state(key);
     if (!strcmp(key, "notice")) {
         static char note[2][96];

@@ -200,7 +200,7 @@ key ok
 expectstate settings.rows 5
 shot shots/apps-unsupported.png
 key x
-run ! ./t48-app --apps simdata/installed:apps --config simdata/config install future 2>simdata/err; grep -q "API level 2" simdata/err; test ! -e simdata/installed/future
+run ! ./t48-app --apps simdata/installed:apps --config simdata/config install future 2>simdata/err; grep -q "API level 9" simdata/err; test ! -e simdata/installed/future
 # a package that does not match the feed's checksum: not installed, and said so
 key up
 expectstate settings.row Demo

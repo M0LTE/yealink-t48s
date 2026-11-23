@@ -3,11 +3,13 @@
  * to the shell, the shared screen buffer, events and timers. */
 #include <errno.h>
 #include <poll.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #include "t48.h"
@@ -25,6 +27,67 @@ static struct { int fd, id; } watch[NWATCH];
 static int nwatch;
 static char *settings[NSETTINGS];  /* "key=value" */
 static int nsettings;
+
+/* the shell's font file (level 2): every family it has, to point the faces into */
+static const unsigned char *fonts;
+static size_t fonts_n;
+static t48_font_family fonts_mapped;
+
+_Static_assert(sizeof(t48_glyph) == sizeof(struct t48_fonts_glyph) && offsetof(t48_glyph, off) == offsetof(struct t48_fonts_glyph, off),
+               "a glyph in the font file is a t48_glyph");
+
+static void fonts_map(void)
+{
+    const char *fd = getenv(T48_ENV_FONTS);
+    struct stat st;
+    struct t48_fonts_hdr h;
+    if (!fd || fstat(atoi(fd), &st) < 0 || st.st_size < (off_t)sizeof h) return;
+    void *m = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_SHARED, atoi(fd), 0);
+    if (m == MAP_FAILED) return;
+    memcpy(&h, m, sizeof h);
+    if (memcmp(h.magic, T48_FONTS_MAGIC, 4) || h.version != 1) { munmap(m, (size_t)st.st_size); return; }
+    fonts = m;
+    fonts_n = (size_t)st.st_size;
+}
+
+/* The family of that name: B612 is built in, the others come from the font
+ * file. NULL if there is none, or the file is not sound. */
+static const t48_font_family *fonts_named(const char *name)
+{
+    struct t48_fonts_hdr h;
+    if (!strcmp(name, t48_fonts_b612.name) || !fonts) return strcmp(name, t48_fonts_b612.name) ? NULL : &t48_fonts_b612;
+    memcpy(&h, fonts, sizeof h);
+    for (size_t i = 0; i < h.families; i++) {
+        struct t48_fonts_family f;
+        size_t at = sizeof h + i * sizeof f;
+        if (at + sizeof f > fonts_n) return NULL;
+        memcpy(&f, fonts + at, sizeof f);
+        if (strncmp(f.name, name, sizeof f.name)) continue;
+        snprintf(fonts_mapped.name, sizeof fonts_mapped.name, "%s", name);
+        for (int k = 0; k < T48_FACES; k++) {
+            size_t g = f.face[k].glyphs, a = f.face[k].coverage;
+            if (g % 4 || g > fonts_n || fonts_n - g < 95 * sizeof(t48_glyph) || a > fonts_n) return NULL;
+            const t48_glyph *gl = (const t48_glyph *)(fonts + g);
+            for (int c = 0; c < 95; c++)
+                if (gl[c].w < 0 || gl[c].h < 0 || gl[c].off > fonts_n - a || (size_t)gl[c].w * (size_t)gl[c].h > fonts_n - a - gl[c].off)
+                    return NULL;
+            fonts_mapped.face[k] = (t48_font){f.face[k].ascent, f.face[k].height, gl, fonts + a};
+        }
+        return &fonts_mapped;
+    }
+    return NULL;
+}
+
+/* THEME: the look, and the family that goes with it (B612 if we have not got that one) */
+static void theme_msg(const unsigned char *p, size_t len)
+{
+    t48_theme t;
+    if (len < sizeof t) return;   /* a later level only adds to the end */
+    memcpy(&t, p, sizeof t);
+    t.name[sizeof t.name - 1] = t.font[sizeof t.font - 1] = 0;
+    const t48_font_family *f = fonts_named(t.font);
+    t48_theme_use(&t, f ? f : &t48_fonts_b612);
+}
 
 long long t48_now_ms(void)
 {
@@ -86,7 +149,8 @@ int t48_app_init(void)
         return -1;
     }
     sock = atoi(sfd);
-    for (;;) {  /* HELLO, settings, START */
+    fonts_map();
+    for (;;) {  /* HELLO, settings, the theme, START */
         while (!take(&type, p, sizeof p - 1, &len)) {
             if (closed) return -1;
             fill_rx();
@@ -107,6 +171,8 @@ int t48_app_init(void)
         } else if (type == T48_MSG_SETTING && nsettings < NSETTINGS) {
             p[len] = 0;
             settings[nsettings++] = strdup((char *)p);
+        } else if (type == T48_MSG_THEME) {
+            theme_msg(p, len);
         } else if (type == T48_MSG_START) {
             break;
         } else if (type == T48_MSG_QUIT) {
@@ -169,7 +235,7 @@ const char *t48_setting(const char *key, const char *def)
 /* turn the next message in rx into an event: 1 if there was one worth reporting */
 static int next_event(t48_event *ev)
 {
-    unsigned char p[64];
+    unsigned char p[512];
     size_t len;
     int type;
 
@@ -195,6 +261,7 @@ static int next_event(t48_event *ev)
         if (type == T48_MSG_PAUSE) { ev->type = T48_EV_PAUSE; return 1; }
         if (type == T48_MSG_RESUME) { ev->type = T48_EV_RESUME; return 1; }
         if (type == T48_MSG_QUIT) { ev->type = T48_EV_QUIT; return 1; }
+        if (type == T48_MSG_THEME) { theme_msg(p, len); ev->type = T48_EV_THEME; return 1; }
         /* anything else: from a newer shell, skip it */
     }
     return 0;

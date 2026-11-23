@@ -31,14 +31,14 @@
 #define T48_VERSION "development build"
 #endif
 
-enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP };
+enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME };
 static const char *const page_names[] = {"root", "accounts", "sip", "network", "time", "timezone", "sound", "screen", "access", "about",
-                                         "appsettings", "appconf", "store", "storeapp"};
+                                         "appsettings", "appconf", "store", "storeapp", "theme"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
 enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16 };
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
-              A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE };
+              A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME };
 
 struct row {
     int kind, flags;
@@ -652,9 +652,21 @@ static void build_screen(void)
     r->level_max = BL_LEVELS;
     r->level = backlight_level();
     if (!have) r->flags = F_DISABLED;
+    add_menu("Theme", P_THEME, ui_theme_label(T->name));
     if (!have) { add_info("Backlight", "None"); return; }
     add_info("Dim after", idle_time(atoi(cfg_str("screen", "dim_seconds", "120"))));
     add_info("Off after", idle_time(atoi(cfg_str("screen", "off_seconds", "1800"))));
+}
+
+/* the themes, side by side, each as a small picture of itself */
+static void build_theme(void)
+{
+    snprintf(title, sizeof title, "Theme");
+    for (int i = 0; i < t48_theme_count; i++) {
+        struct row *r = add_action(ui_theme_label(t48_themes[i].name), A_SET_THEME, "");
+        snprintf(r->def, sizeof r->def, "%s", t48_themes[i].name);
+        if (!strcmp(T->name, t48_themes[i].name)) snprintf(r->value, sizeof r->value, "Current");
+    }
 }
 
 static void build_access(void)
@@ -884,6 +896,7 @@ static void rebuild(void)
     case P_APPCONF: build_appconf(stack[depth].arg); break;
     case P_STORE: build_store(); break;
     case P_STOREAPP: build_storeapp(stack[depth].arg); break;
+    case P_THEME: build_theme(); break;
     }
     if (stack[depth].sel >= nrows) stack[depth].sel = nrows ? nrows - 1 : 0;
     if (stack[depth].top > stack[depth].sel) stack[depth].top = stack[depth].sel;
@@ -904,7 +917,7 @@ static void push(enum page p, const char *arg)
     rebuild();
     /* start on the first row that does something */
     while (stack[depth].sel < nrows - 1 && (rows[stack[depth].sel].kind == R_NOTE || rows[stack[depth].sel].kind == R_INFO)) stack[depth].sel++;
-    if (p == P_TZ)
+    if (p == P_TZ || p == P_THEME)
         for (int i = 0; i < nrows; i++)
             if (rows[i].value[0]) stack[depth].sel = i;
     rebuild();
@@ -993,6 +1006,12 @@ static void do_action(const struct row *r)
         run_apply("system");
         pop();
         return;
+    case A_SET_THEME:
+        /* at once, here and in an open app; the web setup page follows the store */
+        cfg_set("screen", "theme", r->def);
+        ui_theme_set(r->def);
+        shell_theme_changed();
+        break;
     case A_REFRESH: store_refresh(); break;
     case A_INSTALL:
     case A_UPDATE: change_app((enum action)r->target, r->arg); break;
@@ -1213,6 +1232,8 @@ void settings_key(int code, int down)
         return;
     }
     int *sel = &stack[depth].sel;
+    if (stack[depth].page == P_THEME && (code == T48_KEY_LEFT || code == T48_KEY_RIGHT))
+        code = code == T48_KEY_LEFT ? T48_KEY_UP : T48_KEY_DOWN;   /* they are side by side */
     switch (code) {
     case T48_KEY_UP: if (*sel > 0) (*sel)--; break;
     case T48_KEY_DOWN: if (*sel < nrows - 1) (*sel)++; break;
@@ -1243,6 +1264,14 @@ void settings_key(int code, int down)
 
 static int list_w(void) { return SW - 2 * LIST_X - (nrows > VISIBLE ? SCROLL_W : 0); }
 
+/* the Theme page: a picture of each, its name under it */
+#define TH_W 240
+#define TH_H 222
+#define TH_GAP 16
+#define TH_Y 92
+#define TH_X(i) ((SW - t48_theme_count * TH_W - (t48_theme_count - 1) * TH_GAP) / 2 + (i) * (TH_W + TH_GAP))
+#define TH_ALL_H (TH_H + 84)   /* with the name and "Current" */
+
 void settings_touch(int state, int x, int y)
 {
     if (depth < 0) return;
@@ -1266,6 +1295,16 @@ void settings_touch(int state, int x, int y)
     if (y < HEAD_H) {
         if (x < 130) { pop(); if (depth < 0) return; }
         redraw_me();
+        return;
+    }
+    if (stack[depth].page == P_THEME) {
+        for (int i = 0; i < nrows; i++)
+            if (ui_inside(x, y, TH_X(i), TH_Y, TH_W, TH_ALL_H)) {
+                stack[depth].sel = i;
+                activate(i, 1);
+                rebuild();
+                redraw_me();
+            }
         return;
     }
     int w = list_w();
@@ -1433,10 +1472,10 @@ static void draw_overlay(void)
     if (ov.kind == O_BUSY) {
         t48_text_centre(&ui, SW / 2, OV_Y + 88, &t48_font_normal, ink.dim, ov.text);
         int bx = OV_X + 60, bw = OV_W - 120, by = OV_Y + 150;
-        t48_round_fill(&ui, bx, by, bw, 12, T->r < 6 ? 0 : 6, t48_mix(ink.text, ui_ground(), 215));
+        t48_round_fill(&ui, bx, by, bw, 12, T->radius < 6 ? 0 : 6, t48_mix(ink.text, ui_ground(), 215));
         if (ov.percent >= 0) {
             char pc[8];
-            t48_round_fill(&ui, bx, by, bw * ov.percent / 100 > 12 ? bw * ov.percent / 100 : 12, 12, T->r < 6 ? 0 : 6, ink.text);
+            t48_round_fill(&ui, bx, by, bw * ov.percent / 100 > 12 ? bw * ov.percent / 100 : 12, 12, T->radius < 6 ? 0 : 6, ink.text);
             snprintf(pc, sizeof pc, "%d%%", ov.percent);
             t48_text_centre(&ui, SW / 2, by + 28, &t48_font_small, ink.dim, pc);
         }
@@ -1482,6 +1521,17 @@ static void draw_door(void)
     ui_dialog_btn(SW / 2 + 10, DOOR_Y + DOOR_H - 70, 180, 54, "Close", B_STOP);
 }
 
+static void draw_themes(void)
+{
+    for (int i = 0; i < nrows && i < t48_theme_count; i++) {
+        int x = TH_X(i), current = rows[i].value[0] != 0, selected = i == stack[depth].sel;
+        if (selected) t48_round_fill(&ui, x - 6, TH_Y - 6, TH_W + 12, TH_H + 12, T->radius + 2, T->sel);
+        ui_theme_preview(&t48_themes[i], x, TH_Y, TH_W, TH_H, current);
+        t48_text_centre(&ui, x + TH_W / 2, TH_Y + TH_H + 20, &t48_font_bold, C_TEXT, rows[i].label);
+        if (current) t48_text_centre(&ui, x + TH_W / 2, TH_Y + TH_H + 50, &t48_font_small, C_DIM, "Current");
+    }
+}
+
 void settings_draw(void)
 {
     if (depth < 0) return;
@@ -1490,6 +1540,7 @@ void settings_draw(void)
 
     ui_clear(C_BG);
     ui_header(title, 1, 0);
+    if (stack[depth].page == P_THEME) { draw_themes(); return; }
     int w = list_w(), top = stack[depth].top;
     for (int i = top; i < nrows && i < top + VISIBLE; i++)
         draw_row(&rows[i], LIST_X, LIST_Y + (i - top) * ROW_H, w, i == stack[depth].sel);

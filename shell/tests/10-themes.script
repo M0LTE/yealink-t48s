@@ -1,0 +1,125 @@
+# Themes: Settings, Screen, Theme picks one of three at once and keeps it; a change
+# from elsewhere (the web setup page, t48-config) is followed within a second; an
+# open app is told, and a frozen one finds out when it comes back.
+wait 300
+expect idle
+expectstate theme switchboard
+expectstate font b612
+expectpixel 5 300 000000
+key down
+expect settings
+key down
+key down
+key down
+key down
+expectstate settings.row Screen
+key ok
+expectstate settings.page screen
+key down
+expectstate settings.row Theme
+expectstate settings.value Switchboard
+key ok
+expectstate settings.page theme
+expectstate settings.rows 3
+expectstate settings.row Switchboard
+expectstate settings.value Current
+shot shots/theme-choose-switchboard.png
+# they are side by side: Right is the next one, OK takes it
+key right
+expectstate settings.row Directory
+expectstate settings.value -
+expectstate theme switchboard
+key ok
+expectstate theme directory
+expectstate font plex
+expectstate cfg.screen.theme directory
+expectstate settings.value Current
+# paper, and the yellow band of the header
+expectpixel 5 470 F7F7F4
+expectpixel 400 20 FFCE00
+shot shots/theme-choose-directory.png
+# a touch on the third picture
+touch 660 220
+expectstate theme twotone
+expectstate font figtree
+expectstate cfg.screen.theme twotone
+expectstate settings.row Two-tone
+expectpixel 5 470 1C3557
+shot shots/theme-choose-twotone.png
+key left
+key left
+expectstate settings.row Switchboard
+key x
+expectstate settings.page screen
+expectstate settings.row Theme
+expectstate settings.value Two-tone
+shot shots/theme-screen-page.png
+# the keyboard is dressed the same
+key x
+key up
+key up
+key up
+key up
+key ok
+expectstate settings.page accounts
+key ok
+expectstate settings.page sip
+key ok
+expectstate kbd open
+expectpixel 3 3 1C3557
+shot shots/theme-keyboard-twotone.png
+key x
+key x
+key x
+key x
+expect idle
+expectpixel 5 300 1C3557
+shot shots/theme-idle-twotone.png
+
+# ---- from elsewhere: the store is looked at once a second ----
+run ./t48-config --config simdata/config set screen theme directory
+waitstate theme directory 3000
+waitpixel 400 20 FFCE00 2000
+shot shots/theme-idle-directory.png
+# a name that is no theme is Switchboard
+run ./t48-config --config simdata/config set screen theme plaid
+waitstate theme switchboard 3000
+waitpixel 5 300 000000 2000
+
+# ---- an app that is open is told, and draws itself again ----
+key ok
+expect launcher
+key ok
+waitframe 3000
+expect app
+waitpixel 5 5 000000 2000
+run ./t48-config --config simdata/config set screen theme twotone
+waitstate theme twotone 3000
+waitpixel 5 5 1C3557 3000
+shot shots/theme-app-twotone.png
+# ---- a frozen app: it is told when it comes back ----
+key x 1000
+expect launcher
+waitstate app stopped 3000
+expectpixel 5 470 1C3557
+run ./t48-config --config simdata/config set screen theme directory
+waitstate theme directory 3000
+waitpixel 5 470 F7F7F4 2000
+shot shots/theme-launcher-directory.png
+key ok
+expect app
+waitpixel 5 5 F7F7F4 3000
+shot shots/theme-app-directory.png
+# ---- the dialler over the app, and a change while it shows ----
+hook off
+expect call
+expectpixel 5 470 F7F7F4
+run ./t48-config --config simdata/config set screen theme switchboard
+waitstate theme switchboard 3000
+waitpixel 5 470 000000 2000
+hook on
+expect app
+waitpixel 5 5 000000 3000
+key x
+waitscreen launcher 2000
+quit

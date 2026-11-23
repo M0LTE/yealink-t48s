@@ -218,7 +218,9 @@ void watch_tick(long long now)
         logmsg("watch: files have changed, read again:%s%s%s%s%s", phone ? " phone" : "", any ? " settings" : "",
                contacts ? " contacts" : "", history ? " history" : "", apps ? " apps" : "");
         backlight_reload();
+        int theme = ui_theme_reload();   /* before the screens are drawn again */
         settings_reload();
+        if (theme) shell_theme_changed();
         shell_phone_changed();
     }
 }
