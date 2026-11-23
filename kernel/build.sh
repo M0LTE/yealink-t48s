@@ -2,6 +2,13 @@
 # Build the T48S kernel inside the t48s-kbuild:trusty container (gcc 4.7).
 # Run from the directory holding linux-3.6.11/ and this kernel/ directory.
 #   sh kernel/build.sh          -> T48S.bin   (U-Boot image, for recovery-mode TFTP boot)
+#   sh kernel/build.sh live     -> T48S.bin   for the live image (issue #7, docs/live-image.md):
+#                                  the same kernel, told that it was started through
+#                                  recovery mode (t48boot=live) and with a console on
+#                                  the screen. Its root filesystem is the ramdisk
+#                                  U-Boot loads beside it, T48S.rfs, which
+#                                  tools/mkliveimage.py makes from Buildroot's
+#                                  rootfs.cpio.
 #   ROOTFS=rootfs.cpio sh kernel/build.sh kexec
 #                               -> Image-kexec (raw Image for kmod/t48kexec) with
 #                                  Buildroot's root filesystem (buildroot/build.sh)
@@ -142,6 +149,10 @@ grep -q "t48s_audio.o" sound/arm/Makefile || echo 'obj-$(CONFIG_SND_T48S) += t48
 # the flash, read-only (issue #5): our driver instead of mainline's bcm_umi_nand
 cp ../kernel/drivers/t48s_nand.c drivers/mtd/nand/t48s_nand.c
 grep -q "t48s_nand.o" drivers/mtd/nand/Makefile || echo 'obj-$(CONFIG_MTD_NAND) += t48s_nand.o' >> drivers/mtd/nand/Makefile
+# U-Boot's BOOTMODE flag: read it, and ask the flash driver to take it out (issue #7).
+# No write code of its own: with the read-only driver above it can change nothing
+cp ../kernel/drivers/t48s_bootmode.c ../kernel/drivers/t48s_bootmode_env.h drivers/mtd/nand/
+grep -q "t48s_bootmode.o" drivers/mtd/nand/Makefile || echo 'obj-$(CONFIG_MTD_NAND) += t48s_bootmode.o' >> drivers/mtd/nand/Makefile
 # put the delay loop on an 8-byte boundary. On this ARM1176 the two-instruction loop
 # takes 2 cycles per pass there and 3 at the other word alignment, and where it lands is
 # an accident of the link: unaligned, 3.6 measured 331.77 BogoMIPS against the 498.07
@@ -167,6 +178,7 @@ EOD
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- bcmring_defconfig
 ./scripts/kconfig/merge_config.sh -m .config ../kernel/t48s.config >/dev/null
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kernel/kexec.config >/dev/null
+[ "$VARIANT" = live ] && ./scripts/kconfig/merge_config.sh -m .config ../kernel/live.config >/dev/null
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kexec-initramfs.config >/dev/null
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig >/dev/null 2>&1 || make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- oldnoconfig >/dev/null
 for o in CONFIG_BACKLIGHT_CLASS_DEVICE= CONFIG_LEDS_CLASS= CONFIG_LEDS_TRIGGER_TIMER= CONFIG_SND_T48S CONFIG_SND_PCM= CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
@@ -185,3 +197,6 @@ if [ "$VARIANT" = kexec ]; then
 fi
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j12 zImage 2>&1 | tail -n 5
 mkimage -A arm -O linux -T kernel -C none -a 0x0e000000 -e 0x0e000000 -n "Linux-3.6.11-t48s" -d arch/arm/boot/zImage ../T48S.bin
+# U-Boot loads the ramdisk 4 MB above this file (0x02680000 and 0x02a80000): a bigger
+# kernel would have its end overwritten before it is started
+[ "$(stat -c %s ../T48S.bin)" -lt 4194304 ] || { echo "T48S.bin is 4 MB or more: U-Boot's ramdisk would overwrite its end" >&2; exit 1; }

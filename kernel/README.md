@@ -7,6 +7,8 @@ Linux 3.6.11 (the last mainline release with Broadcom's `mach-bcmring` platform,
 - `build.sh`: applies the board patches and builds `T48S.bin` (U-Boot legacy image, load and entry 0x0E000000 like Yealink's kernel). Run inside the container from a directory holding `linux-3.6.11/` and this `kernel/` directory:
   `docker run --rm -u $(id -u):$(id -g) -v $PWD:/w -w /w t48s-kbuild:trusty sh kernel/build.sh`
 - `t48s.config`: config added on top of `bcmring_defconfig`.
+- `build.sh live` and `live.config`: the same `T48S.bin` for the live image ([docs/live-image.md](../docs/live-image.md)): its command line says `t48boot=live` and puts a console on the screen, and its root filesystem is the ramdisk U-Boot loads beside it. `build.sh` stops if `T48S.bin` reaches 4 MB, where U-Boot's ramdisk would overwrite its end.
+- `drivers/t48s_bootmode.c`: reads U-Boot's `BOOTMODE` flag (`/sys/kernel/t48s_bootmode/mode`) and, asked with one fixed word, has the flash driver take it out. It holds no flash-writing code, so with the read-only driver it changes nothing. `tools/test-bootmode.sh` runs its logic on a PC.
 
 Container (on hyperv-gha, `~/t48s-kbuild`):
 
