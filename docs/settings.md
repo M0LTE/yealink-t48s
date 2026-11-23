@@ -2,7 +2,7 @@
 
 Issue [#23](https://github.com/M0LTE/yealink-t48s/issues/23). Design: [architecture.md](architecture.md#the-shell). Source: [`shell/config.c`](../shell/config.c) (the store and `t48-config`), [`shell/settings.c`](../shell/settings.c) (the screens), [`libt48/src/kbd.c`](../libt48/src/kbd.c) (the keyboard).
 
-Press **Down** on the idle screen, or touch **Settings**. Arrows and OK, or touch, move around; X or "< Back" goes back.
+Press **Down** on the idle screen, or touch **Settings**. Everything here can also be set from a browser, which is easier for anything long: the web setup page, [web.md](web.md). Arrows and OK, or touch, move around; X or "< Back" goes back.
 
 | | |
 |---|---|
@@ -19,7 +19,7 @@ Press **Down** on the idle screen, or touch **Settings**. Arrows and OK, or touc
 | Date and time | time zone, from a list | at once, in the shell and in apps started afterwards |
 | Sound | ringer, handset, speakerphone and headset levels, 0 to 15 | at once, through the audio service. Nothing is played. The volume keys change the same levels |
 | Screen | brightness, 1 to 10 | at once ([shell.md](shell.md#the-backlight)). The page also says when the screen dims and goes off |
-| Access | SSH on or off, the phone's host key, the keys that can log in, adding a first key | at once ([access.md](access.md)). SSH is off until turned on here |
+| Access | SSH on or off, the phone's host key, the keys that can log in, adding a first key; the web setup page on or off | at once ([access.md](access.md), [web.md](web.md)). Both are off until turned on here |
 | Apps | the app manager ([apps.md](apps.md)) | |
 | App settings | each installed app's own settings, from its manifest | the next time the app is opened (an open app is closed) |
 | About | firmware and shell version, app API level, kernel, address, MAC, memory, storage | |
@@ -48,7 +48,7 @@ Plain text in `/data/config`, one file per subject, `key=value` a line, `#` for 
 | `system` | `timezone`: a name from the list (`Europe/London`), or any POSIX TZ string (`XYZ-3`) for a zone the list lacks |
 | `audio` | `ringer`, `handset`, `speaker`, `headset`: 0 to 15 |
 | `screen` | `brightness`: 1 to 10. Not on the screen: `dim_seconds` (120) and `off_seconds` (1800), how long nothing is touched before the screen dims and goes off; 0 is never. The shell picks changes to this file up within five seconds |
-| `access` | `ssh`: on or off (off when missing); `t48-apply access` makes it so |
+| `access` | `ssh`: on or off (off when missing); `web`: the web setup page, the same ([web.md](web.md)); `t48-apply access` makes it so |
 | `feed` | `url`: the app feed, if not the standard one |
 | `apps/ID.conf` | that app's settings, by the keys in its manifest |
 
@@ -60,7 +60,7 @@ t48-config list            # everything; passwords shown only as (set)
 t48-apply network          # make the running phone follow a file changed by hand
 ```
 
-`t48-config` is the shell's own program under another name, so there is one implementation. `t48-apply` ([the script](../buildroot/board/t48s/rootfs-overlay/usr/bin/t48-apply)) is what the shell runs when a page that needs it is left.
+`t48-config` is the shell's own program under another name, so there is one implementation. The shell looks at the files once a second, so a value set this way, or from the web setup page ([web.md](web.md)), shows on the screen by itself; `t48-apply` is still needed for the network, the phone service and SSH. `t48-apply` ([the script](../buildroot/board/t48s/rootfs-overlay/usr/bin/t48-apply)) is what the shell runs when a page that needs it is left.
 
 **Saving is atomic**: the new file is written beside the old one, synced, renamed over it, and the folder synced. A power cut leaves the old file or the new one. All reading and writing goes through two functions at the top of `config.c` (load a file, save a file), which did not need to change when `/data` moved to flash (#29, [flash.md](flash.md)): once `t48-data format` has been run on a phone, settings survive a restart; before that `/data` is in RAM and they are lost at power off.
 

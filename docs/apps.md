@@ -2,7 +2,7 @@
 
 Issue [#22](https://github.com/M0LTE/yealink-t48s/issues/22). Design: [architecture.md](architecture.md#the-apps-repository). Source: [`shell/pkg.c`](../shell/pkg.c) (`t48-app`), [`shell/settings.c`](../shell/settings.c) (the screens).
 
-Open **Apps**, then the last tile, **Get apps** (also Settings, Apps). It lists what is installed and what the feed offers; pick one to install, update, open, change its settings or remove it.
+Open **Apps**, then the last tile, **Get apps** (also Settings, Apps; and the Apps page of the web setup page, [web.md](web.md)). It lists what is installed and what the feed offers; pick one to install, update, open, change its settings or remove it.
 
 | | |
 |---|---|

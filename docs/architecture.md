@@ -184,6 +184,10 @@ Issue [#28](https://github.com/M0LTE/yealink-t48s/issues/28). SSH (dropbear) is 
 
 (2026-11-23: done, see [access.md](access.md). A first key gets onto the phone through password login that the screen opens for ten minutes, with a password it makes up and shows; it closes when the key arrives. Our own test builds, the only ones with keys in them, always run SSH. Keys from the live image's settings file wait for #7.)
 
+### The web setup page
+
+Issue [#37](https://github.com/M0LTE/yealink-t48s/issues/37). (2026-11-23: written and tested off the phone, see [web.md](web.md).) A small HTTP server of our own on the LAN, off until the owner turns it on at the screen. A browser pairs by typing a code the screen shows. It uses the same settings store as the Settings screens, and the shell notices changed files by itself. Plain HTTP, and it says so.
+
 ### Updates
 
 Issue [#31](https://github.com/M0LTE/yealink-t48s/issues/31). `t48-update` reads the latest GitHub release over HTTPS, downloads the system image, checks its SHA-256, writes the unused slot and reboots. Never automatic unless the owner asks; owners can point it at their own builds. Signed releases come later (see Decisions for Tom).

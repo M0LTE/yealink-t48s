@@ -27,6 +27,8 @@ ssh-copy-id root@10.45.0.214        # the address is on the screen too
 
 After that the page lists each key by its kind and its comment (`ssh-ed25519 tom@desk`), and **Forget all keys** empties the list.
 
+With the web setup page turned on ([web.md](web.md)) there is an easier way: paste the public key into its Access page.
+
 ### Why a password on the screen, and not something else
 
 - Typing a public key on the on-screen keyboard is several hundred characters. Nobody would get it right.

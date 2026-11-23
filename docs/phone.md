@@ -74,7 +74,7 @@ Left on the idle screen, or the Contacts button. A list of names and numbers, in
 - Add, Edit and Delete (which asks first) are buttons under the list; names and numbers are typed with the same keyboard as Settings ([settings.md](settings.md#the-keyboard)).
 - OK, Dial, or a second touch on a contact puts the number in the dialler.
 - A number in the list shows its name everywhere: the dialler as you type, calls going out, calls coming in (in place of the name the caller sends), a waiting or held call, and the history. The history's Add contact button starts a new contact with the number filled in.
-- The file is `/data/phone/contacts`, one contact a line, `name|number`. A list made elsewhere can be copied there over SSH; the shell reads it at start.
+- The file is `/data/phone/contacts`, one contact a line, `name|number`. A list made elsewhere can be imported as CSV or vCard on the web setup page ([web.md](web.md)), or copied there over SSH; the shell reads the file at start and again whenever it changes.
 
 | | |
 |---|---|
