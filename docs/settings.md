@@ -2,7 +2,7 @@
 
 Issue [#23](https://github.com/M0LTE/yealink-t48s/issues/23). Design: [architecture.md](architecture.md#the-shell). Source: [`shell/config.c`](../shell/config.c) (the store and `t48-config`), [`shell/settings.c`](../shell/settings.c) (the screens), [`libt48/src/kbd.c`](../libt48/src/kbd.c) (the keyboard).
 
-Press **Down** on the idle screen, or touch **Settings**. Everything here can also be set from a browser, which is easier for anything long: the web setup page, [web.md](web.md). Arrows and OK, or touch, move around; X or "< Back" goes back.
+Press **Down** on the idle screen, or touch **Settings**. Everything here can also be set from a browser, which is easier for anything long: the web setup page, [web.md](web.md). Arrows and OK, or touch, move around; X or the arrow in the header goes back. The words and the look follow [style.md](style.md) and [design/](design/README.md).
 
 | | |
 |---|---|
@@ -14,7 +14,7 @@ Press **Down** on the idle screen, or touch **Settings**. Everything here can al
 
 | Page | What it sets | Takes effect |
 |---|---|---|
-| Phone accounts | up to six accounts ([phone.md](phone.md#several-accounts)), and which is the usual one for calls. For each: user, password, domain, server or proxy, login name, name shown to others, transport, a short name for this phone's screens, the voicemail number, in use or not, and Remove | on leaving an account's page: baresip is restarted if it is running. The usual account changes at once |
+| Accounts | up to six accounts ([phone.md](phone.md#several-accounts)), and which is the default for calls. For each: User, Password, Domain, Proxy, Auth user, Display name, Transport, Label (a short name for this phone's screens), Voicemail, Enabled, and Remove account | on leaving an account's page: baresip is restarted if it is running. The usual account changes at once |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server | on leaving the page. If the address is a different one, baresip is started again, as it listens on the address it started with |
 | Date and time | time zone, from a list | at once, in the shell and in apps started afterwards |
 | Sound | ringer, handset, speakerphone and headset levels, 0 to 15 | at once, through the audio service. Nothing is played. The volume keys change the same levels |
@@ -73,11 +73,11 @@ From the app's manifest ([app-protocol.md](app-protocol.md#the-manifest)): each 
 | `text` (and anything unknown) | text, edited with the keyboard |
 | `number` | the same, with the keyboard on digits |
 | `bool` | a switch; stored as `true` or `false` |
-| `password` | "set" or "not set"; typed blind |
+| `password` | "Set" or "Not set"; typed blind |
 
 ![an app's settings](img/settings-app.png)
 
-## Phone accounts
+## Accounts
 
 | | |
 |---|---|
@@ -85,7 +85,7 @@ From the app's manifest ([app-protocol.md](app-protocol.md#the-manifest)): each 
 
 An account with no user or no domain is not used. Removing an account asks first and deletes its file.
 
-The app gets each value in a SETTING message when it starts. "Back to the app's own defaults" forgets the owner's values.
+The app gets each value in a SETTING message when it starts. "Reset to defaults" forgets the owner's values.
 
 ## Testing
 

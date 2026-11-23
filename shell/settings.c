@@ -55,7 +55,7 @@ struct row {
 #define MAX_ROWS 96
 #define VISIBLE 7
 #define ROW_H 60
-#define LIST_Y 52
+#define LIST_Y 54
 #define LIST_X 16
 
 static struct row rows[MAX_ROWS];
@@ -1263,7 +1263,7 @@ void settings_touch(int state, int x, int y)
         redraw_me();
         return;
     }
-    if (y < 46) {
+    if (y < HEAD_H) {
         if (x < 130) { pop(); if (depth < 0) return; }
         redraw_me();
         return;
@@ -1348,6 +1348,20 @@ static void two_lines(int x, int y, int w, const t48_font *f, uint32_t c, const 
     t48_text_fit(&ui, x, y + f->height + 2, w, f, c, text + cut + 1);
 }
 
+/* the same, each line centred on cx: the words of a question */
+static void two_lines_centred(int cx, int y, int w, const t48_font *f, uint32_t c, const char *text)
+{
+    char line[220];
+    size_t n = strlen(text), cut = n;
+    snprintf(line, sizeof line, "%s", text);
+    while (cut > 0 && (line[cut] = 0, t48_text_width(f, line) > w)) {
+        do cut--; while (cut > 0 && text[cut] != ' ');
+    }
+    if (cut == 0 || cut == n) { t48_text_centre(&ui, cx, y + f->height / 2, f, c, cut ? line : text); return; }
+    t48_text_centre(&ui, cx, y, f, c, line);
+    t48_text_centre(&ui, cx, y + f->height + 2, f, c, text + cut + 1);
+}
+
 /* a stored choice as it is shown: the files keep "dhcp", the screen says DHCP */
 static const char *choice_text(const char *v)
 {
@@ -1360,55 +1374,50 @@ static const char *choice_text(const char *v)
 static void draw_row(const struct row *r, int x, int y, int w, int selected)
 {
     int h = ROW_H - 6, dis = r->flags & F_DISABLED;
-    uint32_t text = dis ? C_FAINT : C_TEXT;
     const t48_font *f = &t48_font_normal;
     int ty = y + (h - f->height) / 2;
+    struct row_ink ink;
 
     if (r->kind == R_NOTE) {
-        if (selected) t48_fill(&ui, x, y + 8, 4, h - 16, C_ACCENT);
-        two_lines(x + 16, y + 6, w - 32, &t48_font_small, (r->flags & F_DANGER) ? C_BAD : C_DIM, r->value);
+        /* words between rows: they are not chosen, so they are never dressed as a row */
+        if (selected) t48_fill(&ui, x, y + 8, 4, h - 16, C_TEXT);
+        two_lines(x + 18, y + 6, w - 36, &t48_font_small, (r->flags & F_DANGER) ? C_BAD : C_DIM, r->value);
         return;
     }
-    t48_round_fill(&ui, x, y, w, h, 10, selected ? C_KEY : C_PANEL);
-    if (selected) t48_fill(&ui, x, y + 8, 4, h - 16, C_ACCENT);
+    ui_row(x, y, w, h, selected, &ink);
+    uint32_t text = dis ? ink.faint : ink.text;
 
     if (r->kind == R_ACTION) {
-        t48_text(&ui, x + 18, ty, &t48_font_bold, dis ? C_FAINT : (r->flags & F_DANGER) ? C_BAD : C_ACCENT, r->label);
-        if (r->value[0]) t48_text_right(&ui, x + w - 18, ty, f, C_GOOD, r->value);
+        t48_text(&ui, x + 18, ty, &t48_font_bold, dis ? ink.faint : (r->flags & F_DANGER) && !selected ? C_BAD : ink.text, r->label);
+        if (r->value[0]) t48_text_right(&ui, x + w - 18, ty, f, ink.dim, r->value);
         return;
     }
     int right = x + w - 18;
-    if (r->kind == R_MENU) { t48_text_right(&ui, right, ty, &t48_font_bold, C_DIM, ">"); right -= 26; }
+    if (r->kind == R_MENU) { ui_chevron(right - 6, y + h / 2, 7, 1, 3, ink.dim); right -= 26; }
     if (r->kind == R_LEVEL) {
-        int bx = x + w - 340, bw = 340 - 18, cell = (bw - 120) / (r->level_max ? r->level_max : 1);
-        ui_button(bx, y + 6, 50, h - 12, "-", dis ? C_PANEL : C_LINE);
-        ui_button(bx + bw - 50, y + 6, 50, h - 12, "+", dis ? C_PANEL : C_LINE);
-        for (int i = 0; i < r->level_max; i++)
-            t48_fill(&ui, bx + 60 + i * cell, y + h / 2 - 9, cell - 3, 18, i < r->level && !dis ? C_ACCENT : C_LINE);
+        int bx = x + w - 340, bw = 340 - 18;
+        ui_level(bx, y, bw, h, r->level, r->level_max, dis, selected);
         t48_text(&ui, x + 18, ty, f, text, r->label);
         if (!dis) {
             char n[8];
             snprintf(n, sizeof n, "%d", r->level);
-            t48_text_right(&ui, bx - 14, ty, f, C_DIM, n);
+            t48_text_right(&ui, bx - 14, ty, f, ink.dim, n);
         }
         return;
     }
     if (r->kind == R_TOGGLE) {
-        int on = !strcmp(r->value, "on");
-        t48_round_fill(&ui, right - 76, y + 11, 76, h - 22, (h - 22) / 2, on ? C_GOOD : C_LINE);
-        t48_text_centre(&ui, right - 38, ty, &t48_font_bold, on ? C_BG : C_DIM, on ? "On" : "Off");
+        ui_switch(right, y, h, !strcmp(r->value, "on"), selected);
         t48_text_fit(&ui, x + 18, ty, w - 140, f, text, r->label);
         return;
     }
     /* label on the left, value on the right; the value gives way first */
     int lw = t48_text_width(f, r->label), room = right - (x + 18);
     if (lw > room * 2 / 3 && r->value[0]) lw = room * 2 / 3;
-    t48_text_fit(&ui, x + 18, ty, lw + 2, f, text, r->label);
+    t48_text_fit(&ui, x + 18, ty, lw + 2, f, r->kind == R_INFO && !selected ? ink.dim : text, r->label);
     if (r->value[0]) {
         const char *shown = r->kind == R_CHOICE ? choice_text(r->value) : r->value;
         int vw = t48_text_width(f, shown), max = room - lw - 24;
-        uint32_t vc = r->kind == R_INFO ? (dis ? C_FAINT : C_TEXT) : C_DIM;
-        if (dis) vc = C_FAINT;
+        uint32_t vc = dis ? ink.faint : r->kind == R_INFO ? ink.text : ink.dim;
         if (vw <= max) t48_text_right(&ui, right, ty, f, vc, shown);
         else if (max > 40) t48_text_fit(&ui, right - max, ty, max, f, vc, shown);
     }
@@ -1416,29 +1425,30 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
 
 static void draw_overlay(void)
 {
-    t48_fill_alpha(&ui, 0, 0, SW, SH, C_BG, 170);
-    t48_round_fill(&ui, OV_X, OV_Y, OV_W, OV_H, 16, C_PANEL);
-    t48_fill(&ui, OV_X, OV_Y + 16, 6, OV_H - 32, ov.kind == O_CONFIRM ? C_BAD : C_ACCENT);
-    t48_text_centre(&ui, SW / 2, OV_Y + 24, &t48_font_head, C_TEXT, ov.title);
+    struct row_ink ink;
+    int danger = ov.kind == O_CONFIRM && (!ov.yes || ov.act == A_FORGET_KEYS);
+    ui_dialog(OV_X, OV_Y, OV_W, OV_H, danger ? B_STOP : B_PLAIN);
+    ui_dialog_ink(&ink);
+    t48_text_centre(&ui, SW / 2, OV_Y + 30, &t48_font_head, ink.text, ov.title);
     if (ov.kind == O_BUSY) {
-        t48_text_centre(&ui, SW / 2, OV_Y + 88, &t48_font_normal, C_DIM, ov.text);
+        t48_text_centre(&ui, SW / 2, OV_Y + 88, &t48_font_normal, ink.dim, ov.text);
         int bx = OV_X + 60, bw = OV_W - 120, by = OV_Y + 150;
-        t48_round_fill(&ui, bx, by, bw, 16, 8, C_LINE);
+        t48_round_fill(&ui, bx, by, bw, 12, T->r < 6 ? 0 : 6, t48_mix(ink.text, ui_ground(), 215));
         if (ov.percent >= 0) {
             char pc[8];
-            t48_round_fill(&ui, bx, by, bw * ov.percent / 100 > 16 ? bw * ov.percent / 100 : 16, 16, 8, C_ACCENT);
+            t48_round_fill(&ui, bx, by, bw * ov.percent / 100 > 12 ? bw * ov.percent / 100 : 12, 12, T->r < 6 ? 0 : 6, ink.text);
             snprintf(pc, sizeof pc, "%d%%", ov.percent);
-            t48_text_centre(&ui, SW / 2, by + 30, &t48_font_small, C_DIM, pc);
+            t48_text_centre(&ui, SW / 2, by + 28, &t48_font_small, ink.dim, pc);
         }
         return;
     }
-    two_lines(OV_X + 40, OV_Y + 70, OV_W - 80, &t48_font_normal, C_DIM, ov.text);
-    if (ov.extra[0]) t48_text_centre(&ui, SW / 2, OV_Y + 136, &t48_font_small, C_TEXT, ov.extra);
+    two_lines_centred(SW / 2, OV_Y + 76, OV_W - 80, &t48_font_normal, ink.dim, ov.text);
+    if (ov.extra[0]) t48_text_centre(&ui, SW / 2, OV_Y + 138, &t48_font_small, ink.dim, ov.extra);
     if (ov.kind == O_MSG) {
-        ui_button(OV_X + OV_W / 2 - 80, OV_Y + OV_H - 76, 160, 56, "OK", C_ACCENT);
+        ui_dialog_btn(OV_X + OV_W / 2 - 80, OV_Y + OV_H - 76, 160, 56, "OK", B_FIRST);
     } else {
-        ui_button(OV_X + OV_W / 2 - 170, OV_Y + OV_H - 76, 160, 56, ov.no ? ov.no : "Cancel", C_LINE);
-        ui_button(OV_X + OV_W / 2 + 10, OV_Y + OV_H - 76, 160, 56, ov.yes ? ov.yes : "Remove", ov.yes && ov.act != A_FORGET_KEYS ? C_ACCENT : C_BAD);
+        ui_dialog_btn(OV_X + OV_W / 2 - 170, OV_Y + OV_H - 76, 160, 56, ov.no ? ov.no : "Cancel", B_PLAIN);
+        ui_dialog_btn(OV_X + OV_W / 2 + 10, OV_Y + OV_H - 76, 160, 56, ov.yes ? ov.yes : "Remove", danger ? B_STOP : B_FIRST);
     }
 }
 
@@ -1447,19 +1457,19 @@ static void draw_door(void)
 {
     char b[200], net[80];
     int up;
-    t48_fill_alpha(&ui, 0, 0, SW, SH, C_BG, 200);
-    t48_round_fill(&ui, DOOR_X, DOOR_Y, DOOR_W, DOOR_H, 16, C_PANEL);
-    t48_fill(&ui, DOOR_X, DOOR_Y + 16, 6, DOOR_H - 32, C_ACCENT);
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 16, &t48_font_head, C_TEXT, "Add key");
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 66, &t48_font_small, C_DIM, "Run");
+    struct row_ink ink;
+    ui_dialog(DOOR_X, DOOR_Y, DOOR_W, DOOR_H, B_LIT);
+    ui_dialog_ink(&ink);
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 22, &t48_font_head, ink.text, "Add key");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 66, &t48_font_small, ink.dim, "Run");
     ui_network_status(net, sizeof net, &up);
     snprintf(b, sizeof b, "ssh-copy-id root@%s", up ? net : "ADDRESS");
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 90, &t48_font_head, C_TEXT, b);
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 140, &t48_font_small, C_DIM, "Host key must match");
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 162, &t48_font_small, C_TEXT, acc.host_key[0] ? acc.host_key : "unknown");
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 194, &t48_font_small, C_DIM, "Password");
-    if (door_password[0]) t48_text_centre(&ui, SW / 2, DOOR_Y + 216, &t48_font_big, C_ACCENT, door_password);
-    else t48_text_centre(&ui, SW / 2, DOOR_Y + 228, &t48_font_normal, C_DIM, "Hidden. Close and reopen for a new one");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 88, &t48_font_head, ink.text, b);
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 140, &t48_font_small, ink.dim, "Host key must match");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 162, &t48_font_small, ink.text, acc.host_key[0] ? acc.host_key : "unknown");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 196, &t48_font_small, ink.dim, "Password");
+    if (door_password[0]) t48_text_centre(&ui, SW / 2, DOOR_Y + 218, &t48_font_big, ink.text, door_password);
+    else t48_text_centre(&ui, SW / 2, DOOR_Y + 230, &t48_font_normal, ink.dim, "Hidden. Close and reopen for a new one");
     if (acc.door) {
         char left[16];
         door_left(left, sizeof left);
@@ -1467,9 +1477,9 @@ static void draw_door(void)
     } else {
         snprintf(b, sizeof b, "Opening");
     }
-    t48_text_centre(&ui, SW / 2, DOOR_Y + DOOR_H - 104, &t48_font_small, C_DIM, b);
-    ui_button(SW / 2 - 190, DOOR_Y + DOOR_H - 70, 180, 54, "Hide", C_LINE);
-    ui_button(SW / 2 + 10, DOOR_Y + DOOR_H - 70, 180, 54, "Close", C_BAD);
+    t48_text_centre(&ui, SW / 2, DOOR_Y + DOOR_H - 104, &t48_font_small, ink.dim, b);
+    ui_dialog_btn(SW / 2 - 190, DOOR_Y + DOOR_H - 70, 180, 54, "Hide", B_PLAIN);
+    ui_dialog_btn(SW / 2 + 10, DOOR_Y + DOOR_H - 70, 180, 54, "Close", B_STOP);
 }
 
 void settings_draw(void)
@@ -1478,25 +1488,15 @@ void settings_draw(void)
     if (kbd_open) { t48_kbd_draw(&kbd, &ui); return; }
     rebuild();   /* what the rows show may have changed underneath: the clock, the network, a download */
 
-    char hm[8];
-    time_t t = time(NULL);
-    struct tm tm;
-    localtime_r(&t, &tm);
-    strftime(hm, sizeof hm, "%H:%M", &tm);
-    t48_fill(&ui, 0, 0, SW, SH, C_BG);
-    t48_fill(&ui, 0, 0, SW, 44, C_BAR);
-    t48_fill(&ui, 0, 44, SW, 1, C_LINE);
-    t48_text(&ui, 18, 11, &t48_font_bold, C_ACCENT, "< Back");
-    t48_text(&ui, 130, 6, &t48_font_head, C_TEXT, title);
-    t48_text_right(&ui, SW - 18, 11, &t48_font_bold, C_DIM, hm);
-
+    ui_clear(C_BG);
+    ui_header(title, 1, 0);
     int w = list_w(), top = stack[depth].top;
     for (int i = top; i < nrows && i < top + VISIBLE; i++)
         draw_row(&rows[i], LIST_X, LIST_Y + (i - top) * ROW_H, w, i == stack[depth].sel);
     if (nrows > VISIBLE) {
         int x = SW - LIST_X - SCROLL_W + 8, hh = VISIBLE * ROW_H / 2 - 6;
-        ui_button(x, LIST_Y, SCROLL_W - 8, hh, "^", top > 0 ? C_KEY : C_PANEL);
-        ui_button(x, LIST_Y + hh + 6, SCROLL_W - 8, hh, "v", top + VISIBLE < nrows ? C_KEY : C_PANEL);
+        ui_btn(x, LIST_Y, SCROLL_W - 8, hh, "^", top > 0 ? B_PLAIN : B_OFF);
+        ui_btn(x, LIST_Y + hh + 6, SCROLL_W - 8, hh, "v", top + VISIBLE < nrows ? B_PLAIN : B_OFF);
     }
     if (ov.kind == O_DOOR) draw_door();
     else if (ov.kind != O_NONE) draw_overlay();

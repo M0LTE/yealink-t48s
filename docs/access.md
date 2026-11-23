@@ -17,7 +17,7 @@ The fingerprint is there so the first `ssh` from a computer can be checked again
 
 ## Getting your key onto the phone
 
-With SSH on and no keys, nobody can log in. **Add a key from your computer** opens password login for ten minutes, with a password the phone makes up and shows on its screen:
+With SSH on and no keys, nobody can log in. **Add key** opens password login for ten minutes, with a password the phone makes up and shows on its screen:
 
 ```
 ssh-copy-id root@10.45.0.214        # the address is on the screen too
@@ -25,7 +25,7 @@ ssh-copy-id root@10.45.0.214        # the address is on the screen too
 
 `ssh-copy-id` shows the host key (compare it with the screen), asks for the password, and puts your public key on the phone. The moment a key arrives the phone closes password login again and says so. It also closes after ten minutes, or at once with **Close now**. The password is never stored or logged; closing the screen with Hide leaves the door open but the password cannot be shown again, only replaced with a new one.
 
-After that the page lists each key by its kind and its comment (`ssh-ed25519 tom@desk`), and **Forget all keys** empties the list.
+After that the page lists each key by its kind and its comment (`ssh-ed25519 tom@desk`), and **Remove all keys** empties the list.
 
 With the web setup page turned on ([web.md](web.md)) there is an easier way: paste the public key into its Access page.
 
@@ -41,7 +41,7 @@ With the web setup page turned on ([web.md](web.md)) there is an easier way: pas
 `kernel/build.sh` adds `kernel/kexec-rootfs/root.authorized_keys`, if that file is in the build folder, to the image as `/etc/t48-dev/authorized_keys`. That makes it a **development build**:
 
 - SSH is on from boot, whatever the setting says, and those keys can always log in. `tools/ourkernel.sh ssh` and `tools/phone-input.sh` work with nobody at the phone, as before.
-- The Access page says so, and its SSH switch cannot be moved. Forgetting keys removes only keys added later.
+- The Access page says so, and its SSH switch cannot be moved. Removing keys removes only keys added later.
 
 The file is gitignored, CI has none, and Buildroot never sees it, so nothing published is a development build. A published image says `initramfs: no ... SSH is off until the owner turns it on at the screen` when it is built.
 

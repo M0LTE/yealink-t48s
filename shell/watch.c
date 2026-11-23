@@ -97,17 +97,17 @@ static int pairing(void)
 void watch_draw_overlay(void)
 {
     char spaced[16], from[96];
+    struct row_ink ink;
     if (!pairing()) return;
-    t48_round_fill(&ui, BOX_X - 3, BOX_Y - 3, BOX_W + 6, BOX_H + 6, 21, C_ACCENT);
-    t48_round_fill(&ui, BOX_X, BOX_Y, BOX_W, BOX_H, 18, C_PANEL);
-    t48_text_centre(&ui, SW / 2, BOX_Y + 22, &t48_font_head, C_TEXT, "Pairing code");
+    ui_dialog(BOX_X, BOX_Y, BOX_W, BOX_H, B_LIT);
+    ui_dialog_ink(&ink);
+    t48_text_centre(&ui, SW / 2, BOX_Y + 28, &t48_font_head, ink.text, "Pairing code");
     /* in two groups, as it is easier to carry across the room */
     size_t n = strlen(web.code), half = (n + 1) / 2;
     snprintf(spaced, sizeof spaced, "%.*s %s", (int)half, web.code, web.code + half);
-    t48_text_centre(&ui, SW / 2, BOX_Y + 96, &t48_font_huge, C_ACCENT, spaced);
-    snprintf(from, sizeof from, "Requested by %s", web.from[0] ? web.from : "a browser");
-    t48_text_centre(&ui, SW / 2, BOX_Y + BOX_H - 62, &t48_font_small, C_DIM, from);
-    t48_text_centre(&ui, SW / 2, BOX_Y + BOX_H - 36, &t48_font_small, C_DIM, "X to refuse");
+    t48_text_centre(&ui, SW / 2, BOX_Y + 76, &t48_font_huge, ink.text, spaced);
+    snprintf(from, sizeof from, "Requested by %s. X to refuse", web.from[0] ? web.from : "a browser");
+    t48_text_centre(&ui, SW / 2, BOX_Y + BOX_H - 48, &t48_font_normal, ink.dim, from);
 }
 
 /* the owner says no: the server throws the code away when it sees this file */

@@ -113,48 +113,14 @@ void ui_network_status(char *out, size_t n, int *up)
     freeifaddrs(list);
 }
 
-void ui_status_bar(const char *title)
-{
-    char net[80], hm[8], acc[120];
-    uint32_t acc_colour;
-    int up;
-    time_t t = time(NULL);
-    struct tm tm;
-
-    t48_fill(&ui, 0, 0, SW, 44, C_BAR);
-    t48_fill(&ui, 0, 44, SW, 1, C_LINE);
-    if (title) {
-        localtime_r(&t, &tm);
-        strftime(hm, sizeof hm, "%H:%M", &tm);
-        t48_text(&ui, 18, 6, &t48_font_head, C_TEXT, title);
-        t48_text_right(&ui, SW - 18, 11, &t48_font_bold, C_DIM, hm);
-    } else {
-        ui_network_status(net, sizeof net, &up);
-        t48_round_fill(&ui, 18, 17, 10, 10, 5, up ? C_GOOD : C_BAD);
-        t48_text(&ui, 36, 11, &t48_font_normal, C_TEXT, net);
-        phone_account_text(acc, sizeof acc, &acc_colour);
-        int w = t48_text_width(&t48_font_normal, acc);
-        t48_text_right(&ui, SW - 18, 11, &t48_font_normal, C_TEXT, acc);
-        t48_round_fill(&ui, SW - 18 - w - 20, 17, 10, 10, 5, acc_colour);
-    }
-}
-
-void ui_button(int x, int y, int w, int h, const char *label, uint32_t fill)
-{
-    /* dark lettering on the bright fills, light on the dark ones */
-    int bright = ((fill >> 16 & 255) * 3 + (fill >> 8 & 255) * 6 + (fill & 255)) / 10 > 120;
-    t48_round_fill(&ui, x, y, w, h, 10, fill);
-    t48_text_centre(&ui, x + w / 2, y + (h - t48_font_bold.height) / 2, &t48_font_bold, bright ? C_BG : C_TEXT, label);
-}
-
 /* five buttons along the bottom of the idle screen */
-#define IDLE_BTN_Y 392
+#define IDLE_BTN_Y 400
 #define IDLE_BTN_W 144
 #define IDLE_BTN_H 56
-#define IDLE_BTN_X(i) (20 + (i) * (IDLE_BTN_W + 10))
+#define IDLE_BTN_X(i) (24 + (i) * (IDLE_BTN_W + 8))
 enum { IB_APPS, IB_CALLS, IB_CONTACTS, IB_DND, IB_SETTINGS };
 /* one line for each account, when there is more than one */
-#define ACC_Y 294
+#define ACC_Y 292
 #define ACC_H 36
 #define ACC_MAX 6
 
@@ -206,15 +172,6 @@ static void acc_box(int k, int n, int *x, int *y, int *w)
     *y = ACC_Y - (n > 3 ? 40 : 0) + row * (ACC_H + 4);
 }
 
-/* a rounded label in the middle of the idle screen's row of notices; returns the x after it */
-static int notice_pill(int x, int y, const char *text, uint32_t fill)
-{
-    int w = t48_text_width(&t48_font_bold, text) + 44;
-    t48_round_fill(&ui, x, y, w, 42, 21, fill);
-    t48_text_centre(&ui, x + w / 2, y + (42 - t48_font_bold.height) / 2, &t48_font_bold, C_BG, text);
-    return x + w + 12;
-}
-
 static void draw_idle(void)
 {
     char hm[8], date[64];
@@ -224,63 +181,63 @@ static void draw_idle(void)
     localtime_r(&t, &tm);
     strftime(hm, sizeof hm, "%H:%M", &tm);
     strftime(date, sizeof date, "%A %e %B %Y", &tm);
-    t48_fill(&ui, 0, 0, SW, SH, C_BG);
-    ui_status_bar(NULL);
-    t48_text_centre(&ui, SW / 2, 106, &t48_font_huge, C_TEXT, hm);
-    t48_text_centre(&ui, SW / 2, 248, &t48_font_head, C_DIM, date);
+    ui_clear(C_BG);
+    ui_header_idle();
     /* the accounts, when there are several: which are registered, and a touch dials from one */
     int naccts = phone_accounts(), several = naccts > 1;
+    t48_text_centre(&ui, SW / 2, several ? 72 : 112, &t48_font_huge, C_TEXT, hm);
+    t48_text_centre(&ui, SW / 2, several ? 200 : 248, &t48_font_head, C_DIM, date);
     for (int i = 0; several && i < ACC_MAX; i++) {
         char line[80];
         uint32_t c;
         int def, x, y, w;
+        struct row_ink ink;
         if (!phone_account_line(i, line, sizeof line, &c, &def)) break;
         acc_box(i, naccts, &x, &y, &w);
-        t48_round_fill(&ui, x, y, w, ACC_H, 10, C_PANEL);
-        t48_round_fill(&ui, x + 12, y + 13, 10, 10, 5, c);
-        t48_text_fit(&ui, x + 30, y + (ACC_H - t48_font_normal.height) / 2, w - (def ? 108 : 40), &t48_font_normal, C_TEXT, line);
-        if (def) t48_text_right(&ui, x + w - 10, y + (ACC_H - t48_font_small.height) / 2, &t48_font_small, C_ACCENT, "Default");
+        ui_tile(x, y, w, ACC_H, 0, &ink);
+        ui_lamp(x + 12, y + ACC_H / 2 - 6, c);
+        t48_text_fit(&ui, x + 34, y + (ACC_H - t48_font_normal.height) / 2, w - (def ? 112 : 44), &t48_font_normal, ink.text, line);
+        if (def) t48_text_right(&ui, x + w - 12, y + (ACC_H - t48_font_small.height) / 2, &t48_font_small, ink.dim, "Default");
     }
     /* One row of notices, the most important first: the standing notice from a file
      * (t48-live: nothing is installed, which the owner must not lose sight of), missed
      * calls, voice messages, do not disturb. What does not fit the row is left out from
      * the end: do not disturb shows on its button too, and messages on the lamp. */
     char note[4][96], file[2][96];
-    uint32_t fill[4];
-    int nn = 0, total = 0, ny = several ? 336 : 312;
+    int role[4];
+    int nn = 0, total = 0, ny = several ? 340 : 320;
     notice_read(file);
     if (file[0][0]) {
         snprintf(note[nn], sizeof note[0], "%s", file[0]);
-        for (size_t l = strlen(note[0]); l && t48_text_width(&t48_font_bold, note[0]) + 44 > SW - 24; ) note[0][--l] = 0;
-        fill[nn++] = C_TEXT;
+        for (size_t l = strlen(note[0]); l && ui_notice_width(note[0]) > SW - 24; ) note[0][--l] = 0;
+        role[nn++] = B_FIRST;
     }
     if (phone_missed()) {
         snprintf(note[nn], sizeof note[0], "%d missed call%s", phone_missed(), phone_missed() == 1 ? "" : "s");
-        fill[nn++] = C_BAD;
+        role[nn++] = B_STOP;
     }
     if (phone_messages()) {
         snprintf(note[nn], sizeof note[0], "%d new message%s", phone_messages(), phone_messages() == 1 ? "" : "s");
-        fill[nn++] = C_ACCENT;
+        role[nn++] = B_LIT;
     }
     if (phone_dnd()) {
         snprintf(note[nn], sizeof note[0], "Do not disturb");
-        fill[nn++] = C_BAD;
+        role[nn++] = B_LIT;
     }
     idle_notices = 0;
     for (int i = 0; i < nn; i++) {
-        int w = t48_text_width(&t48_font_bold, note[i]) + 44 + (i ? 12 : 0);
+        int w = ui_notice_width(note[i]) + (i ? 12 : 0);
         if (total + w > SW - 24) break;
         total += w;
         idle_notices++;
     }
-    for (int i = 0, x = (SW - total) / 2; i < idle_notices; i++) x = notice_pill(x, ny, note[i], fill[i]);
+    for (int i = 0, x = (SW - total) / 2; i < idle_notices; i++) x = ui_notice(x, ny, note[i], role[i]);
     static const char *const labels[5] = {"Apps", "Calls", "Contacts", "DND", "Settings"};
     for (int i = 0; i < 5; i++)
-        ui_button(IDLE_BTN_X(i), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, labels[i],
-                  i == IB_DND && phone_dnd() ? C_BAD : C_PANEL);
-    /* the bottom line: the notice's second line (how to go back to Yealink) when there is one */
-    if (file[1][0] && t48_text_width(&t48_font_small, file[1]) > SW - 20) t48_text_fit(&ui, 10, 456, SW - 20, &t48_font_small, C_DIM, file[1]);
-    else if (file[1][0]) t48_text_centre(&ui, SW / 2, 456, &t48_font_small, C_DIM, file[1]);
+        ui_btn(IDLE_BTN_X(i), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, labels[i], i == IB_DND && phone_dnd() ? B_LIT : B_PLAIN);
+    /* the notice's second line (how to go back to Yealink), above the buttons */
+    if (file[1][0] && t48_text_width(&t48_font_small, file[1]) > SW - 20) t48_text_fit(&ui, 10, 372, SW - 20, &t48_font_small, C_DIM, file[1]);
+    else if (file[1][0]) t48_text_centre(&ui, SW / 2, 372, &t48_font_small, C_DIM, file[1]);
 }
 
 /* launcher grid: 4 across, 2 down, a page at a time */
@@ -291,8 +248,6 @@ static void draw_idle(void)
 #define TILE_GAP 20
 #define GRID_X ((SW - COLS * TILE_W - (COLS - 1) * TILE_GAP) / 2)
 #define GRID_Y 66
-
-static const uint32_t tile_colours[] = {0x4CC2FF, 0xB68CFF, 0xE8C27A, 0x6FE3C1, 0xFF8FA3, 0x9AD0FF, 0xD7E36F, 0xFFB86B};
 
 static void tile_box(int slot, int *x, int *y)
 {
@@ -305,47 +260,43 @@ static void tile_box(int slot, int *x, int *y)
 
 static void draw_launcher(void)
 {
-    t48_fill(&ui, 0, 0, SW, SH, C_BG);
-    ui_status_bar("Apps");
+    ui_clear(C_BG);
+    ui_header("Apps", 1, 0);
     if (sel >= NTILES) sel = NTILES - 1;
     int per = COLS * ROWS, page = sel / per, pages = (NTILES + per - 1) / per;
     for (int slot = 0; slot < per; slot++) {
         int i = page * per + slot, x, y;
+        struct row_ink ink;
         if (i >= NTILES) break;
         tile_box(slot, &x, &y);
-        if (i == sel) t48_round_fill(&ui, x - 3, y - 3, TILE_W + 6, TILE_H + 6, 15, C_ACCENT);
-        t48_round_fill(&ui, x, y, TILE_W, TILE_H, 12, C_PANEL);
+        ui_tile(x, y, TILE_W, TILE_H, i == sel, &ink);
         int ix = x + (TILE_W - 96) / 2, iy = y + 16;
         if (i == napps) {
-            t48_round_fill(&ui, ix, iy, 96, 96, 20, C_KEY);
-            t48_fill(&ui, ix + 44, iy + 24, 8, 48, C_ACCENT);
-            t48_fill(&ui, ix + 24, iy + 44, 48, 8, C_ACCENT);
-            t48_text_centre(&ui, x + TILE_W / 2, y + 122, &t48_font_bold, C_TEXT, "Get apps");
+            ui_icon(ix, iy, 96, "+");
+            t48_text_centre(&ui, x + TILE_W / 2, y + 124, &t48_font_bold, ink.text, "Get apps");
             continue;
         }
         const struct manifest *m = &apps[i];
         if (m->icon.px) {
             t48_blit(&ui, ix + (96 - m->icon.w) / 2, iy + (96 - m->icon.h) / 2, m->icon.px, m->icon.w, m->icon.h, m->icon.stride);
         } else {
-            unsigned h = 0;
             char letter[2] = {m->name[0], 0};
-            for (const char *p = m->id; *p; p++) h = h * 31 + (unsigned char)*p;
             if (letter[0] >= 'a' && letter[0] <= 'z') letter[0] -= 32;
-            t48_round_fill(&ui, ix, iy, 96, 96, 20, tile_colours[h % 8]);
-            t48_text_centre(&ui, ix + 48, iy + 48 - t48_font_big.height / 2, &t48_font_big, C_BG, letter);
+            ui_icon(ix, iy, 96, letter);
         }
         int tw = t48_text_width(&t48_font_bold, m->name);
-        if (tw > TILE_W - 16) t48_text_fit(&ui, x + 8, y + 122, TILE_W - 16, &t48_font_bold, C_TEXT, m->name);
-        else t48_text_centre(&ui, x + TILE_W / 2, y + 122, &t48_font_bold, C_TEXT, m->name);
-        if (!strcmp(app_id(), m->id))
-            t48_text_centre(&ui, x + TILE_W / 2, y + 152, &t48_font_small, C_GOOD, "Open");
-        else if (m->version[0])
-            t48_text_centre(&ui, x + TILE_W / 2, y + 152, &t48_font_small, C_FAINT, m->version);
+        if (tw > TILE_W - 16) t48_text_fit(&ui, x + 8, y + 124, TILE_W - 16, &t48_font_bold, ink.text, m->name);
+        else t48_text_centre(&ui, x + TILE_W / 2, y + 124, &t48_font_bold, ink.text, m->name);
+        if (!strcmp(app_id(), m->id)) {
+            int w = t48_text_width(&t48_font_small, "Open") + 18;
+            ui_lamp(x + (TILE_W - w) / 2, y + 156, C_GOOD);
+            t48_text(&ui, x + (TILE_W - w) / 2 + 18, y + 153, &t48_font_small, ink.dim, "Open");
+        }
     }
     if (pages > 1) {
         char b[24];
         snprintf(b, sizeof b, "%d/%d", page + 1, pages);
-        t48_text_centre(&ui, SW / 2, 14, &t48_font_small, C_DIM, b);
+        t48_text_right(&ui, SW - 100, (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, b);
     }
 }
 
@@ -356,21 +307,22 @@ static void draw_launcher(void)
 
 static void draw_message(void)
 {
-    t48_fill(&ui, 0, 0, SW, SH, C_BG);
-    ui_status_bar("Apps");
-    t48_round_fill(&ui, 80, 96, 640, 290, 16, C_PANEL);
-    t48_fill(&ui, 80, 112, 6, 258, C_BAD);
-    t48_text_centre(&ui, SW / 2, 126, &t48_font_head, C_TEXT, msg_title);
+    struct row_ink ink;
+    ui_clear(C_BG);
+    ui_header("Apps", 1, 0);
+    ui_dialog(80, 96, 640, 290, B_STOP);
+    ui_dialog_ink(&ink);
+    t48_text_centre(&ui, SW / 2, 132, &t48_font_head, ink.text, msg_title);
     int w = t48_text_width(&t48_font_normal, msg_text);
-    if (w > 600) t48_text_fit(&ui, 100, 196, 600, &t48_font_normal, C_DIM, msg_text);
-    else t48_text_centre(&ui, SW / 2, 196, &t48_font_normal, C_DIM, msg_text);
-    ui_button(MSG_BTN_X, MSG_BTN_Y, MSG_BTN_W, MSG_BTN_H, "OK", C_ACCENT);
+    if (w > 600) t48_text_fit(&ui, 100, 196, 600, &t48_font_normal, ink.dim, msg_text);
+    else t48_text_centre(&ui, SW / 2, 196, &t48_font_normal, ink.dim, msg_text);
+    ui_dialog_btn(MSG_BTN_X, MSG_BTN_Y, MSG_BTN_W, MSG_BTN_H, "OK", B_FIRST);
 }
 
 static void draw_starting(void)
 {
     char b[96];
-    t48_fill(&ui, 0, 0, SW, SH, C_BG);
+    ui_clear(C_BG);
     snprintf(b, sizeof b, "Starting %s", app_id());
     t48_text_centre(&ui, SW / 2, 210, &t48_font_head, C_DIM, b);
 }
@@ -622,7 +574,9 @@ void shell_touch(int state, int x, int y)
     if (scr == SCR_SETTINGS) { settings_touch(state, x, y); return; }
     if (scr == SCR_CONTACTS) { contacts_touch(state, x, y); return; }
     if (state != T48_TOUCH_DOWN) return;
-    if (scr == SCR_CALL) {
+    if ((scr == SCR_LAUNCHER || scr == SCR_HISTORY) && y < HEAD_H && x < 130) {
+        shell_key(T48_KEY_BACK, 1);   /* the way back in the header */
+    } else if (scr == SCR_CALL) {
         phone_touch(x, y);
     } else if (scr == SCR_HISTORY) {
         phone_history_touch(x, y);
@@ -842,6 +796,7 @@ int main(int argc, char **argv)
     fcntl(chld_pipe[0], F_SETFD, FD_CLOEXEC);
     fcntl(chld_pipe[1], F_SETFD, FD_CLOEXEC);
 
+    ui_init();
     settings_init();
     phone_init();
     if (be->init() < 0) return 1;

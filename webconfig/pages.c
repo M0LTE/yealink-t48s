@@ -1261,8 +1261,9 @@ static void page_backup(struct req *r)
     H("<div class='card'><h2>Restore</h2><p class='dim'>Replaces each section the file contains. Passwords missing from the file are kept.</p>");
     form_begin(r, "/backup/restore", "enctype='multipart/form-data'");
     H("<label class='field'><span>Backup file</span><input type='file' name='file' accept='.txt,.t48backup,text/plain' required></label>");
+    H("<div class='actions'>");
     sure_box();
-    H("<div class='actions'><button type='submit' class='bad'>Restore</button></div></form></div>");
+    H("<button type='submit' class='bad'>Restore</button></div></form></div>");
     page_end(r);
 }
 

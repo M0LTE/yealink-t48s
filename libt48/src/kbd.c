@@ -12,13 +12,33 @@
 #define REVEAL_MS 1200  /* how long the last character of a password shows */
 #define FLASH_MS 120
 
-#define K_BG T48_RGB(8, 10, 16)
-#define K_FIELD T48_RGB(22, 29, 43)
-#define K_KEY T48_RGB(34, 44, 64)
-#define K_SIDE T48_RGB(24, 31, 46)
-#define K_TEXT T48_RGB(226, 232, 240)
-#define K_DIM T48_RGB(128, 142, 162)
-#define K_ACCENT T48_RGB(255, 176, 60)
+/* as the shell's Switchboard look has it (shell/ui.c); the shell sets this at start */
+t48_kbd_look t48_kbd_style = {
+    .bg = 0x000000, .field = 0x171715, .field_text = 0xF4F3EE, .label = 0xA3A299,
+    .key = 0x24241F, .side = 0x171715, .text = 0xF4F3EE, .dim = 0xA3A299,
+    .accent = 0xF4F3EE, .on_accent = 0x000000, .cursor = 0xFFB000, .edge = 0, .edge_kind = 0, .radius = 3,
+};
+#define K (&t48_kbd_style)
+
+/* rub out: an arrow pointing left */
+static void rubout(t48_surface *s, int cx, int cy, uint32_t c)
+{
+    for (int j = -8; j <= 8; j++) t48_fill(s, cx - 12 + (j < 0 ? -j : j), cy + j, 4, 1, c);
+    t48_fill(s, cx - 10, cy - 1, 26, 3, c);
+}
+
+static void keycap(t48_surface *s, int x, int y, int w, int h, uint32_t fill)
+{
+    if (K->edge_kind == 1) {
+        t48_round_fill(s, x, y, w, h, K->radius, K->edge);
+        t48_round_fill(s, x + 1, y + 1, w - 2, h - 2, K->radius > 1 ? K->radius - 1 : K->radius, fill);
+    } else if (K->edge_kind == 2) {
+        t48_round_fill(s, x, y + 3, w, h - 3, K->radius, t48_mix(fill, 0x000000, 70));
+        t48_round_fill(s, x, y, w, h - 3, K->radius, fill);
+    } else {
+        t48_round_fill(s, x, y, w, h, K->radius, fill);
+    }
+}
 
 enum { A_NONE = 0, A_SHIFT = 1, A_BKSP, A_PAGE, A_LEFT, A_RIGHT, A_CANCEL, A_DONE };  /* above 31: that character */
 
@@ -195,11 +215,11 @@ void t48_kbd_draw(t48_kbd *k, t48_surface *s)
 
     k->w = s->w;
     k->h = s->h;
-    t48_fill(s, 0, 0, s->w, s->h, K_BG);
-    t48_text_fit(s, 16, 10, s->w - 260, &t48_font_bold, K_DIM, k->title);
+    t48_fill(s, 0, 0, s->w, s->h, K->bg);
+    t48_text_fit(s, 16, 10, s->w - 120, &t48_font_bold, K->label, k->title);
     char m[40];
     snprintf(m, sizeof m, "# %s", mode_label[k->mode]);
-    t48_text_right(s, s->w - 16, 12, &t48_font_small, K_DIM, m);
+    t48_text_right(s, s->w - 16, 10, &t48_font_bold, K->label, m);
 
     /* what to show: a password is stars, but for the character just typed */
     memcpy(shown, k->text, (size_t)k->len + 1);
@@ -209,7 +229,8 @@ void t48_kbd_draw(t48_kbd *k, t48_surface *s)
 
     /* the field, scrolled so the cursor is in view */
     int fx = 16, fy = 44, fw = s->w - 32, fh = 58, pad = 14, room = fw - 2 * pad, first = 0;
-    t48_round_fill(s, fx, fy, fw, fh, 10, K_FIELD);
+    if (K->edge_kind == 1) t48_round_fill(s, fx - 1, fy - 1, fw + 2, fh + 2, K->radius + 1, K->edge);
+    t48_round_fill(s, fx, fy, fw, fh, K->radius, K->field);
     for (;;) {
         char c = shown[k->cur];
         shown[k->cur] = 0;
@@ -225,24 +246,24 @@ void t48_kbd_draw(t48_kbd *k, t48_surface *s)
         one[0] = shown[i];
         if (x + t48_text_width(f, one) > fx + fw - pad) break;
         /* the letter a keypad press may still change is underlined */
-        if (i == k->cur - 1 && k->tap_until) t48_fill(s, x, ty + f->height, t48_text_width(f, one), 2, K_ACCENT);
-        x = t48_text(s, x, ty, f, K_TEXT, one);
+        if (i == k->cur - 1 && k->tap_until) t48_fill(s, x, ty + f->height, t48_text_width(f, one), 2, K->cursor);
+        x = t48_text(s, x, ty, f, K->field_text, one);
     }
-    t48_fill(s, cx, fy + 10, 2, fh - 20, K_ACCENT);
+    t48_fill(s, cx, fy + 10, 2, fh - 20, K->cursor);
 
     int n = layout(k, b);
     for (int i = 0; i < n; i++) {
         int a = b[i].act, hot = k->flash == a && k->flash_until;
-        uint32_t fill = a == A_DONE ? K_ACCENT : a < 32 ? K_SIDE : K_KEY;
+        uint32_t fill = a == A_DONE ? K->accent : a < 32 ? K->side : K->key;
         const char *label = one;
         const t48_font *lf = &t48_font_head;
-        if (a == A_SHIFT && k->shift) fill = k->shift == 2 ? K_ACCENT : K_KEY;
-        if (hot) fill = t48_mix(fill, K_TEXT, 90);
+        if (a == A_SHIFT && k->shift) fill = k->shift == 2 ? K->accent : K->key;
+        if (hot) fill = t48_mix(fill, K->text, 90);
         one[0] = (char)a;
         if (k->page == 0 && k->shift && a >= 'a' && a <= 'z') one[0] = (char)(a - 32);
         switch (a) {
         case A_SHIFT: label = k->shift == 2 ? "Caps" : "Shift"; lf = &t48_font_bold; break;
-        case A_BKSP: label = "Del"; lf = &t48_font_bold; break;
+        case A_BKSP: label = ""; break;
         case A_PAGE: label = page_label[k->page]; lf = &t48_font_bold; break;
         case A_LEFT: label = "<"; break;
         case A_RIGHT: label = ">"; break;
@@ -250,9 +271,10 @@ void t48_kbd_draw(t48_kbd *k, t48_surface *s)
         case A_DONE: label = "Done"; lf = &t48_font_bold; break;
         case ' ': label = "Space"; lf = &t48_font_normal; break;
         }
-        t48_round_fill(s, b[i].x, b[i].y, b[i].w, b[i].h, 8, fill);
-        int dark = a == A_DONE || (a == A_SHIFT && k->shift == 2);
-        t48_text_centre(s, b[i].x + b[i].w / 2, b[i].y + (b[i].h - lf->height) / 2, lf,
-                        dark ? K_BG : a == ' ' ? K_DIM : K_TEXT, label);
+        keycap(s, b[i].x, b[i].y, b[i].w, b[i].h, fill);
+        int dark = a == A_DONE || (a == A_SHIFT && k->shift == 2), lip = K->edge_kind == 2 ? 3 : 0;
+        uint32_t ink = dark ? K->on_accent : a == ' ' ? K->dim : K->text;
+        if (a == A_BKSP) rubout(s, b[i].x + b[i].w / 2, b[i].y + (b[i].h - lip) / 2, ink);
+        t48_text_centre(s, b[i].x + b[i].w / 2, b[i].y + (b[i].h - lip - lf->height) / 2, lf, ink, label);
     }
 }

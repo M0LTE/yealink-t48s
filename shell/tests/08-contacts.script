@@ -54,7 +54,7 @@ run grep -qx 'amy|1003' simdata/state/contacts
 run grep -qx 'bob|1002' simdata/state/contacts
 shot shots/contacts.png
 # Edit: change amy's number
-touch 396 410
+touch 500 410
 expectstate kbd.text amy
 key ok
 expectstate kbd.text 1003
@@ -115,12 +115,12 @@ key x
 expect idle
 # ---- delete a contact: it asks ----
 key left
-touch 546 410
+touch 690 410
 expectstate contacts.mode confirm
 shot shots/contacts-delete.png
 key x
 expectstate contacts 3
-touch 546 410
+touch 690 410
 key ok
 expectstate contacts 2
 key x

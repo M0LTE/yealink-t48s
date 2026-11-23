@@ -323,7 +323,7 @@ static void respond(struct req *r, int status, const char *type, const char *bod
         "X-Content-Type-Options: nosniff\r\n"
         "X-Frame-Options: DENY\r\n"
         "Referrer-Policy: same-origin\r\n"
-        "Content-Security-Policy: default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; "
+        "Content-Security-Policy: default-src 'none'; style-src 'self'; script-src 'self'; font-src 'self'; form-action 'self'; "
         "frame-ancestors 'none'; base-uri 'none'\r\n"
         "%s\r\n", status, what, type, len, extra_headers);
     send_all(r->fd, head, (size_t)n);
@@ -846,6 +846,12 @@ static void handle(struct req *r)
     if (!post && !strcmp(r->path, "/style.css")) {
         add_header("Cache-Control: max-age=600\r\n");
         respond(r, 200, "text/css; charset=utf-8", asset_css, strlen(asset_css));
+        goto done;
+    }
+    if (!post && (!strcmp(r->path, "/regular.woff2") || !strcmp(r->path, "/bold.woff2"))) {
+        int bold = r->path[1] == 'b';
+        add_header("Cache-Control: max-age=86400\r\n");
+        respond(r, 200, "font/woff2", (const char *)(bold ? asset_font_bold : asset_font_regular), bold ? asset_font_bold_len : asset_font_regular_len);
         goto done;
     }
     if (!post && !strcmp(r->path, "/t48.js")) {

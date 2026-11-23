@@ -1,0 +1,33 @@
+# The six screens every direction is shown with (docs/design/README.md). Run by render.sh
+# against fakesip.py, so the account is registered and the call is answered.
+wait 2500
+expect idle
+shot shots/phone-idle.png
+key ok
+expect launcher
+shot shots/phone-launcher.png
+key x
+key 1
+key 0
+key 0
+key 2
+shot shots/phone-dialler.png
+hook off
+waitstate phone incall 4000
+wait 2300
+shot shots/phone-in-call.png
+hook on
+wait 3200
+expect idle
+key down
+expect settings
+shot shots/phone-settings.png
+key ok
+key ok
+expectstate settings.page sip
+key down
+key down
+key ok
+expectstate kbd open
+shot shots/phone-keyboard.png
+quit

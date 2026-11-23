@@ -81,5 +81,7 @@ void page_overview(struct req *r);
 /* ---------- assets.c ---------- */
 
 extern const char asset_css[], asset_js[];
+extern const unsigned char asset_font_regular[], asset_font_bold[];
+extern const unsigned asset_font_regular_len, asset_font_bold_len;
 
 #endif

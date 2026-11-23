@@ -68,22 +68,65 @@ void logmsg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /* ---------- drawing shared by the shell's own screens ---------- */
 
-#define C_BG T48_RGB(8, 10, 16)
-#define C_BAR T48_RGB(18, 24, 36)
-#define C_PANEL T48_RGB(22, 29, 43)
-#define C_KEY T48_RGB(34, 44, 64)
-#define C_LINE T48_RGB(40, 52, 72)
-#define C_TEXT T48_RGB(226, 232, 240)
-#define C_DIM T48_RGB(128, 142, 162)
-#define C_FAINT T48_RGB(78, 90, 110)
-#define C_ACCENT T48_RGB(255, 176, 60)
-#define C_GOOD T48_RGB(110, 214, 130)
-#define C_BAD T48_RGB(240, 96, 86)
+/* The look is ui.c's: a palette and the parts screens are made of (docs/design/README.md). */
+enum { EDGE_NONE, EDGE_OUTLINE, EDGE_LIP };          /* how a key or a plain button is finished */
+enum { ROWS_BLOCK, ROWS_RULED, ROWS_SOFT };          /* how the rows of a list are told apart */
+struct theme {
+    const char *name;
+    uint32_t bg, panel, key, line;                   /* the ground, a quiet box, a key, a rule */
+    uint32_t text, dim, faint;                       /* ink on the ground */
+    uint32_t accent, on_accent;                      /* lit: something is switched on, or wants attention */
+    uint32_t good, on_good, bad, on_bad;             /* go and stop */
+    uint32_t sel, on_sel, on_sel_dim;                /* the selected row */
+    uint32_t head, on_head, on_head_dim;             /* the header */
+    uint32_t first, on_first;                        /* the one button that matters most */
+    uint32_t ground[3];                              /* the ground while a call rings, is up, is on hold */
+    int r, r_key;                                    /* corner radii; r_key 100 is a round key */
+    int edge;
+    uint32_t edge_c;
+    int rows, head_rule;
+};
+extern const struct theme *T;
+#define C_BG (T->bg)
+#define C_PANEL (T->panel)
+#define C_KEY (T->key)
+#define C_LINE (T->line)
+#define C_TEXT (T->text)
+#define C_DIM (T->dim)
+#define C_FAINT (T->faint)
+#define C_ACCENT (T->accent)
+#define C_GOOD (T->good)
+#define C_BAD (T->bad)
+
+#define HEAD_H 48                            /* the header */
+#define TAG_H 34
+enum { B_PLAIN, B_FIRST, B_GO, B_STOP, B_LIT, B_OFF };   /* what a button is for */
+struct row_ink { uint32_t text, dim, faint; };
 
 extern t48_surface ui;                       /* the shell's own picture of the screen */
-void ui_status_bar(const char *title);
-/* a rounded button; fill is its colour, and the label is dark on bright fills */
-void ui_button(int x, int y, int w, int h, const char *label, uint32_t fill);
+void ui_init(void);
+void ui_clear(uint32_t ground);
+uint32_t ui_ground(void);
+void ui_header(const char *title, int back, int lamp);   /* lamp: 0, or B_GO, B_LIT, B_STOP */
+void ui_header_idle(void);
+void ui_btn(int x, int y, int w, int h, const char *label, int role);
+void ui_key(int x, int y, int w, int h, const char *label);
+void ui_panel(int x, int y, int w, int h);
+void ui_row(int x, int y, int w, int h, int selected, struct row_ink *ink);
+int ui_tag(int x, int y, const char *text, int role);
+int ui_tag_width(const char *text);
+void ui_switch(int rx, int y, int h, int on, int selected);
+void ui_level(int x, int y, int w, int h, int level, int max, int disabled, int selected);
+void ui_lamp(int x, int y, uint32_t colour);
+void ui_chevron(int cx, int cy, int s, int dir, int t, uint32_t c);
+void ui_dialog(int x, int y, int w, int h, int tone);
+void ui_popup(int x, int y, int w, int h, int tone);
+void ui_dialog_ink(struct row_ink *ink);
+void ui_dialog_btn(int x, int y, int w, int h, const char *label, int role);
+int ui_notice(int x, int y, const char *text, int role);
+int ui_notice_width(const char *text);
+void ui_tile(int x, int y, int w, int h, int selected, struct row_ink *ink);
+void ui_icon(int x, int y, int s, const char *letter);
 void ui_network_status(char *out, size_t n, int *up);
 int ui_inside(int x, int y, int bx, int by, int bw, int bh);
 

@@ -8,6 +8,10 @@ O ?= build
 CFLAGS ?= -O2
 CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections -Iinclude
 
+# the font tables; another set can be tried without touching the committed one
+FONTS ?= src/fonts_gen.c
+FONTSET ?= b612
+
 OBJ = $(O)/draw.o $(O)/image.o $(O)/json.o $(O)/app.o $(O)/ws.o $(O)/kbd.o $(O)/fonts_gen.o
 
 all: $(O)/libt48.a $(O)/examples/clock/clock
@@ -19,6 +23,10 @@ $(O)/%.o: src/%.c include/t48.h include/t48_proto.h
 	@mkdir -p $(O)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+$(O)/fonts_gen.o: $(FONTS) include/t48.h
+	@mkdir -p $(O)
+	$(CC) $(CFLAGS) -c -o $@ $(FONTS)
+
 # the example app, laid out as an installed app: a folder with a manifest
 $(O)/examples/clock/clock: examples/clock/clock.c $(O)/libt48.a examples/clock/manifest.json examples/clock/icon.ppm
 	@mkdir -p $(O)/examples/clock
@@ -27,7 +35,7 @@ $(O)/examples/clock/clock: examples/clock/clock.c $(O)/libt48.a examples/clock/m
 
 # regenerate the committed font tables (needs python3-pil and the DejaVu fonts)
 fonts:
-	python3 tools/mkfont.py src/fonts_gen.c
+	python3 tools/mkfont.py src/fonts_gen.c $(FONTSET)
 
 clean:
 	rm -rf build build-arm

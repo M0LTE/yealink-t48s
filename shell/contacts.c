@@ -22,8 +22,8 @@
 #define ROWS 6
 #define ROW_Y0 54
 #define ROW_STEP 52
-#define BTN_Y 384
-#define BTN_H 54
+#define BTN_Y 400
+#define BTN_H 56
 
 struct contact { char name[64], number[64]; };
 static struct contact list[MAX_CONTACTS];   /* sorted by name */
@@ -36,8 +36,8 @@ static int editing;                 /* index being changed, -1 for a new one */
 static char new_name[64];
 static char add_number[64];         /* a new contact's number, when it is already known */
 
-static const struct { int x, w; const char *label; } btn[5] = {
-    {16, 150, "Dial"}, {176, 140, "Add"}, {326, 140, "Edit"}, {476, 140, "Delete"}, {626, 158, "Back"},
+static const struct { int x, w; const char *label; } btn[4] = {
+    {16, 180, "Dial"}, {206, 200, "Add"}, {416, 170, "Edit"}, {596, 188, "Delete"},
 };
 
 static int by_name(const void *a, const void *b)
@@ -191,7 +191,6 @@ static void do_button(int b)
     case 1: editing = -1; add_number[0] = 0; ask_name(""); break;
     case 2: if (sel < n) { editing = sel; ask_name(list[sel].name); } break;
     case 3: if (sel < n) mode = M_CONFIRM; break;
-    case 4: shell_show_contacts(0); break;
     }
 }
 
@@ -242,10 +241,11 @@ void contacts_touch(int state, int x, int y)
             shell_phone_changed();
             return;
         }
-    for (int b = 0; b < 5; b++)
+    if (y < HEAD_H && x < 130) { shell_show_contacts(0); return; }
+    for (int b = 0; b < 4; b++)
         if (ui_inside(x, y, btn[b].x, BTN_Y, btn[b].w, BTN_H)) {
             do_button(b);
-            if (b != 4 && b != 0) shell_phone_changed();
+            if (b != 0) shell_phone_changed();
             return;
         }
 }
@@ -267,35 +267,33 @@ void contacts_tick(long long now)
 void contacts_draw(void)
 {
     if (mode == M_NAME || mode == M_NUMBER) { t48_kbd_draw(&kbd, &ui); return; }
-    t48_fill(&ui, 0, 0, SW, SH, C_BG);
-    ui_status_bar("Contacts");
-    if (!n) {
-        t48_text_centre(&ui, SW / 2, 180, &t48_font_head, C_DIM, "No contacts");
-    }
+    ui_clear(C_BG);
+    ui_header("Contacts", 1, 0);
+    if (!n) t48_text_centre(&ui, SW / 2, 200, &t48_font_head, C_DIM, "No contacts");
     int top = sel >= ROWS ? sel - ROWS + 1 : 0;
     for (int r = 0; r < ROWS && top + r < n; r++) {
         const struct contact *c = &list[top + r];
         int y = ROW_Y0 + r * ROW_STEP;
-        t48_round_fill(&ui, 16, y, SW - 32, 46, 10, top + r == sel ? C_KEY : C_PANEL);
-        if (top + r == sel) t48_fill(&ui, 16, y + 8, 5, 30, C_ACCENT);
-        t48_text_fit(&ui, 36, y + 12, 440, &t48_font_bold, C_TEXT, c->name);
-        t48_text_right(&ui, SW - 34, y + 12, &t48_font_normal, C_DIM, c->number);
+        struct row_ink ink;
+        ui_row(16, y, SW - 32, 46, top + r == sel, &ink);
+        t48_text_fit(&ui, 36, y + 12, 440, &t48_font_bold, ink.text, c->name);
+        t48_text_right(&ui, SW - 34, y + 12, &t48_font_normal, ink.dim, c->number);
     }
     if (n > ROWS) {
         char b[24];
-        snprintf(b, sizeof b, "%d of %d", sel + 1, n);
-        t48_text_right(&ui, SW - 90, 14, &t48_font_small, C_DIM, b);
+        snprintf(b, sizeof b, "%d/%d", sel + 1, n);
+        t48_text_right(&ui, SW - 100, (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, b);
     }
     if (mode == M_CONFIRM && sel < n) {
         char b[120];
         snprintf(b, sizeof b, "Delete %.40s?", list[sel].name);
-        t48_text_fit(&ui, 24, BTN_Y + 16, 380, &t48_font_normal, C_TEXT, b);
-        ui_button(416, BTN_Y, 170, BTN_H, "Cancel", C_PANEL);
-        ui_button(596, BTN_Y, 188, BTN_H, "Delete", C_BAD);
+        t48_text_fit(&ui, 24, BTN_Y + (BTN_H - t48_font_bold.height) / 2, 380, &t48_font_bold, C_TEXT, b);
+        ui_btn(416, BTN_Y, 170, BTN_H, "Cancel", B_PLAIN);
+        ui_btn(596, BTN_Y, 188, BTN_H, "Delete", B_STOP);
     } else {
-        for (int b = 0; b < 5; b++) {
-            int usable = b == 1 || b == 4 || n > 0;
-            ui_button(btn[b].x, BTN_Y, btn[b].w, BTN_H, btn[b].label, !usable ? C_PANEL : b == 0 ? C_GOOD : b == 1 ? C_KEY : C_PANEL);
+        for (int b = 0; b < 4; b++) {
+            int usable = b == 1 || n > 0;
+            ui_btn(btn[b].x, BTN_Y, btn[b].w, BTN_H, btn[b].label, !usable ? B_OFF : b == 0 ? B_GO : B_PLAIN);
         }
     }
 }

@@ -137,6 +137,17 @@ typedef struct t48_kbd {
     int w, h;                        /* the surface last drawn on */
 } t48_kbd;
 
+/* The keyboard's colours and shapes. The shell sets them to its own; an app may too. */
+typedef struct t48_kbd_look {
+    uint32_t bg, field, field_text, label;   /* the ground, the box typed into and its ink, the title */
+    uint32_t key, side, text, dim;           /* a letter key, a key that is not a letter, their ink, "Space" */
+    uint32_t accent, on_accent, cursor;      /* Done and Caps; the cursor */
+    uint32_t edge;                           /* the colour of the outline or the lip */
+    int edge_kind;                           /* 0 none, 1 a one-pixel outline, 2 a lip under the key */
+    int radius;
+} t48_kbd_look;
+extern t48_kbd_look t48_kbd_style;
+
 /* max is the longest text allowed (up to 199) */
 void t48_kbd_open(t48_kbd *k, const char *title, const char *text, int max, int flags);
 void t48_kbd_draw(t48_kbd *k, t48_surface *s);          /* fills the whole surface */

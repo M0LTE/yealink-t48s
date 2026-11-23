@@ -11,4 +11,4 @@ Run an app on a PC with the simulator: see [docs/shell.md](../docs/shell.md#the-
 
 The WebSocket client (plain `ws://`) came from the old `native/waterfall.c`; `wss://` will follow with mbedTLS. The on-screen keyboard (`t48_kbd_*`) is the one the shell's settings use ([docs/settings.md](../docs/settings.md#the-keyboard)). Not written yet: PNG reading.
 
-Licence: AGPL-3.0-or-later (see `LICENSE` here). The fonts are DejaVu (Bitstream Vera licence), rendered by `tools/mkfont.py`.
+Licence: AGPL-3.0-or-later (see `LICENSE` here). The fonts are B612 and B612 Mono (SIL Open Font Licence 1.1, in `fonts/` with the licence text), rendered by `tools/mkfont.py`.

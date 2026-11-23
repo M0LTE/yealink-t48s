@@ -1,6 +1,6 @@
 # The shell and the simulator
 
-`t48-shell` owns the screen and every input device, shows the idle screen and the launcher, runs one app at a time over the [app protocol](app-protocol.md), and is the phone ([phone.md](phone.md): dialler, call screens, history, contacts, the phone keys). The same program, started as `t48-sim`, is the PC simulator. Source in [`shell/`](../shell), library in [`libt48/`](../libt48). Design: [architecture.md](architecture.md#the-shell).
+`t48-shell` owns the screen and every input device, shows the idle screen and the launcher, runs one app at a time over the [app protocol](app-protocol.md), and is the phone ([phone.md](phone.md): dialler, call screens, history, contacts, the phone keys). The same program, started as `t48-sim`, is the PC simulator. Source in [`shell/`](../shell), library in [`libt48/`](../libt48). How it looks is [`shell/ui.c`](../shell/ui.c) and [design/](design/README.md); how it is worded is [style.md](style.md). Design: [architecture.md](architecture.md#the-shell).
 
 ![idle](img/phone-idle.png)
 ![launcher](img/shell-launcher-open.png)
@@ -11,7 +11,7 @@
 - Idle screen: time, date, network address, the SIP account and whether it is registered (a line for each when there are several), missed calls, waiting voicemail, do not disturb. Buttons for Apps, Calls, Contacts, DND and Settings; the same on OK, Up, Left, Right and Down.
 - Launcher: a tile for each installed app (see [the manifest](app-protocol.md#the-manifest)), then **Get apps**, the app manager ([apps.md](apps.md)). Arrows and OK, or touch. X goes back to idle.
 - Settings, with an on-screen keyboard ([settings.md](settings.md)): Down on the idle screen, or its Settings button.
-- In an app: a short press on X goes to the app as "back"; holding X for 0.8 s is Home. The app is paused and frozen, and its tile says "open"; picking it again brings it back where it was. Picking a different app closes it.
+- In an app: a short press on X goes to the app as "back"; holding X for 0.8 s is Home. The app is paused and frozen, and its tile says "Open"; picking it again brings it back where it was. Picking a different app closes it.
 - A call, or lifting the handset, takes the screen at once, from anything. When the call is over, what was there comes back. The phone side is described in [phone.md](phone.md).
 - An app that crashes, exits with an error, never starts or stops reading its events is cleaned up and the owner is told. Phone keys are never passed to apps.
 - Apps run as their own unprivileged user when the shell runs as root (user number 20000 to 29999, worked out from the app id), with their own data folder under `/data/appdata`.
@@ -69,7 +69,7 @@ make -C shell check           # run the simulator tests; pictures in shell/build
 make -C shell CC=$HOME/src-build/t48s/bin/armcc O=build-arm all build-arm/apps    # the phone: static ARM
 ```
 
-Plain make and a C compiler; nothing else. The fonts are committed as C (`make -C libt48 fonts` regenerates them).
+Plain make and a C compiler; nothing else. The fonts (B612, in `libt48/fonts`) are committed as C (`make -C libt48 fonts` regenerates them).
 
 ## The simulator
 

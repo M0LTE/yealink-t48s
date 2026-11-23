@@ -1294,10 +1294,8 @@ static const char kp_chars[] = "123456789*0#";
 static void keypad_draw(void)
 {
     for (int i = 0; i < 12; i++) {
-        int x = KP_X + (i % 3) * (KP_W + KP_GAP), y = KP_Y + (i / 3) * (KP_H + KP_GAP);
-        char s[2] = {kp_chars[i], 0};
-        t48_round_fill(&ui, x, y, KP_W, KP_H, 10, C_KEY);
-        t48_text_centre(&ui, x + KP_W / 2, y + (KP_H - t48_font_big.height) / 2, &t48_font_big, C_TEXT, s);
+        char k[2] = {kp_chars[i], 0};
+        ui_key(KP_X + (i % 3) * (KP_W + KP_GAP), KP_Y + (i / 3) * (KP_H + KP_GAP), KP_W, KP_H, k);
     }
 }
 
@@ -1309,29 +1307,19 @@ static int keypad_hit(int x, int y)
     return 0;
 }
 
-/* a small label in a rounded box; returns the x after it */
-static int chip(int x, int y, const char *text, uint32_t fill, uint32_t ink)
-{
-    int w = t48_text_width(&t48_font_bold, text) + 28;
-    t48_round_fill(&ui, x, y, w, 34, 17, fill);
-    t48_text(&ui, x + 14, y + (34 - t48_font_bold.height) / 2, &t48_font_bold, ink, text);
-    return x + w + 10;
-}
-
-/* the chips that say where the sound is and what is switched off; centred on cx, or from x if cx < 0 */
+/* the tags that say where the sound is and what is switched off; centred on cx, or from x if cx < 0 */
 static void chips(int cx, int x, int y)
 {
     const char *t[4];
-    uint32_t fill[4], ink[4];
-    int n = 0, w = 0;
+    int role[4], n = 0, w = 0;
 
-    t[n] = route_labels[P.route]; fill[n] = C_PANEL; ink[n++] = P.route ? C_GOOD : C_DIM;
-    if (P.muted) { t[n] = "Muted"; fill[n] = C_BAD; ink[n++] = C_BG; }
-    if (P.c.held) { t[n] = "On hold"; fill[n] = C_ACCENT; ink[n++] = C_BG; }
-    if (P.c.remote_held) { t[n] = "Held remotely"; fill[n] = C_PANEL; ink[n++] = C_ACCENT; }
-    for (int i = 0; i < n; i++) w += t48_text_width(&t48_font_bold, t[i]) + 28 + (i ? 10 : 0);
+    if (P.route) { t[n] = route_labels[P.route]; role[n++] = B_PLAIN; }
+    if (P.muted) { t[n] = "Muted"; role[n++] = B_STOP; }
+    if (P.c.held) { t[n] = "On hold"; role[n++] = B_LIT; }
+    if (P.c.remote_held) { t[n] = "Held remotely"; role[n++] = B_LIT; }
+    for (int i = 0; i < n; i++) w += ui_tag_width(t[i]) + (i ? 8 : 0);
     if (cx >= 0) x = cx - w / 2;
-    for (int i = 0; i < n; i++) x = chip(x, y, t[i], fill[i], ink[i]);
+    for (int i = 0; i < n; i++) x = ui_tag(x, y, t[i], role[i]);
 }
 
 /* a number or name as large as will fit in maxw, centred on cx; the end of a long number is the part kept */
@@ -1355,41 +1343,42 @@ static void acct_text(int i, char *out, size_t n)
 
 static void draw_dial(void)
 {
-    ui_status_bar("Dial");
-    t48_round_fill(&ui, 24, KP_Y, 448, 110, 14, C_PANEL);
+    ui_header("Dial", 0, 0);
+    ui_panel(24, KP_Y, 448, 110);
     if (P.number[0]) {
         const char *n = contacts_name(P.number);
         big_text(248, KP_Y + (n ? 18 : 30), 420, P.number, C_TEXT);
-        if (n) t48_text_centre(&ui, 248, KP_Y + 76, &t48_font_normal, C_ACCENT, n);
+        if (n) t48_text_centre(&ui, 248, KP_Y + 74, &t48_font_normal, C_DIM, n);
     } else {
         t48_text_centre(&ui, 248, KP_Y + 40, &t48_font_head, C_FAINT, "Number");
     }
-    chips(-1, 24, KP_Y + 130);
-    if (!sipc_connected()) t48_text(&ui, 28, KP_Y + 186, &t48_font_normal, C_BAD, "No service");
+    chips(-1, 24, KP_Y + 126);
+    if (!sipc_connected()) t48_text(&ui, 28, KP_Y + 182, &t48_font_normal, C_BAD, "No service");
     if (accts_on() > 1) {
         char b[120], a[100];
         enum reg r = A[P.dial_acct].reg;
+        struct row_ink ink;
         acct_text(P.dial_acct, a, sizeof a);
         snprintf(b, sizeof b, "From %s", a);
-        t48_round_fill(&ui, 24, FROM_Y, 448, FROM_H, 10, C_PANEL);
-        t48_round_fill(&ui, 40, FROM_Y + 18, 10, 10, 5, r == REG_OK ? C_GOOD : r == REG_TRYING ? C_ACCENT : C_BAD);
-        t48_text_fit(&ui, 60, FROM_Y + (FROM_H - t48_font_normal.height) / 2, 350, &t48_font_normal, C_TEXT, b);
-        t48_text_right(&ui, 458, FROM_Y + (FROM_H - t48_font_bold.height) / 2, &t48_font_bold, C_ACCENT, "< >");
+        ui_tile(24, FROM_Y, 448, FROM_H, 0, &ink);
+        ui_lamp(40, FROM_Y + FROM_H / 2 - 6, r == REG_OK ? C_GOOD : r == REG_TRYING ? C_ACCENT : C_BAD);
+        t48_text_fit(&ui, 62, FROM_Y + (FROM_H - t48_font_normal.height) / 2, 340, &t48_font_normal, ink.text, b);
+        ui_chevron(424, FROM_Y + FROM_H / 2, 7, -1, 3, ink.dim);
+        ui_chevron(448, FROM_Y + FROM_H / 2, 7, 1, 3, ink.dim);
     }
     keypad_draw();
-    ui_button(24, ROW_Y, 216, ROW_H, "Call", P.number[0] ? C_GOOD : C_PANEL);
-    ui_button(252, ROW_Y, 108, ROW_H, "Delete", C_PANEL);
-    ui_button(372, ROW_Y, 100, ROW_H, "Cancel", C_PANEL);
+    ui_btn(24, ROW_Y, 216, ROW_H, "Call", P.number[0] ? B_GO : B_OFF);
+    ui_btn(252, ROW_Y, 108, ROW_H, "<x", P.number[0] ? B_PLAIN : B_OFF);
+    ui_btn(372, ROW_Y, 100, ROW_H, "Cancel", B_PLAIN);
 }
 
 static void draw_outgoing(void)
 {
     char b[120];
-    ui_status_bar("Calling");
-    t48_text_centre(&ui, SW / 2, 78, &t48_font_head, C_DIM, P.consult ? "Asking first" : "Calling");
-    big_text(SW / 2, 126, 720, who(), C_TEXT);
-    if (P.c.name[0]) t48_text_centre(&ui, SW / 2, 176, &t48_font_normal, C_DIM, P.c.peer);
-    t48_text_centre(&ui, SW / 2, 206, &t48_font_head, C_ACCENT, P.c.ringing ? "Ringing" : "Connecting");
+    ui_header(P.consult ? "Asking first" : "Calling", 0, B_LIT);
+    big_text(SW / 2, 104, 720, who(), C_TEXT);
+    if (P.c.name[0]) t48_text_centre(&ui, SW / 2, 160, &t48_font_head, C_DIM, P.c.peer);
+    t48_text_centre(&ui, SW / 2, 212, &t48_font_normal, C_DIM, P.c.ringing ? "Ringing" : "Connecting");
     if (P.o_st == O_HELD) {
         snprintf(b, sizeof b, "On hold: %s", call_who(&P.o));
         t48_text_centre(&ui, SW / 2, 246, &t48_font_normal, C_DIM, b);
@@ -1397,26 +1386,25 @@ static void draw_outgoing(void)
         snprintf(b, sizeof b, "From %s", acct_label(P.c.acct));
         t48_text_centre(&ui, SW / 2, 246, &t48_font_normal, C_DIM, b);
     }
-    chips(SW / 2, 0, 276);
-    ui_button(180, ROW_Y, 200, ROW_H, "Speaker", P.route == T48AC_ROUTE_SPEAKER ? C_ACCENT : C_PANEL);
-    ui_button(420, ROW_Y, 200, ROW_H, "End", C_BAD);
+    chips(SW / 2, 0, 296);
+    ui_btn(180, ROW_Y, 200, ROW_H, "Speaker", P.route == T48AC_ROUTE_SPEAKER ? B_LIT : B_PLAIN);
+    ui_btn(420, ROW_Y, 200, ROW_H, "End", B_STOP);
 }
 
 static void draw_incoming(void)
 {
-    ui_status_bar("Incoming call");
-    t48_text_centre(&ui, SW / 2, 78, &t48_font_head, C_ACCENT, "Incoming call");
-    big_text(SW / 2, 126, 720, who(), C_TEXT);
-    if (P.c.name[0]) t48_text_centre(&ui, SW / 2, 192, &t48_font_head, C_DIM, P.c.peer);
+    ui_header("Incoming call", 0, B_GO);
+    big_text(SW / 2, 112, 720, who(), C_TEXT);
+    if (P.c.name[0]) t48_text_centre(&ui, SW / 2, 172, &t48_font_head, C_DIM, P.c.peer);
     if (accts_on() > 1) {
         char b[120], a[100];
         acct_text(P.c.acct, a, sizeof a);
         snprintf(b, sizeof b, "For %s", a);
-        t48_text_centre(&ui, SW / 2, 234, &t48_font_normal, C_TEXT, b);
+        t48_text_centre(&ui, SW / 2, 228, &t48_font_normal, C_DIM, b);
     }
-    if (!P.ring) t48_text_centre(&ui, SW / 2, 304, &t48_font_normal, C_FAINT, "Silenced");
-    ui_button(120, 372, 260, 76, "Answer", C_GOOD);
-    ui_button(420, 372, 260, 76, "Decline", C_BAD);
+    if (!P.ring) ui_tag(SW / 2 - ui_tag_width("Silenced") / 2, 280, "Silenced", B_OFF);
+    ui_btn(120, 372, 260, 76, "Answer", B_GO);
+    ui_btn(420, 372, 260, 76, "Decline", B_STOP);
 }
 
 static void call_time(char *out, size_t n)
@@ -1432,18 +1420,19 @@ static void draw_banner(int side)
 {
     char b[120];
     int w = side ? 448 : SW - 48;
+    struct row_ink ink;
     if (!P.o_st) return;
     snprintf(b, sizeof b, "%s: %s", P.o_st == O_WAITING ? "Call waiting" : "On hold", call_who(&P.o));
-    t48_round_fill(&ui, 24, BAN_Y, w, BAN_H, 10, C_PANEL);
-    t48_fill(&ui, 24, BAN_Y + 8, 5, BAN_H - 16, P.o_st == O_WAITING ? C_GOOD : C_ACCENT);
-    t48_text_fit(&ui, 44, BAN_Y + (BAN_H - t48_font_bold.height) / 2, side ? w - 40 : 480, &t48_font_bold, C_TEXT, b);
+    ui_tile(24, BAN_Y, w, BAN_H, 0, &ink);
+    ui_lamp(40, BAN_Y + BAN_H / 2 - 6, P.o_st == O_WAITING ? C_GOOD : C_ACCENT);
+    t48_text_fit(&ui, 64, BAN_Y + (BAN_H - t48_font_bold.height) / 2, side ? w - 60 : 460, &t48_font_bold, ink.text, b);
     if (side) return;
     if (P.o_st == O_WAITING) {
-        ui_button(548, BAN_Y + 4, 108, BAN_H - 8, "Answer", C_GOOD);
-        ui_button(664, BAN_Y + 4, 108, BAN_H - 8, "Decline", C_BAD);
+        ui_btn(548, BAN_Y + 4, 108, BAN_H - 8, "Answer", B_GO);
+        ui_btn(664, BAN_Y + 4, 108, BAN_H - 8, "Decline", B_STOP);
     } else if (!P.joining) {
-        ui_button(548, BAN_Y + 4, 108, BAN_H - 8, "Swap", C_KEY);
-        ui_button(664, BAN_Y + 4, 108, BAN_H - 8, "Join", C_KEY);
+        ui_btn(548, BAN_Y + 4, 108, BAN_H - 8, "Swap", B_FIRST);
+        ui_btn(664, BAN_Y + 4, 108, BAN_H - 8, "Join", B_FIRST);
     }
 }
 
@@ -1454,54 +1443,53 @@ static void draw_incall(void)
     int cx = side ? 248 : SW / 2, maxw = side ? 440 : 720;
 
     call_time(t, sizeof t);
-    ui_status_bar(P.xfer ? "Transfer" : P.c.held ? "On hold" : "In call");
+    ui_header(P.xfer ? "Transfer to" : P.c.held ? "On hold" : "In call", 0, P.c.held ? B_LIT : B_GO);
     if (P.xfer) {
-        t48_text_centre(&ui, cx, 62, &t48_font_normal, C_DIM, "Transfer to");
-        t48_round_fill(&ui, 24, 96, 448, 96, 14, C_PANEL);
-        if (P.number[0]) big_text(cx, 120, 420, P.number, C_TEXT);
-        else t48_text_centre(&ui, cx, 128, &t48_font_head, C_FAINT, "Number");
-        t48_text_centre(&ui, cx, 214, &t48_font_bold, C_TEXT, who());
-        t48_text_centre(&ui, cx, 244, &t48_font_head, C_DIM, t);
+        ui_panel(24, KP_Y, 448, 110);
+        if (P.number[0]) big_text(cx, KP_Y + 30, 420, P.number, C_TEXT);
+        else t48_text_centre(&ui, cx, KP_Y + 40, &t48_font_head, C_FAINT, "Number");
+        t48_text_centre(&ui, cx, 196, &t48_font_bold, C_TEXT, who());
+        t48_text_centre(&ui, cx, 226, &t48_font_head, C_DIM, t);
     } else if (side) {
         big_text(cx, 66, maxw, who(), C_TEXT);
-        t48_text_centre(&ui, cx, 132, &t48_font_big, P.c.held ? C_ACCENT : C_GOOD, t);
+        t48_text_centre(&ui, cx, 128, &t48_font_big, P.c.held ? C_DIM : C_TEXT, t);
         if (P.c.dtmf[0]) {
-            t48_round_fill(&ui, 24, 196, 448, 56, 12, C_PANEL);
+            ui_panel(24, 196, 448, 56);
             t48_text_centre(&ui, cx, 196 + (56 - t48_font_head.height) / 2, &t48_font_head, C_TEXT, P.c.dtmf);
         }
     } else {
         big_text(cx, 60, maxw, who(), C_TEXT);
         if (P.c.name[0]) t48_text_centre(&ui, cx, 112, &t48_font_normal, C_DIM, P.c.peer);
-        t48_text_centre(&ui, cx, 142, &t48_font_huge, P.c.held ? C_ACCENT : C_TEXT, t);
+        t48_text_centre(&ui, cx, 142, &t48_font_huge, P.c.held ? C_DIM : C_TEXT, t);
     }
     if (side) keypad_draw();
     if (P.o_st && !P.xfer) {
         draw_banner(side);
-        if (P.note[0]) t48_text_centre(&ui, cx, 362, &t48_font_small, C_ACCENT, P.note);
+        if (P.note[0]) t48_text_centre(&ui, cx, 362, &t48_font_small, C_DIM, P.note);
     } else if (P.note[0]) {
-        t48_text_centre(&ui, cx, 274, &t48_font_normal, C_ACCENT, P.note);
+        t48_text_centre(&ui, cx, 276, &t48_font_normal, C_DIM, P.note);
     } else if (P.parked && !side) {
-        t48_text_centre(&ui, cx, 274, &t48_font_normal, C_ACCENT, "Lift handset to resume");
+        t48_text_centre(&ui, cx, 276, &t48_font_normal, C_DIM, "Lift handset to resume");
     }
     chips(cx, 0, 318);
 
     if (P.xfer) {
-        ui_button(24, ROW_Y, 132, ROW_H, "Transfer", P.number[0] ? C_GOOD : C_PANEL);
-        ui_button(164, ROW_Y, 132, ROW_H, "Ask first", P.number[0] ? C_ACCENT : C_PANEL);
-        ui_button(304, ROW_Y, 80, ROW_H, "Delete", C_PANEL);
-        ui_button(392, ROW_Y, 80, ROW_H, "Cancel", C_PANEL);
+        ui_btn(24, ROW_Y, 132, ROW_H, "Transfer", P.number[0] ? B_GO : B_OFF);
+        ui_btn(164, ROW_Y, 132, ROW_H, "Ask first", P.number[0] ? B_FIRST : B_OFF);
+        ui_btn(304, ROW_Y, 80, ROW_H, "<x", P.number[0] ? B_PLAIN : B_OFF);
+        ui_btn(392, ROW_Y, 80, ROW_H, "Cancel", B_PLAIN);
         return;
     }
     static const char *const label[6] = {"Mute", "Hold", "Keypad", "Speaker", "Transfer", "End"};
     for (int i = 0; i < 6; i++) {
         int on = (i == 0 && P.muted) || (i == 1 && P.c.held) || (i == 2 && P.keypad) || (i == 3 && P.route == T48AC_ROUTE_SPEAKER);
-        ui_button(24 + i * 127, ROW_Y, 117, ROW_H, label[i], i == 5 ? C_BAD : on ? C_ACCENT : C_PANEL);
+        ui_btn(24 + i * 127, ROW_Y, 117, ROW_H, label[i], i == 5 ? B_STOP : on ? B_LIT : B_PLAIN);
     }
 }
 
 static void draw_ended(void)
 {
-    ui_status_bar("Call ended");
+    ui_header("Call", 0, 0);
     t48_text_centre(&ui, SW / 2, 120, &t48_font_big, C_TEXT, P.ended);
     if (hist[0].number[0] && nhist) t48_text_centre(&ui, SW / 2, 196, &t48_font_head, C_DIM, hist_name(&hist[0]));
     if (P.ended_detail[0]) t48_text_centre(&ui, SW / 2, 250, &t48_font_normal, C_DIM, P.ended_detail);
@@ -1509,7 +1497,8 @@ static void draw_ended(void)
 
 void phone_draw(void)
 {
-    t48_fill(&ui, 0, 0, SW, SH, C_BG);
+    ui_clear(P.st == PH_INCOMING ? T->ground[0] : P.st == PH_INCALL && P.c.held ? T->ground[2] :
+             P.st == PH_INCALL || P.st == PH_OUTGOING ? T->ground[1] : C_BG);
     switch (P.st) {
     case PH_IDLE: break;
     case PH_DIAL: draw_dial(); break;
@@ -1523,15 +1512,16 @@ void phone_draw(void)
 void phone_draw_overlay(void)
 {
     char b[8];
+    struct row_ink ink;
     if (!P.vol_until) return;
     int x = 200, y = 300, w = 400, h = 76, v = P.vol[P.vol_shown];
-    t48_round_fill(&ui, x - 2, y - 2, w + 4, h + 4, 16, C_LINE);
-    t48_round_fill(&ui, x, y, w, h, 14, C_BAR);
-    t48_text(&ui, x + 20, y + 10, &t48_font_bold, C_TEXT, vol_labels[P.vol_shown]);
+    ui_popup(x, y, w, h, B_PLAIN);
+    ui_dialog_ink(&ink);
+    t48_text(&ui, x + 20, y + 12, &t48_font_bold, ink.text, vol_labels[P.vol_shown]);
     snprintf(b, sizeof b, "%d", v);
-    t48_text_right(&ui, x + w - 20, y + 10, &t48_font_bold, C_ACCENT, b);
+    t48_text_right(&ui, x + w - 20, y + 12, &t48_font_bold, ink.text, b);
     for (int i = 0; i < T48AC_VOL_MAX; i++)
-        t48_fill(&ui, x + 20 + i * 24, y + 44, 20, 16, i < v ? C_ACCENT : C_LINE);
+        t48_fill(&ui, x + 20 + i * 24, y + 46, 20, 14, i < v ? ink.text : t48_mix(ink.text, ui_ground(), 200));
 }
 
 void phone_touch(int x, int y)
@@ -1603,8 +1593,8 @@ void phone_touch(int x, int y)
 
 /* ---------- call history ---------- */
 
-#define HIST_BTN_Y 384
-#define HIST_BTN_H 54
+#define HIST_BTN_Y 400
+#define HIST_BTN_H 56
 
 void phone_open_history(void)
 {
@@ -1625,8 +1615,8 @@ void phone_draw_history(void)
     struct tm today, tm;
 
     localtime_r(&now, &today);
-    t48_fill(&ui, 0, 0, SW, SH, C_BG);
-    ui_status_bar("Calls");
+    ui_clear(C_BG);
+    ui_header("Calls", 1, 0);
     if (!nhist) {
         t48_text_centre(&ui, SW / 2, 200, &t48_font_head, C_DIM, "No calls");
         return;
@@ -1635,38 +1625,38 @@ void phone_draw_history(void)
     int top = P.hist_sel >= HIST_ROWS ? P.hist_sel - HIST_ROWS + 1 : 0, several = accts_on() > 1;
     for (int r = 0; r < HIST_ROWS && top + r < nhist; r++) {
         const struct hist *h = &hist[top + r];
-        int y = 54 + r * 52;
+        int y = 54 + r * 52, selected = top + r == P.hist_sel;
         char when[32], dur[16] = "";
         const char *name = hist_name(h);
         time_t t = (time_t)h->when;
+        struct row_ink ink;
 
         localtime_r(&t, &tm);
         strftime(when, sizeof when, tm.tm_yday == today.tm_yday && tm.tm_year == today.tm_year ? "%H:%M" : "%e %b %H:%M", &tm);
         if (h->secs) snprintf(dur, sizeof dur, "%d:%02d", h->secs / 60, h->secs % 60);
-        t48_round_fill(&ui, 16, y, SW - 32, 46, 10, top + r == P.hist_sel ? C_KEY : C_PANEL);
-        if (top + r == P.hist_sel) t48_fill(&ui, 16, y + 8, 5, 30, C_ACCENT);
-        t48_text(&ui, 36, y + 12, &t48_font_bold, h->kind == 'm' ? C_BAD : h->kind == 'o' ? C_DIM : C_GOOD,
+        ui_row(16, y, SW - 32, 46, selected, &ink);
+        t48_text(&ui, 36, y + 12, &t48_font_bold, selected ? ink.text : h->kind == 'm' ? C_BAD : h->kind == 'o' ? C_DIM : C_GOOD,
                  h->kind == 'm' ? "Missed" : h->kind == 'o' ? "Out" : "In");
-        t48_text_fit(&ui, 130, y + 12, several ? 250 : 380, &t48_font_normal, C_TEXT, name);
+        t48_text_fit(&ui, 130, y + 12, several ? 250 : 380, &t48_font_normal, ink.text, name);
         if (strcmp(name, h->number)) {
             int w = t48_text_width(&t48_font_normal, name);
-            if (w < (several ? 150 : 260)) t48_text_fit(&ui, 130 + w + 14, y + 15, (several ? 250 : 380) - w - 14, &t48_font_small, C_FAINT, h->number);
+            if (w < (several ? 150 : 260)) t48_text_fit(&ui, 130 + w + 14, y + 15, (several ? 250 : 380) - w - 14, &t48_font_small, ink.dim, h->number);
         }
         if (several && h->acct >= 1 && h->acct <= MAX_ACCTS && A[h->acct - 1].used)
-            t48_text_fit(&ui, 392, y + 15, 150, &t48_font_small, C_ACCENT, acct_label(h->acct - 1));
-        t48_text_right(&ui, 620, y + 12, &t48_font_normal, C_DIM, dur);
-        t48_text_right(&ui, SW - 34, y + 12, &t48_font_normal, C_DIM, when);
+            t48_text_fit(&ui, 392, y + 15, 150, &t48_font_small, ink.dim, acct_label(h->acct - 1));
+        t48_text_right(&ui, 620, y + 12, &t48_font_normal, ink.dim, dur);
+        t48_text_right(&ui, SW - 34, y + 12, &t48_font_normal, ink.dim, when);
     }
     if (P.hist_confirm) {
-        t48_text(&ui, 24, HIST_BTN_Y + 16, &t48_font_normal, C_TEXT, "Clear all calls?");
-        ui_button(416, HIST_BTN_Y, 170, HIST_BTN_H, "Cancel", C_PANEL);
-        ui_button(596, HIST_BTN_Y, 188, HIST_BTN_H, "Clear", C_BAD);
+        t48_text(&ui, 24, HIST_BTN_Y + (HIST_BTN_H - t48_font_bold.height) / 2, &t48_font_bold, C_TEXT, "Clear all calls?");
+        ui_btn(416, HIST_BTN_Y, 170, HIST_BTN_H, "Cancel", B_PLAIN);
+        ui_btn(596, HIST_BTN_Y, 188, HIST_BTN_H, "Clear", B_STOP);
     } else {
         int known = contacts_name(hist[P.hist_sel].number) != NULL;
-        ui_button(16, HIST_BTN_Y, 180, HIST_BTN_H, "Dial", C_GOOD);
-        ui_button(206, HIST_BTN_Y, 200, HIST_BTN_H, known ? "In contacts" : "Add contact", known ? C_PANEL : C_KEY);
-        ui_button(416, HIST_BTN_Y, 170, HIST_BTN_H, "Delete", C_PANEL);
-        ui_button(596, HIST_BTN_Y, 188, HIST_BTN_H, "Clear all", C_PANEL);
+        ui_btn(16, HIST_BTN_Y, 180, HIST_BTN_H, "Dial", B_GO);
+        ui_btn(206, HIST_BTN_Y, 200, HIST_BTN_H, known ? "In contacts" : "Add contact", known ? B_OFF : B_PLAIN);
+        ui_btn(416, HIST_BTN_Y, 170, HIST_BTN_H, "Delete", B_PLAIN);
+        ui_btn(596, HIST_BTN_Y, 188, HIST_BTN_H, "Clear all", B_PLAIN);
     }
 }
 

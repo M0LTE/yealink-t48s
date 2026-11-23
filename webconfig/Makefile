@@ -30,9 +30,14 @@ $(LIB): FORCE
 	$(MAKE) -C ../libt48 CC="$(CC)" O=$(O)
 endif
 
-$(O)/assets.c: style.css t48.js mkassets.sh
+# the style sheet and the two faces of its font (libt48/tools/mkwebfont.py makes those)
+STYLE ?= style.css
+FONT_REGULAR ?= fonts/b612-regular.woff2
+FONT_BOLD ?= fonts/b612-bold.woff2
+
+$(O)/assets.c: $(STYLE) t48.js $(FONT_REGULAR) $(FONT_BOLD) mkassets.sh
 	@mkdir -p $(O)
-	sh mkassets.sh style.css t48.js > $@
+	sh mkassets.sh $(STYLE) t48.js $(FONT_REGULAR) $(FONT_BOLD) > $@
 
 $(O)/t48-web: $(SRC) web.h $(SHELL_DIR)/shell.h $(SHELL_DIR)/zones.h $(LIB)
 	@mkdir -p $(O)

@@ -2,7 +2,7 @@
 
 Issue [#37](https://github.com/M0LTE/yealink-t48s/issues/37). Source: [`webconfig/`](../webconfig) (the server `t48-web`: [`http.c`](../webconfig/http.c), the pages: [`pages.c`](../webconfig/pages.c)), [`shell/watch.c`](../shell/watch.c) (how the phone's screens notice a change), the Access page in [`shell/settings.c`](../shell/settings.c).
 
-Typing a SIP password on the phone's on-screen keyboard works but is fiddly. This is the comfortable way: a page served by the phone itself, for a browser on the same network. It reads and writes the same settings files as the phone's own Settings screens ([settings.md](settings.md)), so the two always agree.
+Typing a SIP password on the phone's on-screen keyboard works but is fiddly. This is the comfortable way: a page served by the phone itself, for a browser on the same network. It reads and writes the same settings files as the phone's own Settings screens ([settings.md](settings.md)), so the two always agree. It uses the same words and the same look as the phone's screen: [style.md](style.md), [design/](design/README.md).
 
 | | |
 |---|---|
@@ -11,13 +11,13 @@ Typing a SIP password on the phone's on-screen keyboard works but is fiddly. Thi
 
 ## Turning it on, and pairing a browser
 
-The page is **off until the owner turns it on at the phone's own screen**: Settings, Access, Web setup page. The phone asks first. The Access page then shows the address to open.
+The page is **off until the owner turns it on at the phone's own screen**: Settings, Access, Web setup. The phone asks first. The Access page then shows the address to open.
 
 | | |
 |---|---|
 | ![the question](img/web-phone-confirm.png) | ![on](img/web-phone-on.png) |
 
-Open that address in a browser. A browser the phone has not seen gets one page only, with one button: **Show a code on the phone**. The phone puts six digits on its screen; type them into the page and the browser is paired. Being able to read the phone's screen is the proof of ownership, as it is for SSH ([access.md](access.md)).
+Open that address in a browser. A browser the phone has not seen gets one page only, with one button: **Show code**. The phone puts six digits on its screen; type them into the page and the browser is paired. Being able to read the phone's screen is the proof of ownership, as it is for SSH ([access.md](access.md)).
 
 | | |
 |---|---|
@@ -33,17 +33,17 @@ Open that address in a browser. A browser the phone has not seen gets one page o
 | Page | What it does |
 |---|---|
 | Overview | where things stand, a tile for each page |
-| Phone accounts | all six SIP accounts: every field the phone's screen has. Which one calls usually go out from. Remove |
+| Accounts | all six SIP accounts: every field the phone's screen has. The default account. Remove |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server |
 | Date and time | the time zone, from the phone's list, or a TZ string for a place the list lacks |
-| Sound and screen | ringer, handset, speakerphone and headset levels; brightness, and when the screen dims and goes off |
+| Sound and screen | ringer, handset, speaker and headset levels; brightness, and when the screen dims and goes off |
 | Contacts | add, change, delete; import a CSV or vCard file (added to the list, or replacing it); download as CSV or vCard |
 | Calls | the call history, and Clear |
 | Apps | what is installed and what the feed offers: install, update, remove; each app's own settings; the feed address |
 | Access | SSH on and off, the host key's fingerprint, the keys that can log in: **paste a public key** to add one, remove one, forget all. The browsers paired with the page; turn the page off |
 | Backup | download the settings as one text file; put a saved file back |
 
-**Passwords go one way only.** A password box is always empty and says only "set" or "not set"; leaving it empty keeps the one that is set. That goes for SIP passwords and for any app setting its manifest calls a password.
+**Passwords go one way only.** A password box is always empty and says only "Set" or "Not set"; leaving it empty keeps the one that is set. That goes for SIP passwords and for any app setting its manifest calls a password.
 
 **Pasting a key** is the easy way to get SSH access: turn SSH on, paste the line from `~/.ssh/id_ed25519.pub`, done. The ten-minute password door on the phone's screen ([access.md](access.md)) is still there for when there is no browser.
 
@@ -87,7 +87,7 @@ Sized for a hobby phone on a home network: not careless, not a bank.
 - **The LAN only.** It listens on `eth0`'s own address (and ties the socket to `eth0`), follows the address when it changes, and turns away callers whose address is not a private one.
 - **Pairing.** Six digits from `/dev/urandom`, shown only on the phone's screen (the file the shell reads them from is root's alone, and apps run as other users). Good for two minutes and five tries, and only for the browser that asked for it. A new code at most every three seconds. Fifteen wrong tries in a row and pairing is closed for ten minutes.
 - **Sessions.** A paired browser holds 256 random bits in a cookie (`HttpOnly`, `SameSite=Strict`), kept in the server's memory only. Eight browsers at most.
-- **Changes need the page's own token.** Every form carries a token tied to the session, and is refused without it. A form sent from another site is refused by its `Origin` as well. Nothing is changed by a GET. No page can be framed, and the pages load nothing from anywhere else (`Content-Security-Policy: default-src 'none'`).
+- **Changes need the page's own token.** Every form carries a token tied to the session, and is refused without it. A form sent from another site is refused by its `Origin` as well. Nothing is changed by a GET. No page can be framed, and the pages load nothing from anywhere else (`Content-Security-Policy: default-src 'none'`; the style sheet, the script and the two font files are the phone's own).
 - **Nothing typed is logged.** The log says which form was sent and from where, never a value. The pairing code and the cookie are not logged either.
 - **Plain HTTP, and every page says so.** Anyone who can watch the network can read what is sent, passwords included. HTTPS with a self-signed key was the other choice: it would mean a browser warning on every visit, a TLS library in the server, and slow handshakes on a 500 MHz ARMv6, for a page that is on for the few minutes the phone is being set up. Turn the page off when done.
 - **A paired browser can do what the owner can do at the screen**, including turning SSH on and adding a key, which is root on the phone. That is the point of it, and why pairing needs the screen.

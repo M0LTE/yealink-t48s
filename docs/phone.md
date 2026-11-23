@@ -91,13 +91,13 @@ For each account the phone asks the server to tell it about waiting voicemail (S
 
 ## Several accounts
 
-Up to six, set in Settings, Phone accounts ([settings.md](settings.md)). Account 1 is `/data/config/sip`, as it always was, so a phone that already has an account needs nothing done; accounts 2 to 6 are `sip2` to `sip6` beside it.
+Up to six, set in Settings, Accounts ([settings.md](settings.md)). Account 1 is `/data/config/sip`, as it always was, so a phone that already has an account needs nothing done; accounts 2 to 6 are `sip2` to `sip6` beside it.
 
 - **All of them ring.** The incoming call screen says which account was called.
-- **Calls go out from the usual account** unless another is chosen: Left and Right in the dialler step through the accounts, as does a touch on the "From" line. A touch on an account's line on the idle screen opens the dialler already set to it.
-- **Which is usual** is set on the Phone accounts page. The status bar shows that one; with more than one account the idle screen has a line for each with its own dot.
+- **Calls go out from the default account** unless another is chosen: Left and Right in the dialler step through the accounts, as does a touch on the "From" line. A touch on an account's line on the idle screen opens the dialler already set to it.
+- **Which is the default** is set on the Accounts page. The status bar shows that one; with more than one account the idle screen has a line for each with its own dot.
 - **The history keeps the account** of each call, and Redial and the history call back from the same one.
-- An account can be switched off without forgetting it ("In use"), given a short name for the phone's own screens, and removed.
+- An account can be switched off without forgetting it ("Enabled"), given a short name for the phone's own screens, and removed.
 
 The dot beside an account is green when registered, amber while trying, red when the server refused or baresip is not running. The shell reads the same files `t48-sip` does ([sip.md](sip.md#running-it), example in [`sip/config/sip.example`](../sip/config/sip.example)), and only for what it shows; the passwords are baresip's business. No account is in the repository; the tests use made-up ones on a server that exists for a minute.
 
