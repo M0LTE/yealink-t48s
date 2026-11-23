@@ -43,6 +43,11 @@ $(O)/bench: tests/bench.c $(CORE) $(HDRS) tests/t.h
 bench: $(O)/bench
 	$(O)/bench
 
+# A stand-in for baresip on the call stream, for measurements on the phone
+$(O)/calltap: tests/calltap.c $(T48AUDIO)/t48audio_proto.h
+	@mkdir -p $(O)
+	$(CC) $(CFLAGS) -o $@ tests/calltap.c -lm $(LDFLAGS)
+
 clean:
 	rm -rf build build-arm
 

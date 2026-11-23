@@ -10,7 +10,7 @@ FREE = clang --target=armv6-linux-gnueabi -march=armv6 -mfloat-abi=soft -marm -O
        -ffreestanding -fno-builtin -nostdlib -fuse-ld=lld
 MUSLCC = $(CROSS_CC) -Os -Wall
 
-all: fbtest fbswap.so envexec fbinfo tap sertest usbinit membanner cpubench keytest touchtest apmcap t48rec t48mix nandread
+all: fbtest fbswap.so envexec fbinfo tap sertest usbinit membanner cpubench keytest touchtest apmcap t48rec t48play t48mix nandread
 
 fbtest: fbtest.c
 	$(FREE) -static -Wl,-e,_start -o $@ $<
@@ -35,15 +35,15 @@ fonts:
 apmcap: apmcap.c
 	$(MUSLCC) -static -o $@ $< -lm
 
-# ALSA capture and mixer test tools for kernel/drivers/t48s_audio.c (issue #24)
-t48rec: t48rec.c
+# ALSA capture, playback and mixer test tools for kernel/drivers/t48s_audio.c (issue #24)
+t48rec t48play: %: %.c
 	$(MUSLCC) -static -o $@ $< -lm
 
 t48mix: t48mix.c
 	$(MUSLCC) -static -o $@ $<
 
 clean:
-	rm -f fbtest fbswap.so envexec fbinfo tap sertest usbinit membanner cpubench keytest touchtest apmcap t48rec t48mix
+	rm -f fbtest fbswap.so envexec fbinfo tap sertest usbinit membanner cpubench keytest touchtest apmcap t48rec t48play t48mix
 
 membanner: membanner.c gen/fonts.h
 	$(MUSLCC) -o $@ membanner.c

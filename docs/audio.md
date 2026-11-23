@@ -12,7 +12,9 @@ Research for issue #6, done 2026-11-22/23 at night with a hard rule of making no
 
 Recommended path: write a small ALSA driver for our 3.6 kernel that drives the APM codecs over DMA controller 0 directly, capture first (testable in silence), then playback and path switching with Tom listening.
 
-**Update, night of 2026-11-23 (issue #24): the capture half of that driver exists and works.** `kernel/drivers/t48s_audio.c` gives an ALSA card with one capture device per codec and mixer controls for the capture side. See "The capture driver" below. Playback and cold start are still to do, both need someone listening.
+**Update, night of 2026-11-23 (issue #24): the capture half of that driver exists and works.** `kernel/drivers/t48s_audio.c` gives an ALSA card with one capture device per codec and mixer controls for the capture side. See "The capture driver" below.
+
+**Update, daytime 2026-11-23: playback works too.** Both codecs play, the outputs, gains, sidetone and loudspeaker amplifier are mixer controls, and the driver starts with everything off. Measured with the phone's own microphones as the listener; see "Playback" at the end. Cold start is still to do.
 
 ## How Yealink's audio is put together
 
@@ -140,7 +142,7 @@ An ALSA driver (`kernel/drivers/t48s_audio.c`), not a private character device: 
 | 0 | User-space capture proof (`native/apmcap.c`) | done | done | no |
 | 1 | **Done 2026-11-23.** ALSA capture: one card, two capture devices (codec A, codec B), 16 kHz, 16-bit mono, 5 ms periods, DMA0 channels 3 and 5 with their block interrupts (IRQ 3, 5), error interrupt (IRQ 28). Leaves the analog setup as Yealink left it. | 1 to 2 days | `arecord` from codec B, compare with `apmcap` | no |
 | 2 | **Done 2026-11-23, tested on codec A only.** Capture controls: input select, preamp gain, ADC digital gain, ADC power, microphone bias, as ALSA mixer controls. Port of five short `ApmHw_*` functions. | 1 day | record each input | mostly no, see note |
-| 3 | Playback: two playback devices on DMA0 channels 2 and 4, DAC digital gain, output mode and mute, amplifier power-down, GPIO31, ramp-down on stop (`ApmHw_AmpDacRampDown`) to avoid clicks. What the audio service expects of it, including control names, is in [audiod.md](audiod.md#what-the-kernel-driver-must-add). | 1 to 2 days | tone to each output at low level | **yes** |
+| 3 | **Done 2026-11-23, see "Playback" below.** Playback: two playback devices on DMA0 channels 2 and 4, DAC digital gain, output mode and mute, amplifier power-down, GPIO31, ramp-down on stop (`ApmHw_AmpDacRampDown`) to avoid clicks. What the audio service expects of it, including control names, is in [audiod.md](audiod.md#what-the-kernel-driver-must-add). | 1 to 2 days | tone to each output at low level | **yes** |
 | 4 | **Not started: cannot be tested in silence** (see below). Cold start, so the live image (#7) works without Yealink having run first: clocks, chipc audio enable, APM soft reset, the `ApmHw_init` table (about 70 constant writes, already extracted), sample rate, FIFO setup. | 1 to 2 days | boot through U-Boot recovery, record and play | **yes** (possible click) |
 | 5 | Paths as named ALSA controls ("Handset", "Headset", "Speaker"), sidetone for handset and headset, 8 kHz as a second rate. | 1 day | switch during a call | **yes** |
 | 6 | In user space, with the SIP stack (#12): G.711/G.722 on the ARM, echo cancelling for the speakerphone (speexdsp is the first thing to try on this 500 MHz ARM11), ringer through the loudspeaker. | with #12 | calls | **yes** |
@@ -162,7 +164,7 @@ Risks: the equaliser coefficients (`ApmHw_WriteCoeff`) are loaded by Yealink at 
 
 **It cannot make a sound by itself, with one caveat.** It never writes a DAC FIFO, DAC gain, output mode or mute, amplifier bit, sidetone or GPIO31. But codec B idles with its output B on and its sidetone on, so on codec B the microphone already reaches that output, and changing codec B's capture controls changes what goes there. On codec A nothing is connected through: its outputs are off, its DAC is muted and its sidetone is off. So tonight only codec A's controls were exercised; codec B was recorded as found and its controls only read. The playback step should take over sidetone and remove this trap.
 
-How it takes DMA controller 0: our kernel's DMA framework stays patched to leave controller 0 completely alone (no channel reset at boot, no interrupt handlers), as before. The driver programs its two channels (3 and 5) directly, like `t48s_eth.c` does on controller 1, requests only their two interrupts, and uses the per-channel write-enable form of the shared registers, so channels 0, 1, 2, 4, 6 and 7 are never written. The kexec loader has already stopped all eight before our kernel starts.
+(Since playback was added the driver uses channels 2 to 5; what follows describes the capture-only driver of that night.) How it takes DMA controller 0: our kernel's DMA framework stays patched to leave controller 0 completely alone (no channel reset at boot, no interrupt handlers), as before. The driver programs its two channels (3 and 5) directly, like `t48s_eth.c` does on controller 1, requests only their two interrupts, and uses the per-channel write-enable form of the shared registers, so channels 0, 1, 2, 4, 6 and 7 are never written. The kexec loader has already stopped all eight before our kernel starts.
 
 **Measured** on the phone (kexec boot from Yealink 66.82.0.31, silent room):
 
@@ -221,8 +223,8 @@ Not done, and why: playback (out of scope and audible), cold start (above), samp
 
 ## Files
 
-- `kernel/drivers/t48s_audio.c`: the ALSA capture driver.
-- `native/t48rec.c`, `native/t48mix.c`: record and set controls on the phone without alsa-utils.
+- `kernel/drivers/t48s_audio.c`: the ALSA driver, capture and playback.
+- `native/t48rec.c`, `native/t48play.c`, `native/t48mix.c`: record, play and set controls on the phone without alsa-utils.
 - `native/apmcap.c`: the first capture proof, from user space. Records only. Not for use alongside the driver.
 - `tools/regsum.py`: lists the register accesses of each function in Yealink's kernel image.
 - `tools/audio-modes.sh`: daytime test 1.
@@ -268,3 +270,58 @@ Tom counted aloud into the handset, then at the phone from about 50 cm (8 s each
 | at the phone, codec B input B | -46.8 | -52.8 | handset mic hearing the room from the cradle |
 
 So: handset microphone = codec B input B; speakerphone microphone = codec A input A (about 20 dB more gain wanted for speech at 50 cm); codec A input B is unused (probably the headset mic is codec B's other input, selected by 0x3060012c/134/138 in headset mode, untested without a headset).
+
+## Playback (2026-11-23, issue #24)
+
+The driver now plays as well as records. Still no DSP and no vendor module.
+
+- `hw:0,0` (codec A) and `hw:0,1` (codec B) each have a playback side: S16_LE, mono, 16000 Hz, periods in whole 5 ms blocks, DMA0 channels 2 and 4. Capture is unchanged and runs alongside on the same clock.
+- New controls, for each codec: `Output A Playback Switch`, `Output B Playback Switch` (the analog output stage: on, or muted and off), `Output A Playback Volume`, `Output B Playback Volume` (analog, 0 to 7 in 3 dB steps, 7 is 0 dB), `Playback Volume` (DAC digital: 0 = mute, n = n - 36 dB, up to 42 = +6 dB), `Sidetone Switch`, `Sidetone Volume` (0 = mute, n = n - 36 dB, 36 at most). And one for the board: `Speaker Amp Switch` (GPIO31).
+- Which is which (from the daytime tests): codec A output A is the loudspeaker, through the amplifier; codec B output B is the handset earpiece; codec B output A is the headset. Codec A output B is unused.
+- `t48play` (`native/t48play.c`) plays a test tone or a WAV file, like `t48rec` records. It refuses tones above -6 dBFS.
+
+**Quiet by default.** At start-up the driver switches the amplifier off, both sidetones off, mutes and switches off all four outputs, sets every analog output gain to its lowest (-21 dB) and both DAC gains to -20 dB. That also removes the trap described above (codec B left live with sidetone by Yealink). Nothing can be heard until user space switches an output on, and the amplifier is only ever switched on by its own control; switching the loudspeaker output off switches the amplifier off too.
+
+**No clicks.** An output is switched on while still muted and then unmuted, and muted before it is switched off; the mute is the codec's own 40 ms ramp, which Yealink had already set up (registers 0x134 low half and 0x13c) and the driver leaves alone. A stream starts from a block of zeros. When a stream stops, is dropped or underruns, the DMA is steered to a 5 ms fade from the last sample played down to zero and then round a block of zeros, so the DAC is never cut off in mid-wave or left starved while an output is on. The DMA channel stops only when the stream is closed.
+
+Register details found on the way (all from `ApmHw_*` in Yealink's kernel, checked against the three modes of daytime test 1):
+
+| Register | Bits | What |
+|---|---|---|
+| 0x134 | 16 to 19 | output mutes: 16 = codec B output A, 17 = B/B, 18 = A/A, 19 = A/B |
+| 0x134 | 0 to 15 | one nibble per output: ramp time ((n + 1) x 20 ms in bits 1 to 3) and a ramp enable; 0x3333 as found |
+| 0x138 | 12 to 19 | output mode, two bits each: 0 = on, 3 = off (order B/A, B/B, A/A, A/B) |
+| 0x138 | 20 to 31 | analog output attenuation, three bits each, 3 dB a step, 7 = -21 dB (order B/A, B/B, A/A, A/B). Yealink: handset 3 (-9 dB), headset 2 (-6 dB), loudspeaker 1 (-3 dB) |
+| 0x13c | 9, 10 | DAC power down, codec B, codec A (not used here) |
+| 0x02c / 0x05c | 0 to 18 | DAC digital gain: 15-bit gain where 0x7fff is 0 dB, and a shift in bits 16 to 18 (3 = none). Yealink: loudspeaker -6 dB (0x4027), handset and headset +3 dB (0x5a67 with shift 4) |
+| 0x024 / 0x054 | 15 | sidetone on. Its level is one of 28 filter coefficients written through 0x010 (value) and 0x014 (index, bank, strobe) |
+
+One thing that was not as expected: the DAC channels' DMA control word (0x00904835, as Yealink has it) counts a block in 64-bit units of memory, so its block count is 20 where the ADC's is 40. With 40 the sound played at half speed, each block running on into the next.
+
+**Measured** on the phone, using its own microphones as the listener (nobody had to listen; levels are rms):
+
+| Check | Result |
+|---|---|
+| Rate | 32000 frames played in 2.016 s on each codec, first write to end of drain (16 kHz); no DMA errors, no FIFO underflows |
+| Loudspeaker, 1 kHz at -30 dBFS, Yealink's speaker gains (DAC -6 dB, output -3 dB, amplifier on) | -24.5 dBFS at the base microphone (preamp 21 dB, digital +12 dB), steady within 0.5 dB over 2 s, 25 dB above everything else in the recording; room and microphone noise is at -49 dBFS |
+| Output gain control | 9 dB down on the control gave 9.1 dB down at the microphone |
+| Edges | recorded through the microphone: tone start, tone end, output switched on and off, amplifier on and off, the player killed in mid-tone, and a forced underrun. None left a step bigger than the tone's own slope, and with the tone filtered out nothing stood out of the noise at any of them |
+| Handset earpiece, same tone, Yealink's handset gains | with the handset on its cradle the handset microphone hears it only just: about 10 dB over its own noise in a narrow band with the microphone gain turned right up (-84 dBFS at its normal gain), and the base microphone hears it too. With the output muted, nothing. So the earpiece plays and the switch works; how it sounds needs an ear |
+| Loudspeaker to base microphone, by frequency (same gains) | the microphone reads this much against the level in the frame played: 300 Hz 0 dB, 500 -5, 700 -1, 1000 +5, 1400 +7, 2000 +1, 2800 -15, 3600 -20 dB. The loop takes 80 ms |
+
+Not measured, needs an ear: sidetone (the level control is a straight port of Yealink's function and could not be checked by loopback), how the earpiece and loudspeaker sound, and the headset path with a headset plugged in.
+
+To hear it (moderate levels; nothing here is louder than quiet speech):
+
+```
+t48mix "Codec A Playback Volume" 30; t48mix "Codec A Output A Playback Volume" 6
+t48mix "Codec A Output A Playback Switch" 1; t48mix "Speaker Amp Switch" 1
+t48play -d 0 -s 2 -l -30            # 1 kHz from the loudspeaker for 2 s
+t48mix "Codec A Output A Playback Switch" 0     # also switches the amplifier off
+
+t48mix "Codec B Playback Volume" 39; t48mix "Codec B Output B Playback Volume" 4
+t48mix "Codec B Output B Playback Switch" 1
+t48play -d 1 -s 2 -l -30            # the same in the handset earpiece
+t48mix "Codec B Sidetone Switch" 1  # now blow across the handset microphone: you should hear it
+t48mix "Codec B Sidetone Switch" 0; t48mix "Codec B Output B Playback Switch" 0
+```

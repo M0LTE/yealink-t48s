@@ -6,43 +6,67 @@
 #include "routes.h"
 
 /*
- * NOT CONFIRMED ON A PHONE. This is "Reading 1" of docs/audio.md: handset
- * microphone on codec A input A, headset on codec A input B, base microphone
- * on codec B input B, loudspeaker on codec B output B. Capture control names
- * are the driver's. Playback control names are the ones the driver is asked
- * to provide (docs/audiod.md); a control the kernel does not have is reported
- * once and skipped. Gains are Yealink's idle values where known.
+ * From the daytime tests on the phone (docs/audio.md, 2026-11-23): codec B is
+ * the handset (input B, output B) and the headset (input A, output A); codec A
+ * with the external amplifier is the speakerphone (input A, output A). Control
+ * names are the driver's (kernel/drivers/t48s_audio.c); a control the kernel
+ * does not have is reported once and skipped.
+ *
+ * The values are the ones Yealink's firmware was seen to set in each mode:
+ *   handset  preamp 15 dB, ADC 0 dB, DAC +3 dB, output B at -9 dB, sidetone on
+ *   headset  preamp 22 dB (21 here: the control moves in 3 dB steps), ADC 0 dB,
+ *            DAC +3 dB, output A at -6 dB, sidetone on
+ *   speaker  preamp 21 dB, ADC +1 dB, DAC -6 dB, output A at -3 dB, amplifier on
+ * with one change: the speakerphone's ADC gain is +12 dB, not +1, because the
+ * base microphone is quiet at arm's length (daytime test 2) and Yealink makes
+ * that up in its DSP.
+ *
+ * Order matters for silence: amplifier and the other outputs off first, then
+ * gains, then this route's output on, and the amplifier last.
  */
-#define CAP_A(on, src) \
-	{ "Codec A Capture Switch", on }, { "Codec A Capture Source", src }, \
-	{ "Codec A Preamp Capture Volume", 5 }, { "Codec A Capture Volume", 36 }
-#define CAP_B(on) \
-	{ "Codec B Capture Switch", on }, { "Codec B Capture Source", 1 }, \
-	{ "Codec B Preamp Capture Volume", 5 }, { "Codec B Capture Volume", 36 }
-#define OUT(aa, ab, ba, bb, amp) \
-	{ "Codec A Output A Playback Switch", aa }, { "Codec A Output B Playback Switch", ab }, \
-	{ "Codec B Output A Playback Switch", ba }, { "Codec B Output B Playback Switch", bb }, \
-	{ "Speaker Amp Switch", amp }
-#define SIDETONE(a, b) \
-	{ "Codec A Sidetone Switch", a }, { "Codec B Sidetone Switch", b }
+#define MIC_A(on, digital) \
+	{ "Codec A Capture Switch", on }, { "Codec A Capture Source", 0 }, \
+	{ "Codec A Preamp Capture Volume", 7 }, { "Codec A Capture Volume", digital }
+#define MIC_B(on, src, preamp) \
+	{ "Codec B Capture Switch", on }, { "Codec B Capture Source", src }, \
+	{ "Codec B Preamp Capture Volume", preamp }, { "Codec B Capture Volume", 36 }
+#define QUIET_A \
+	{ "Speaker Amp Switch", 0 }, { "Codec A Output A Playback Switch", 0 }, \
+	{ "Codec A Output B Playback Switch", 0 }, { "Codec A Sidetone Switch", 0 }
+#define QUIET_B \
+	{ "Codec B Output A Playback Switch", 0 }, { "Codec B Output B Playback Switch", 0 }, \
+	{ "Codec B Sidetone Switch", 0 }
+#define SPEAKER_OUT \
+	{ "Codec A Output B Playback Switch", 0 }, { "Codec A Sidetone Switch", 0 }, \
+	{ "Codec A Playback Volume", 30 }, { "Codec A Output A Playback Volume", 6 }, \
+	{ "Codec A Output A Playback Switch", 1 }, { "Speaker Amp Switch", 1 }
 
 struct route routes[ROUTE_ROWS] = {
 	[ROUTE_ALERT] = {
-		.name = "alert", .cap_dev = 1, .play_dev = 1, .echo = ECHO_NONE,
-		.nctl = 15, .ctl = { CAP_A(0, 0), CAP_B(0), SIDETONE(0, 0), OUT(0, 0, 0, 1, 1) },
+		.name = "alert", .cap_dev = 0, .play_dev = 0, .echo = ECHO_NONE, .confirmed = 1,
+		.nctl = 17, .ctl = { QUIET_B, MIC_B(0, 1, 5), MIC_A(0, 48), SPEAKER_OUT },
 	},
 	[T48AC_ROUTE_HANDSET] = {
-		.name = "handset", .cap_dev = 0, .play_dev = 0, .echo = ECHO_NONE,
-		.nctl = 15, .ctl = { CAP_A(1, 0), CAP_B(0), OUT(1, 0, 0, 0, 0), SIDETONE(1, 0) },
+		.name = "handset", .cap_dev = 1, .play_dev = 1, .echo = ECHO_NONE, .confirmed = 1,
+		.nctl = 18, .ctl = { QUIET_A, { "Codec B Output A Playback Switch", 0 },
+			MIC_A(0, 48), MIC_B(1, 1, 5),
+			{ "Codec B Playback Volume", 39 }, { "Codec B Output B Playback Volume", 4 },
+			{ "Codec B Sidetone Volume", 18 }, { "Codec B Sidetone Switch", 1 },
+			{ "Codec B Output B Playback Switch", 1 } },
 	},
 	[T48AC_ROUTE_SPEAKER] = {
-		.name = "speaker", .cap_dev = 1, .play_dev = 1, .echo = ECHO_SWITCH,
-		.coupling_q8 = 256,
-		.nctl = 15, .ctl = { CAP_A(0, 0), CAP_B(1), SIDETONE(0, 0), OUT(0, 0, 0, 1, 1) },
+		.name = "speaker", .cap_dev = 0, .play_dev = 0, .echo = ECHO_SWITCH, .confirmed = 1,
+		.coupling_q8 = 512,	/* measured: the base microphone hears a tone up to 7 dB above its level in the frame played (1.4 kHz) */
+		.nctl = 17, .ctl = { QUIET_B, MIC_B(0, 1, 5), MIC_A(1, 48), SPEAKER_OUT },
 	},
 	[T48AC_ROUTE_HEADSET] = {
-		.name = "headset", .cap_dev = 0, .play_dev = 0, .echo = ECHO_NONE,
-		.nctl = 15, .ctl = { CAP_A(1, 1), CAP_B(0), OUT(0, 1, 0, 0, 0), SIDETONE(1, 0) },
+		/* settings as Yealink's; not tried with a headset plugged in */
+		.name = "headset", .cap_dev = 1, .play_dev = 1, .echo = ECHO_NONE,
+		.nctl = 18, .ctl = { QUIET_A, { "Codec B Output B Playback Switch", 0 },
+			MIC_A(0, 48), MIC_B(1, 0, 7),
+			{ "Codec B Playback Volume", 39 }, { "Codec B Output A Playback Volume", 5 },
+			{ "Codec B Sidetone Volume", 18 }, { "Codec B Sidetone Switch", 1 },
+			{ "Codec B Output A Playback Switch", 1 } },
 	},
 };
 

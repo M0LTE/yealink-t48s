@@ -36,6 +36,7 @@ int main(void)
 	engine_set_route(&e, T48AC_ROUTE_HANDSET);
 	run(&e, 1);
 	CHECK_RANGE(tone_amp(mic_out + N / 2, N / 2, 300), 5900, 6050);
+	CHECK(rms(mic_out, 24 * 320) == 0);	/* held back while the microphone settles */
 	CHECK_RANGE(tone_amp(spk_out, N, 700), 7950, 8050);
 	CHECK(tone_amp(spk_out, N, 300) < 20);	/* no software sidetone */
 	CHECK(engine_hw_row(&e) == T48AC_ROUTE_HANDSET);

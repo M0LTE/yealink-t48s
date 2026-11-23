@@ -2,9 +2,9 @@
  *
  * t48-audiod: the route table (issue #24). A route says which codec to
  * record from, which to play to, what echo control to use, and the mixer
- * controls to set. The compiled-in table is a best guess until the daytime
- * test on the phone says which input and output is which (docs/audio.md);
- * a routes file can replace any of it without a rebuild.
+ * controls to set. The compiled-in table follows the daytime tests on the
+ * phone (docs/audio.md); a routes file can replace any of it without a
+ * rebuild.
  */
 #ifndef AUDIOD_ROUTES_H
 #define AUDIOD_ROUTES_H

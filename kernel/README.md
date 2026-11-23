@@ -1,6 +1,6 @@
 # Our kernel for the T48S
 
-**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 498.89, matching Yealink's 498.07 (see "CPU speed" below). Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. The screen, keys, hook switch and touchscreen have drivers too (below); and the microphones (ALSA capture, below); and the NAND flash, read-only (`docs/nand.md`); none yet for audio playback.
+**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 498.89, matching Yealink's 498.07 (see "CPU speed" below). Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. The screen, keys, hook switch and touchscreen have drivers too (below); and sound in and out (ALSA capture and playback, [docs/audio.md](../docs/audio.md)); and the NAND flash, read-only (`docs/nand.md`).
 
 Linux 3.6.11 (the last mainline release with Broadcom's `mach-bcmring` platform, the BCM11107 family the phone's BCM11188 belongs to), patched and configured for the phone. Built with gcc 4.7 in an Ubuntu 14.04 container.
 
@@ -46,7 +46,7 @@ Userspace for testing: `tools/mkrfs-bb.sh` builds `T48S.rfs` with a static busyb
 
 Yealink's page tables (`kmod/pgdprobe.c`, output in `dumps/yealink-iomap.txt`) confirm mainline's `mm_addr.h`: AXI blocks at 0x30100000 (ARAM), 0x30200000 (DMA0), 0x30300000 (DMA1), 0x30400000 (Ethernet switch), 0x30500000 (LCD), 0x30600000 (APM), 0x30700000 (SPUM), 0x30800000/0x30A00000 (VPM); chip control at 0x80000000 (ChipId reads 0x111880B0, BCM11188 rev B0). Ignore the addresses in the comments in mainline's `mm.c` (0x32000000 etc.), they are stale.
 
-DMA0 (Synopsys DW AHB DMAC, ID 0x44571110) carries audio: Yealink's firmware runs four of its channels between RAM and the APM codecs (the kexec loader stops them before the jump). Our kernel's DMA framework neither initialises its channels nor takes their interrupts; `drivers/t48s_audio.c` programs the two it uses (3 and 5) directly and touches no other. DMA1 carries the Ethernet switch (channel 2 RX, channel 3 TX); its channels are stopped before being reset.
+DMA0 (Synopsys DW AHB DMAC, ID 0x44571110) carries audio: Yealink's firmware runs four of its channels between RAM and the APM codecs (the kexec loader stops them before the jump). Our kernel's DMA framework neither initialises its channels nor takes their interrupts; `drivers/t48s_audio.c` programs the four it uses (2 to 5) directly and touches no other. DMA1 carries the Ethernet switch (channel 2 RX, channel 3 TX); its channels are stopped before being reset.
 
 ## Backlight (2026-11-23)
 

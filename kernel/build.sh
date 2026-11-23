@@ -67,7 +67,7 @@ grep -q "use_cnt = 1, /\* T48S" arch/arm/mach-bcmring/core.c
 # DMA: controller 0 carries audio. Yealink's firmware runs four of its channels for the
 # APM codecs, and writing an active channel's registers faults. The kexec loader stops
 # them all, but the DMA framework still must not reset or claim anything there: the
-# only user is drivers/t48s_audio.c, which programs its own channels (3 and 5) directly
+# only user is drivers/t48s_audio.c, which programs its own channels (2 to 5) directly
 # and touches no other. So leave controller 0 alone here, and stop each controller 1
 # channel before resetting its configuration.
 python3 - <<'EOP'
@@ -134,7 +134,7 @@ grep -q "t48s_backlight.o" drivers/video/backlight/Makefile || echo 'obj-$(CONFI
 # our touchscreen driver (TSC2046 on the PL022 SPI host, polled)
 cp ../kernel/drivers/t48s_touch.c drivers/input/t48s_touch.c
 grep -q "t48s_touch.o" drivers/input/Makefile || echo 'obj-$(CONFIG_INPUT) += t48s_touch.o' >> drivers/input/Makefile
-# our microphone capture driver (ALSA; the APM codecs over DMA0 channels 3 and 5), with
+# our audio driver (ALSA capture and playback; the APM codecs over DMA0 channels 2 to 5), with
 # a Kconfig entry so the ALSA PCM core gets selected
 cp ../kernel/drivers/t48s_audio.c sound/arm/t48s_audio.c
 grep -q "SND_T48S" sound/arm/Kconfig || printf '\nconfig SND_T48S\n\tbool "Yealink T48S audio (BCM11188 APM codecs)"\n\tdepends on SND = y\n\tselect SND_PCM\n' >> sound/arm/Kconfig

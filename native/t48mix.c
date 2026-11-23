@@ -7,8 +7,9 @@
  *   t48mix                    list every control of card 0 with its value
  *   t48mix "NAME" VALUE       set one control (a number; for a switch 0 or 1)
  *
- * It changes only the control named. Read the warning about codec B at the top
- * of the driver before setting anything there in a quiet house.
+ * It changes only the control named. The output switches, gains and the
+ * loudspeaker amplifier make things audible: the driver starts with them all
+ * off and low.
  */
 #include <fcntl.h>
 #include <stdio.h>

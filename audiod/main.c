@@ -27,6 +27,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sched.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -51,6 +54,42 @@ static struct hw *hw;
 static int hw_running, hw_row = -1, linger, verbose;
 static int64_t hw_retry_at;
 static struct client call = { .fd = -1 };
+
+/* --record: a test aid for measuring and tuning on the phone. While a call
+ * stream is open, each tick's three frames go to a 3-channel WAV file:
+ * the microphone as sent to baresip, the far end as received from baresip,
+ * and the loudspeaker as played. It stops by itself after REC_MAX_TICKS. */
+#define REC_MAX_TICKS (120 * 50)
+static FILE *rec;
+static unsigned long rec_ticks;
+
+static void rec_header(void)
+{
+	uint32_t bytes = (uint32_t)(rec_ticks * FRAME * 6);
+	uint32_t h[11] = { 0x46464952, 36 + bytes, 0x45564157, 0x20746d66, 16,
+			   0x00030001, SRATE, SRATE * 6, 0x00100006, 0x61746164, bytes };
+
+	fseek(rec, 0, SEEK_SET);
+	fwrite(h, 4, 11, rec);	/* little-endian hosts only, like the call stream */
+	fflush(rec);
+}
+
+static void rec_frame(const int16_t *mic, const int16_t *far, const int16_t *spk)
+{
+	int16_t out[FRAME * 3];
+	int i;
+
+	if (!rec || rec_ticks >= REC_MAX_TICKS)
+		return;
+	for (i = 0; i < FRAME; i++) {
+		out[3 * i] = mic[i];
+		out[3 * i + 1] = far ? far[i] : 0;
+		out[3 * i + 2] = spk[i];
+	}
+	fseek(rec, 44 + (long)rec_ticks * FRAME * 6, SEEK_SET);
+	fwrite(out, 2, FRAME * 3, rec);
+	rec_ticks++;
+}
 static int call_ready;
 static uint32_t mic_seq;
 static struct client ctl[MAX_CTL];
@@ -356,6 +395,8 @@ static void tick(const int16_t *mic)
 
 	engine_tick(&eng, mic, have ? spk_in : 0, mic_msg.samples, spk_out);
 	hw->playback(hw, spk_out);
+	if (call_ready)
+		rec_frame(mic_msg.samples, have ? spk_in : 0, spk_out);
 	if (call_ready) {
 		mic_msg.seq = mic_seq++;
 		if (msg_send(call.fd, T48A_MIC, &mic_msg, sizeof(mic_msg)) < 0)
@@ -375,6 +416,7 @@ static void tick(const int16_t *mic)
 int main(int argc, char **argv)
 {
 	const char *backend = "null", *mic = 0, *spk = 0, *run_dir = "/run/t48-audiod", *routes_file = 0;
+	const char *rec_file = 0;
 	int card = 0, print_routes = 0, room_ms = 0, room_percent = 0, i, lctl, lcall, sfd;
 	sigset_t sigs;
 
@@ -387,11 +429,13 @@ int main(int argc, char **argv)
 		else if (!strcmp(a, "--spk") && v) spk = v, i++;
 		else if (!strcmp(a, "--run-dir") && v) run_dir = v, i++;
 		else if (!strcmp(a, "--routes") && v) routes_file = v, i++;
+		else if (!strcmp(a, "--record") && v) rec_file = v, i++;
 		else if (!strcmp(a, "--card") && v) card = atoi(v), i++;
 		else if (!strcmp(a, "--room") && v && sscanf(v, "%d,%d", &room_ms, &room_percent) == 2) i++;
 		else {
 			fprintf(stderr, "usage: t48-audiod [--backend null|alsa] [--mic IN.wav] [--spk OUT.wav] [--room MS,PERCENT]\n"
-				"                  [--run-dir DIR] [--routes FILE] [--card N] [--print-routes] [-v]\n");
+				"                  [--run-dir DIR] [--routes FILE] [--card N] [--print-routes] [-v]\n"
+				"                  [--record CALL.wav]\n");
 			return 2;
 		}
 	}
@@ -401,14 +445,32 @@ int main(int argc, char **argv)
 		routes_print();
 		return 0;
 	}
-	if (!strcmp(backend, "alsa"))
+	if (!strcmp(backend, "alsa")) {
+		/* On the phone nothing else may hold the sound up: one SSH login or a
+		 * busy app is enough to make it 40 ms late, which is heard (measured).
+		 * The work is about 0.6 ms in every 20. */
+		struct sched_param prio = { .sched_priority = 10 };
+
+		/* the system call itself: musl's sched_setscheduler() refuses to work */
+		if (syscall(SYS_sched_setscheduler, 0, SCHED_FIFO, &prio) < 0 ||
+		    mlockall(MCL_CURRENT | MCL_FUTURE) < 0)
+			say("no real-time priority (%s): sound may break up when the phone is busy", strerror(errno));
 		hw = hw_alsa_new(card);
+	}
 	else if (!strcmp(backend, "null"))
 		hw = hw_null_new(mic, spk, room_ms, room_percent);
 	else
 		say("unknown backend %s", backend);
 	if (!hw)
 		return 1;
+
+	umask(077);
+	if (rec_file && !(rec = fopen(rec_file, "wb")))
+		say("%s: %s", rec_file, strerror(errno));
+	if (rec) {
+		rec_header();
+		say("RECORDING the call stream to %s (test aid, at most %d s)", rec_file, REC_MAX_TICKS / 50);
+	}
 
 	engine_init(&eng);
 	fq_reset(&spkq);
@@ -487,6 +549,10 @@ int main(int argc, char **argv)
 	}
 
 	call_drop("service stopping");
+	if (rec) {
+		rec_header();
+		fclose(rec);
+	}
 	hw->stop(hw);
 	hw->destroy(hw);
 	say("stopped");
