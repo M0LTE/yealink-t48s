@@ -8,8 +8,8 @@
 LIBT48_VERSION = local
 LIBT48_SITE = $(BR2_EXTERNAL_T48S_PATH)/../libt48
 LIBT48_SITE_METHOD = local
-LIBT48_LICENSE = AGPL-3.0-or-later
-LIBT48_LICENSE_FILES = LICENSE
+LIBT48_LICENSE = AGPL-3.0-or-later, OFL-1.1 (the fonts)
+LIBT48_LICENSE_FILES = LICENSE fonts/OFL-B612.txt fonts/OFL-IBMPlex.txt fonts/OFL-Figtree.txt
 LIBT48_INSTALL_STAGING = YES
 
 # CFLAGS from the environment: the Makefile adds its own to them

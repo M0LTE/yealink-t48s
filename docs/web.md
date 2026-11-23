@@ -36,7 +36,7 @@ Open that address in a browser. A browser the phone has not seen gets one page o
 | Accounts | all six SIP accounts: every field the phone's screen has. The default account. Remove |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server |
 | Date and time | the time zone, from the phone's list, or a TZ string for a place the list lacks |
-| Sound and screen | ringer, handset, speaker and headset levels; brightness, and when the screen dims and goes off |
+| Sound and screen | ringer, handset, speaker and headset levels; brightness, and when the screen dims and goes off; the theme, which the page wears too ([design](design/README.md)) |
 | Contacts | add, change, delete; import a CSV or vCard file (added to the list, or replacing it); download as CSV or vCard |
 | Calls | the call history, and Clear |
 | Apps | what is installed and what the feed offers: install, update, remove; each app's own settings; the feed address |
@@ -87,7 +87,7 @@ Sized for a hobby phone on a home network: not careless, not a bank.
 - **The LAN only.** It listens on `eth0`'s own address (and ties the socket to `eth0`), follows the address when it changes, and turns away callers whose address is not a private one.
 - **Pairing.** Six digits from `/dev/urandom`, shown only on the phone's screen (the file the shell reads them from is root's alone, and apps run as other users). Good for two minutes and five tries, and only for the browser that asked for it. A new code at most every three seconds. Fifteen wrong tries in a row and pairing is closed for ten minutes.
 - **Sessions.** A paired browser holds 256 random bits in a cookie (`HttpOnly`, `SameSite=Strict`), kept in the server's memory only. Eight browsers at most.
-- **Changes need the page's own token.** Every form carries a token tied to the session, and is refused without it. A form sent from another site is refused by its `Origin` as well. Nothing is changed by a GET. No page can be framed, and the pages load nothing from anywhere else (`Content-Security-Policy: default-src 'none'`; the style sheet, the script and the two font files are the phone's own).
+- **Changes need the page's own token.** Every form carries a token tied to the session, and is refused without it. A form sent from another site is refused by its `Origin` as well. Nothing is changed by a GET. No page can be framed, and the pages load nothing from anywhere else (`Content-Security-Policy: default-src 'none'`; the style sheet, the script and the font files are the phone's own).
 - **Nothing typed is logged.** The log says which form was sent and from where, never a value. The pairing code and the cookie are not logged either.
 - **Plain HTTP, and every page says so.** Anyone who can watch the network can read what is sent, passwords included. HTTPS with a self-signed key was the other choice: it would mean a browser warning on every visit, a TLS library in the server, and slow handshakes on a 500 MHz ARMv6, for a page that is on for the few minutes the phone is being set up. Turn the page off when done.
 - **A paired browser can do what the owner can do at the screen**, including turning SSH on and adding a key, which is root on the phone. That is the point of it, and why pairing needs the screen.

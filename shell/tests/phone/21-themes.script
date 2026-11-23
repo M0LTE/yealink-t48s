@@ -1,0 +1,78 @@
+# Themes in a call. Two-tone's ground is green while a call rings and amber while
+# one is held; the theme carries that, so a change of theme in the middle of a call
+# changes it at once. Then a call over an open app, with the theme changed under both:
+# the app wears the new one when it comes back.
+waitstate reg ok 8000
+waitstate audio up 3000
+run $CONFIG set screen theme twotone
+waitstate theme twotone 3000
+expect idle
+waitpixel 5 300 1C3557 2000
+# ---- ringing: the ground is green ----
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+expect call
+expectpixel 5 300 0F5A40
+shot shots/theme-twotone-ringing.png
+# ---- answered: blue again ----
+key headset
+waitstate phone incall 5000
+run $FAR $BOB waitcall established 3
+expectpixel 5 300 1C3557
+# ---- held: amber ----
+key hold
+expectstate hold 1
+expectpixel 5 300 6A4A14
+shot shots/theme-twotone-hold.png
+# ---- another theme while it is held: paper, and the yellow band; the call is not disturbed ----
+run $CONFIG set screen theme directory
+waitstate theme directory 3000
+waitpixel 5 300 F7F7F4 2000
+expectpixel 400 20 FFCE00
+expectstate phone incall
+expectstate hold 1
+shot shots/theme-directory-hold.png
+key hold
+expectstate hold 0
+run $FAR waitlog $BOBLOG CALL_RESUME 5
+# ---- and back while it is up ----
+run $CONFIG set screen theme twotone
+waitstate theme twotone 3000
+waitpixel 5 300 1C3557 2000
+expectstate phone incall
+key headset
+expectstate phone ended
+run $FAR $BOB waitcall none 5
+waitstate phone idle 4000
+expect idle
+
+# ---- a call over an open app, and the theme changed while the app is frozen under it ----
+key ok
+expect launcher
+key ok
+waitframe 3000
+expect app
+waitpixel 5 5 1C3557 2000
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+expect call
+expectpixel 5 300 0F5A40
+wait 1300
+expectstate app stopped
+run $CONFIG set screen theme switchboard
+waitstate theme switchboard 3000
+waitpixel 5 300 000000 2000
+key speaker
+waitstate phone incall 5000
+wait 600
+key speaker
+expectstate phone ended
+waitstate phone idle 4000
+expect app
+waitpixel 5 5 000000 3000
+shot shots/theme-app-after-call.png
+key x
+waitscreen launcher 2000
+run $CONFIG unset screen theme
+waitstate theme switchboard 3000
+quit

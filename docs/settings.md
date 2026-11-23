@@ -18,7 +18,7 @@ Press **Down** on the idle screen, or touch **Settings**. Everything here can al
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server | on leaving the page. If the address is a different one, baresip is started again, as it listens on the address it started with |
 | Date and time | time zone, from a list | at once, in the shell and in apps started afterwards |
 | Sound | ringer, handset, speakerphone and headset levels, 0 to 15 | at once, through the audio service. Nothing is played. The volume keys change the same levels |
-| Screen | brightness, 1 to 10 | at once ([shell.md](shell.md#the-backlight)). The page also says when the screen dims and goes off |
+| Screen | brightness, 1 to 10; the theme, from a small picture of each ([design](design/README.md)) | at once ([shell.md](shell.md#the-backlight)): the screen, the open app and the web setup page change together. The page also says when the screen dims and goes off |
 | Access | SSH on or off, the phone's host key, the keys that can log in, adding a first key; the web setup page on or off | at once ([access.md](access.md), [web.md](web.md)). Both are off until turned on here |
 | Apps | the app manager ([apps.md](apps.md)) | |
 | App settings | each installed app's own settings, from its manifest | the next time the app is opened (an open app is closed) |
@@ -47,7 +47,7 @@ Plain text in `/data/config`, one file per subject, `key=value` a line, `#` for 
 | `network` | `mode` (dhcp or static), `address`, `netmask`, `gateway`, `dns` |
 | `system` | `timezone`: a name from the list (`Europe/London`), or any POSIX TZ string (`XYZ-3`) for a zone the list lacks |
 | `audio` | `ringer`, `handset`, `speaker`, `headset`: 0 to 15 |
-| `screen` | `brightness`: 1 to 10. Not on the screen: `dim_seconds` (120) and `off_seconds` (1800), how long nothing is touched before the screen dims and goes off; 0 is never. The shell picks changes to this file up within five seconds |
+| `screen` | `brightness`: 1 to 10. `theme`: `switchboard` (also when missing or unknown), `directory` or `twotone`. Not on the screen: `dim_seconds` (120) and `off_seconds` (1800), how long nothing is touched before the screen dims and goes off; 0 is never. The shell picks changes to this file up within five seconds |
 | `access` | `ssh`: on or off (off when missing); `web`: the web setup page, the same ([web.md](web.md)); `t48-apply access` makes it so |
 | `feed` | `url`: the app feed, if not the standard one |
 | `apps/ID.conf` | that app's settings, by the keys in its manifest |
@@ -89,7 +89,7 @@ The app gets each value in a SETTING message when it starts. "Reset to defaults"
 
 ## Testing
 
-Brightness is tested in `06-backlight.script` and the Access page in `07-access.script` ([shell.md](shell.md#the-backlight), [access.md](access.md#testing)). `make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, the first account, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
+Brightness is tested in `06-backlight.script`, the Access page in `07-access.script` and themes in `10-themes.script` ([shell.md](shell.md#the-backlight), [access.md](access.md#testing)). `make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, the first account, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
 
 ## On the phone (2026-11-23)
 
