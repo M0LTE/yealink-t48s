@@ -51,6 +51,7 @@
  * refuses anything else), and program len bytes (whole pages) at its start with
  * the driver's usual error correction, erased check and read-back. 0 or -errno.
  */
+int t48s_nand_userenv_rewrite(loff_t block_ofs, const u8 *data, size_t len);
 int __weak t48s_nand_userenv_rewrite(loff_t block_ofs, const u8 *data, size_t len)
 {
 	return -EROFS;
@@ -113,7 +114,8 @@ static ssize_t status_show(struct kobject *kobj, struct kobj_attribute *attr, ch
 
 static void t48s_bootmode_say(const char *what)
 {
-	strlcpy(t48s_bootmode_status, what, sizeof(t48s_bootmode_status));
+	/* snprintf: the one bounded copy both Linux 3.6 and 6.18 have */
+	snprintf(t48s_bootmode_status, sizeof(t48s_bootmode_status), "%s", what);
 	pr_notice("t48s_bootmode: %s\n", what);
 }
 

@@ -13,8 +13,9 @@ fi
 # else in RAM and lost at power off (issue 29, docs/flash.md)
 t48-data mount
 mkdir -p /data/apps /data/appdata /data/config /data/phone
-# userspace is up: disarm the SP805 watchdog the loader armed (unlock, control 0, lock)
-devmem 0x80017c00 32 0x1ACCE551; devmem 0x80017808 32 0; devmem 0x80017c00 32 0
+# userspace is up: turn off the watchdog the loader armed for the boot (through
+# /dev/watchdog where the kernel has a driver, else the registers; issue 52)
+t48-watchdog off
 echo
 echo "===== T48S: our own kernel is running (started from Yealink's kernel) ====="
 uname -a

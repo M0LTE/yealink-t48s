@@ -43,6 +43,9 @@ format)
             { echo "our part of the flash is not erased and not UBI; not touching it" >&2; exit 1; }
     fi
     attach "$M" || exit 1
+    # A current kernel would make the new filesystem in a format Linux 3.6 can only
+    # read. Ask for the one both write, while both kernels are in use (issue 51).
+    [ ! -w /sys/module/ubifs/parameters/default_version ] || echo 4 > /sys/module/ubifs/parameters/default_version
     if ! volume; then
         # leave four blocks spare, so one going bad does not stop UBI
         leb=$(cat /sys/class/ubi/ubi0/eraseblock_size)

@@ -67,7 +67,9 @@ Order: the shell is up first, so the screen works while the rest starts. baresip
 
 While the phone is started by kexec from Yealink's firmware, a reset lands back in Yealink's firmware, because that is what the flash boots.
 
-Before that, the loader's own 90-second watchdog covers the boot: `rcS` turns it off once the system image is up, and rescue turns it off so that it can stay.
+Before that, the loader's own 90-second watchdog covers the boot: `rcS` turns it off once the system image is up (`t48-watchdog off`), and rescue turns it off so that it can stay. `back-to-yealink` resets the phone with `t48-watchdog reset`.
+
+The same program works under both kernels and picks its way when it starts: through `/dev/watchdog` where the kernel has a driver for the timer (Linux 6.18, the standard ARM SP805 driver), and straight at the registers through `/dev/mem` where it has none (Linux 3.6). Its first line in `/var/log/t48/watchdog/current` says which.
 
 ## Sizes that matter
 

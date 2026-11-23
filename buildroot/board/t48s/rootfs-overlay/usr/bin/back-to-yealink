@@ -1,7 +1,8 @@
 #!/bin/sh
-# reset the board through the SP805 watchdog (2 x 1 s); U-Boot then boots Yealink from flash
+# reset the board through the SoC watchdog (2 seconds); U-Boot then boots Yealink from flash
 echo "resetting to Yealink..."
 # our own feeder would keep the watchdog from firing: stop it first
 [ -d /run/service/watchdog ] && sv -w 5 down /run/service/watchdog >/dev/null 2>&1
 sync; umount -r /data 2>/dev/null
-devmem 0x80017c00 32 0x1ACCE551; devmem 0x80017800 32 25000000; devmem 0x80017808 32 3; devmem 0x80017c00 32 0
+# through /dev/watchdog where the kernel has a driver, else the registers (issue 52)
+exec t48-watchdog reset

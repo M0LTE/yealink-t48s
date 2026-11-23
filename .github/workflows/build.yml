@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Builds the root filesystem (Buildroot) and the kexec kernel image with that root
-# filesystem built in. Artifacts on pushes to main; a release on a v* tag. The SDK
+# Builds the root filesystem (Buildroot) and the kexec kernel images with that root
+# filesystem built in: Image-kexec (Linux 3.6, the default) and Image6-kexec (Linux
+# 6.18, kernel6/). Artifacts on pushes to main; a release on a v* tag. The SDK
 # is built only for tags and runs started by hand (gh workflow run build.yml), and
 # each of those also updates the rolling pre-release "sdk-latest" (sdk/README.md).
 # No SSH keys go into anything built here, so what it builds starts with SSH off
@@ -79,10 +80,32 @@ jobs:
           docker run --rm -u "$(id -u):$(id -g)" -v "$RUNNER_TEMP/k:/w" -w /w -e ROOTFS=firststage.cpio -e SYSTEM=system.img \
             t48s-kbuild:trusty sh kernel/build.sh kexec
 
+      # The current kernel (kernel6/, issue 38) beside 3.6, from the same first
+      # stage and system image. Stock Debian compiler in a container; the kernel
+      # source is cached, and kernel6/build.sh checks its SHA-256.
+      - name: Linux 6.18 source cache
+        uses: actions/cache@v4
+        with:
+          path: k6-src
+          key: linux6-${{ hashFiles('kernel6/build.sh') }}
+
+      - name: "Kernel 6.18 (kexec image, and the fit in the 2.5 MB kernel slot)"
+        run: |
+          docker build -q --build-arg QEMU= -t t48s-kbuild6:trixie kernel6/
+          mkdir -p "$RUNNER_TEMP/k6" k6-src
+          cp k6-src/linux-*.tar.xz "$RUNNER_TEMP/k6/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/br/output/images/firststage.cpio" "$RUNNER_TEMP/br/output/images/system.img" "$RUNNER_TEMP/k6/"
+          k6() { docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src:ro" -v "$RUNNER_TEMP/k6:/w" -e ROOTFS=/w/firststage.cpio "$@" t48s-kbuild6:trixie sh /src/kernel6/build.sh /w; }
+          # what would go in the kernel partition: the kernel with the first stage alone
+          k6 -e SLOT=1 -e OUT=zImage6-slot
+          # what kexec starts: the same with the system image beside the first stage
+          k6 -e SYSTEM=/w/system.img -e OUT=Image6-kexec
+          ls k6-src/linux-*.tar.xz >/dev/null 2>&1 || cp "$RUNNER_TEMP"/k6/linux-*.tar.xz k6-src/
+
       - name: Collect outputs
         run: |
           mkdir out
-          cp "$RUNNER_TEMP/k/Image-kexec" out/
+          cp "$RUNNER_TEMP/k/Image-kexec" "$RUNNER_TEMP/k6/Image6-kexec" out/
           cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" "$RUNNER_TEMP/br/output/images/system.img" out/
           if [ -f "$RUNNER_TEMP/t48s-sdk.tar.gz" ]; then cp "$RUNNER_TEMP/t48s-sdk.tar.gz" out/; fi
           gzip -9 out/rootfs.cpio
@@ -117,4 +140,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
-            --notes "Image-kexec boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). It carries no SSH keys and no password, and SSH is off until it is turned on at the phone's screen (Settings, Access; docs/access.md). system.img is the system image built into it (docs/boot.md) and rootfs.cpio.gz the same files as an archive; t48s-sdk.tar.gz is the app SDK (sdk/README.md)."
+            --notes "Image-kexec boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). Image6-kexec is the same system on Linux 6.18 instead of 3.6, started the same way. It carries no SSH keys and no password, and SSH is off until it is turned on at the phone's screen (Settings, Access; docs/access.md). system.img is the system image built into it (docs/boot.md) and rootfs.cpio.gz the same files as an archive; t48s-sdk.tar.gz is the app SDK (sdk/README.md)."

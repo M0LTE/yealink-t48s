@@ -12,13 +12,13 @@
 #   ROOTFS           Buildroot's rootfs.cpio(.gz) or firststage.cpio (required)
 #   SYSTEM           Buildroot's system.img, added as /system.img (optional)
 #   AUTHORIZED_KEYS  SSH keys for a development build, as kernel/build.sh (optional)
-#   OVERLAY          directory laid over ROOTFS (default kernel6/initramfs-overlay;
-#                    empty for none)
+#   OVERLAY          a directory laid over ROOTFS (optional)
 #   DEBUG=0          leave out the early debug output (kernel6/debug.config)
-#   NAND=1           add the read-only flash driver (kernel6/nand.config)
+#   NAND=0           leave out the flash driver, UBI and UBIFS (kernel6/nand.config)
 #   DTS              board device tree (default bcm11188-yealink-t48s)
 #   EXTRA_CONFIG     one more config fragment
 #   OUT              name of the result (default zImage-t48s)
+#   SLOT=1           fail if the result is larger than the 2.5 MB kernel partition
 set -e
 KVER=6.18.65
 KSHA=c92606f956f09dc50b5a0e2af9e86763fce27ada1647de97f8d1ac8cfc95801d
@@ -51,13 +51,15 @@ if [ -f "$HERE/drivers/Makefile" ]; then
     rm -rf "$SRC/drivers/t48s"
     mkdir -p "$SRC/drivers/t48s"
     cp "$HERE"/drivers/* "$SRC/drivers/t48s/"
+    # one file is shared with the 3.6 kernel as it is
+    cp "$HERE"/../kernel/drivers/t48s_bootmode.c "$HERE"/../kernel/drivers/t48s_bootmode_env.h "$SRC/drivers/t48s/"
     grep -q 'drivers/t48s/Kconfig' "$SRC/drivers/Kconfig" || sed -i 's|^endmenu$|source "drivers/t48s/Kconfig"\n\nendmenu|' "$SRC/drivers/Kconfig"
     grep -q 't48s/' "$SRC/drivers/Makefile" || echo 'obj-y += t48s/' >> "$SRC/drivers/Makefile"
 fi
 
 # the root filesystem
 python3 "$HERE/mkinitramfs.py" "$WORK/initramfs-$DTS.cpio" "$ROOTFS" \
-    ${OVERLAY---overlay "$HERE/initramfs-overlay"} ${OVERLAY:+--overlay "$OVERLAY"} \
+    ${OVERLAY:+--overlay "$OVERLAY"} \
     ${SYSTEM:+--file "system.img=$SYSTEM:444"} \
     $( [ -f "${AUTHORIZED_KEYS:-$WORK/root.authorized_keys}" ] && echo "--file etc/t48-dev/authorized_keys=${AUTHORIZED_KEYS:-$WORK/root.authorized_keys}:600" )
 
@@ -65,7 +67,7 @@ python3 "$HERE/mkinitramfs.py" "$WORK/initramfs-$DTS.cpio" "$ROOTFS" \
 mkdir -p "$BUILD"
 cat "$HERE/t48s.config" > "$BUILD/all.config"
 [ "${DEBUG:-1}" = 0 ] || cat "$HERE/debug.config" >> "$BUILD/all.config"
-[ "${NAND:-0}" != 1 ] || cat "$HERE/nand.config" >> "$BUILD/all.config"
+[ "${NAND:-1}" != 1 ] || cat "$HERE/nand.config" >> "$BUILD/all.config"
 [ -z "$EXTRA_CONFIG" ] || cat "$EXTRA_CONFIG" >> "$BUILD/all.config"
 cat >> "$BUILD/all.config" <<EOC
 CONFIG_INITRAMFS_SOURCE="$WORK/initramfs-$DTS.cpio"
@@ -79,24 +81,37 @@ for o in $(grep -o '^CONFIG_[A-Z0-9_]*=[ym]' "$BUILD/all.config"); do
     grep -q "^$o\$" "$BUILD/.config" || { echo "config: $o was dropped" >&2; fail=1; }
 done
 [ $fail = 0 ] || exit 1
-# The flash: none at all unless NAND=1, and then only drivers/t48s_nand.c, which
-# cannot program or erase. Stop if the configuration holds any other NAND
-# controller driver or anything that writes through MTD: block devices, UBI,
-# flash filesystems, partitions from the command line, test modules.
-if [ "${NAND:-0}" != 1 ]; then
-    if grep -q "^CONFIG_MTD=" "$BUILD/.config"; then echo "CONFIG_MTD is set without NAND=1" >&2; exit 1; fi
+# The flash is written only through drivers/t48s_nand.c, which lets UBI reach our
+# own range and nothing else (issues 29 and 51). Stop if the configuration holds
+# any other NAND controller driver or any other way to the flash: block devices,
+# other flash filesystems, partitions from the command line or the device tree,
+# test modules. NAND=0 builds a kernel with no flash at all.
+if [ "${NAND:-1}" != 1 ]; then
+    if grep -q "^CONFIG_MTD=" "$BUILD/.config"; then echo "CONFIG_MTD is set with NAND=0" >&2; exit 1; fi
 else
-    grep -q "PAGEPROG\|SEQIN\|ERASE1\|ERASE2\|IO_ADDR_W = [^N]" "$HERE/drivers/t48s_nand.c" && { echo "t48s_nand.c mentions a program or erase command: it must only read" >&2; exit 1; }
     for o in $(grep -o '^CONFIG_MTD_NAND_[A-Z0-9_]*=y' "$BUILD/.config" | cut -d= -f1); do
         case $o in CONFIG_MTD_NAND_CORE|CONFIG_MTD_NAND_ECC) ;; *) echo "$o is set: only t48s_nand may drive the flash" >&2; exit 1 ;; esac
     done
-    for o in MTD_BLOCK MTD_BLOCK_RO MTD_CMDLINE_PARTS MTD_UBI UBIFS_FS JFFS2_FS MTD_OOPS MTD_SWAP MTD_TESTS \
-             MTD_PARTITIONED_MASTER FTL NFTL INFTL RFD_FTL SSFDC SM_FTL MTD_SPI_NAND MTD_SPI_NOR MTD_CFI; do
+    for o in MTD_BLOCK MTD_BLOCK_RO MTD_CMDLINE_PARTS MTD_OF_PARTS MTD_REDBOOT_PARTS MTD_AFS_PARTS \
+             MTD_UBI_GLUEBI MTD_UBI_BLOCK MTD_UBI_FASTMAP MTD_UBI_NVMEM MTD_UBI_FAULT_INJECTION \
+             JFFS2_FS YAFFS_FS MTD_OOPS MTD_SWAP MTD_TESTS MTD_NAND_NANDSIM MTD_NAND_ECC_SW_BCH \
+             MTD_PARTITIONED_MASTER FTL NFTL INFTL RFD_FTL SSFDC SM_FTL MTD_SPI_NAND MTD_SPI_NOR MTD_CFI \
+             UBIFS_FS_AUTHENTICATION UBIFS_FS_ZSTD FS_ENCRYPTION; do
         if grep -q "^CONFIG_$o=" "$BUILD/.config"; then echo "CONFIG_$o is set: not a way to the flash we allow" >&2; exit 1; fi
     done
-    grep -q "^CONFIG_T48S_NAND=y" "$BUILD/.config"
+    for o in T48S_NAND MTD_UBI UBIFS_FS UBIFS_FS_LZO UBIFS_FS_ZLIB; do
+        grep -q "^CONFIG_$o=y" "$BUILD/.config" || { echo "CONFIG_$o is missing" >&2; exit 1; }
+    done
+    grep -q '^CONFIG_MTD_UBI_BEB_LIMIT=2$' "$BUILD/.config" || { echo "CONFIG_MTD_UBI_BEB_LIMIT is not 2" >&2; exit 1; }
 fi
 
 $M -s -j"$(nproc)" zImage "broadcom/$DTS.dtb"
 cat "$BUILD/arch/arm/boot/zImage" "$BUILD/arch/arm/boot/dts/broadcom/$DTS.dtb" > "$WORK/$OUT"
 ls -l "$BUILD/arch/arm/boot/Image" "$BUILD/arch/arm/boot/zImage" "$WORK/$OUT" | awk '{print $5, $9}'
+# SLOT=1: the result must fit the kernel partition (2.5 MB). Meant for a build with
+# the first stage alone, which is what goes there (docs/boot.md).
+if [ "${SLOT:-0}" = 1 ]; then
+    size=$(wc -c < "$WORK/$OUT")
+    echo "kernel slot: $size of 2621440 bytes used, $((2621440 - size)) free"
+    [ "$size" -le 2621440 ] || { echo "$OUT does not fit the 2.5 MB kernel slot" >&2; exit 1; }
+fi

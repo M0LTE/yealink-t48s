@@ -33,7 +33,11 @@ config T48S_AUDIO
 	select SND_PCM
 
 config T48S_NAND
-	bool "T48S NAND flash, read-only"
+	bool "T48S NAND flash: read everywhere, write only our own range"
 	depends on MTD_RAW_NAND = y
+
+config T48S_BOOTMODE
+	bool "T48S: U-Boot's BOOTMODE flag (kernel/drivers/t48s_bootmode.c)"
+	depends on T48S_NAND
 
 endmenu
