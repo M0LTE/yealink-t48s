@@ -36,6 +36,7 @@ struct options opt = {
     .sip = "/run/t48-sip/ctrl.sock",
     .audio = T48AC_SOCKET,
     .apply = "/usr/bin/t48-apply",
+    .access = "/run/t48-access",
 };
 
 enum screen { SCR_IDLE, SCR_LAUNCHER, SCR_APP, SCR_CALL, SCR_MESSAGE, SCR_HISTORY, SCR_SETTINGS };
@@ -450,6 +451,7 @@ static void launcher_key(int code)
 
 void shell_key(int code, int down)
 {
+    if (backlight_key(code, down)) return;   /* it woke a dark screen, and that is all it does */
     if (code >= SK_VOLDOWN) {
         /* phone keys stay with the shell, whatever is on the screen */
         phone_key(code, down);
@@ -506,6 +508,7 @@ int ui_inside(int x, int y, int bx, int by, int bw, int bh)
 
 void shell_touch(int state, int x, int y)
 {
+    if (backlight_touch(state)) return;
     if (scr == SCR_APP) { app_touch(state, x, y); return; }
     if (scr == SCR_SETTINGS) { settings_touch(state, x, y); return; }
     if (state != T48_TOUCH_DOWN) return;
@@ -536,12 +539,17 @@ void shell_touch(int state, int x, int y)
     }
 }
 
-void shell_hook(int off_hook) { phone_hook(off_hook); }
+void shell_hook(int off_hook)
+{
+    backlight_wake("the handset");
+    phone_hook(off_hook);
+}
 
 /* ---------- the phone takes the screen, and gives it back ---------- */
 
 void shell_phone_screen(int want)
 {
+    if (want) backlight_wake("the phone");
     if (want && scr != SCR_CALL) {
         /* calls come first: whatever is showing gives way at once */
         under_call = scr == SCR_HISTORY ? SCR_IDLE : scr;
@@ -579,6 +587,7 @@ const char *shell_state(const char *key)
     if (!strcmp(key, "app")) return app_states[app_state()];
     if (!strcmp(key, "appid")) return app_id()[0] ? app_id() : "-";
     const char *v = settings_state(key);
+    if (!v) v = backlight_state(key);
     return v ? v : phone_state(key);
 }
 
@@ -608,6 +617,7 @@ static void usage(void)
         "  --audio SOCKET   the audio service's control socket (%s; the same)\n"
         "  --fb DEVICE      framebuffer (%s)\n"
         "  --apply PROGRAM  run with a settings file's name when it has changed (%s)\n"
+        "  --access DIR     where t48-access leaves its status file (%s)\n"
         "  --app ID         start this app straight away\n"
         "simulator only:\n"
         "  --script FILE    input script, - for standard input (see docs/shell.md)\n"
@@ -615,7 +625,7 @@ static void usage(void)
         "  --runner PROGRAM run apps with this, such as qemu-arm for apps built for the phone\n"
         "also: t48-app (install, update and remove apps) and t48-config (settings), each with its own help\n",
         opt.apps, opt.data, opt.config, opt.state, opt.sip ? opt.sip : "none", opt.audio ? opt.audio : "none", opt.fb,
-        opt.apply ? opt.apply : "none");
+        opt.apply ? opt.apply : "none", opt.access);
 }
 
 int main(int argc, char **argv)
@@ -648,22 +658,25 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--shot")) dst = &opt.shot;
         else if (!strcmp(argv[i], "--apply")) dst = &opt.apply;
         else if (!strcmp(argv[i], "--runner")) dst = &opt.runner;
+        else if (!strcmp(argv[i], "--access")) dst = &opt.access;
         if (!dst || i + 1 >= argc) { usage(); return 2; }
         *dst = argv[++i];
     }
     if (sim) {
         /* keep a PC's /data out of it unless asked */
-        int data_set = 0, apps_set = 0, config_set = 0, state_set = 0;
+        int data_set = 0, apps_set = 0, config_set = 0, state_set = 0, access_set = 0;
         for (int i = 1; i < argc; i++) {
             data_set |= !strcmp(argv[i], "--data");
             apps_set |= !strcmp(argv[i], "--apps");
             config_set |= !strcmp(argv[i], "--config");
             state_set |= !strcmp(argv[i], "--state");
+            access_set |= !strcmp(argv[i], "--access");
         }
         snprintf(sim_data, sizeof sim_data, "/tmp/t48-sim-%d", (int)getuid());
         if (!data_set) opt.data = sim_data;
         if (!config_set) opt.config = sim_data;
         if (!state_set) opt.state = sim_data;
+        if (!access_set) opt.access = sim_data;
         if (!apps_set) opt.apps = "apps";
     }
     be = sim ? &be_sim : &be_fb;
@@ -685,6 +698,7 @@ int main(int argc, char **argv)
     settings_init();
     phone_init();
     if (be->init() < 0) return 1;
+    backlight_init();
     logmsg("t48-shell on the %s, API level %d", be->name, T48_API_LEVEL);
     manifests_scan(opt.apps);
     redraw();
@@ -706,6 +720,7 @@ int main(int argc, char **argv)
         if ((t = sipc_timeout(now)) >= 0 && t < wait) wait = t;
         if ((t = audioc_timeout(now)) >= 0 && t < wait) wait = t;
         if (scr == SCR_SETTINGS && (t = settings_timeout(now)) >= 0 && t < wait) wait = t;
+        if ((t = backlight_timeout(now)) >= 0 && t < wait) wait = t;
         if (x_deadline && x_deadline - now < wait) wait = (int)(x_deadline > now ? x_deadline - now : 0);
 
         pf[n].fd = chld_pipe[0]; pf[n++].events = POLLIN;
@@ -746,6 +761,7 @@ int main(int argc, char **argv)
         phone_tick(now);
         if (scr == SCR_SETTINGS) settings_tick(now);
         be->tick(now);
+        backlight_tick(now);
         if (x_deadline && now >= x_deadline && scr == SCR_APP) go_home();
         if (now >= next_clock) {
             next_clock = now + 1000;

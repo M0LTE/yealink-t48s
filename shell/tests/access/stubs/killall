@@ -1,0 +1,3 @@
+#!/bin/sh
+# stand-in: nothing on this PC is to be killed by name
+exit 0

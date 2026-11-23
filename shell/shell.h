@@ -42,6 +42,7 @@ struct options {
     const char *sip;     /* baresip's control socket (t48ctrl), NULL: no SIP */
     const char *audio;   /* the audio service's control socket, NULL: no audio */
     const char *apply;   /* program run with a settings file's name when that file has changed, NULL: none */
+    const char *access;  /* folder where t48-access leaves its status file (docs/access.md) */
     const char *runner;  /* simulator: a program to run apps with, such as qemu-arm for the phone's own builds */
 };
 extern struct options opt;
@@ -130,7 +131,7 @@ const char *pkg_default_feed(void);
 
 /* ---------- settings and app manager screens (settings.c) ---------- */
 
-void settings_init(void);                    /* at start: the time zone, the backlight */
+void settings_init(void);                    /* at start: the time zone */
 void settings_open(int app_manager);         /* the settings list, or straight to the app manager */
 void settings_close(void);
 void settings_draw(void);
@@ -171,6 +172,20 @@ void audioc_mute(int on);
 void audioc_tone(int tone);
 void audioc_ring(int on);
 void audioc_key(int ch);
+
+/* ---------- the backlight (backlight.c): bright, dimmed, off ---------- */
+
+#define BL_LEVELS 10
+void backlight_init(void);
+int backlight_present(void);                 /* is there a backlight device at all */
+int backlight_level(void);                   /* the brightness when bright, 1 to BL_LEVELS */
+void backlight_set_level(int level);
+void backlight_wake(const char *why);        /* light the screen: a call has arrived */
+int backlight_key(int code, int down);       /* 1: the key only woke the screen and goes no further */
+int backlight_touch(int state);              /* the same for a touch */
+int backlight_timeout(long long now);
+void backlight_tick(long long now);
+const char *backlight_state(const char *key);
 
 /* ---------- lamps (leds.c): a place for the driver of issue #3 ---------- */
 

@@ -6,7 +6,9 @@
 #   network   DHCP, or the fixed address in the file
 #   sip       restart baresip, if it is running
 #   system    nothing to do: the shell follows the time zone by itself
-#   access    nothing yet (issue 28)
+#   access    SSH on or off (t48-access, docs/access.md); also access-door-open,
+#             access-door-close and access-forget-keys, which the Access page uses
+#   screen    nothing to do: the shell follows the file by itself
 get() { t48-config get "$1" "$2" 2>/dev/null || echo "$3"; }
 
 case "$1" in
@@ -37,7 +39,9 @@ sip)
         sleep 1
         t48-sip >>/var/log/t48-sip.log 2>&1 &
     fi ;;
-system|access|audio|screen|feed) ;;
+access) exec t48-access apply ;;
+access-*) exec t48-access "${1#access-}" ;;
+system|audio|screen|feed) ;;
 *) echo "usage: t48-apply network | sip | system | access" >&2; exit 2 ;;
 esac
 exit 0

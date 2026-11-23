@@ -17,7 +17,7 @@ if [ -e /dev/fb0 ]; then
 else
     /usr/bin/membanner "OUR KERNEL" "$(uname -sr) $(uname -v)" "started from Yealink's kernel, no key presses" "$(grep -m1 MemTotal /proc/meminfo)" "busybox shell on the serial console"
 fi
-# network: DHCP on the switch's CPU port, then SSH (key login only)
+# network: DHCP on the switch's CPU port
 hostname t48s
 ifconfig lo 127.0.0.1 up
 ifconfig eth0 up
@@ -29,6 +29,6 @@ ifconfig eth0 up
 rm -f /dev/random && mknod -m 666 /dev/random c 1 9
 # DHCP, or the fixed address in /data/config/network (docs/settings.md)
 t48-apply network
-mkdir -p /var/run/dropbear   # /etc/dropbear points here (Buildroot)
-dropbearkey -t ed25519 -f /etc/dropbear/host_ed25519 >/dev/null 2>&1
-dropbear -s -r /etc/dropbear/host_ed25519 -P /var/run/dropbear.pid
+# SSH: off unless the owner has turned it on at the screen, or this is one of our own
+# test builds (docs/access.md)
+t48-access boot

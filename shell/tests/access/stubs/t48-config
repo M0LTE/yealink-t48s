@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "$SIM_BIN/t48-config" --config "$SIM_BIN/simdata/config" "$@"

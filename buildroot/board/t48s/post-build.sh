@@ -9,3 +9,8 @@ rm -f "$TARGET_DIR"/etc/init.d/S[0-9][0-9]*
 # data, settings, call history. In RAM for now, like the rest of the image.
 mkdir -p "$TARGET_DIR"/data/apps "$TARGET_DIR"/data/appdata "$TARGET_DIR"/data/config \
     "$TARGET_DIR"/data/phone
+# root's SSH keys live with the rest of what the owner has set (docs/access.md)
+rm -rf "$TARGET_DIR"/root/.ssh
+ln -s /data/access/ssh "$TARGET_DIR"/root/.ssh
+# dropbear's own start script and key folder are not used: t48-access runs it
+rm -f "$TARGET_DIR"/etc/dropbear

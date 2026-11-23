@@ -1,0 +1,144 @@
+# Access (issue 28): SSH is off until the owner turns it on, and a first key
+# gets onto the phone through a short-lived password. The phone's real
+# t48-access script runs behind this, with stand-ins for dropbear
+# (tests/access/).
+# what the phone does at boot: the host key is made, SSH stays off
+run sh ../tests/access/apply.sh access
+run grep -qx ssh=off simdata/access/status
+run test ! -f simdata/access/dropbear.started
+wait 200
+touch 590 420
+expectstate settings.page root
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Access
+key ok
+expectstate settings.page access
+expectstate settings.row SSH
+expectstate settings.value off
+shot shots/access-off.png
+# adding a key is not offered while SSH is off
+expectstate cfg.access.ssh (unset)
+
+# ---- turning it on asks first, and shows the host key ----
+key ok
+expectstate overlay confirm
+expectstate overlay.title Turn_SSH_on?
+shot shots/access-confirm.png
+# no: nothing changes
+key x
+expectstate overlay none
+expectstate cfg.access.ssh (unset)
+run test ! -f simdata/access/dropbear.started
+# yes
+key ok
+key ok
+expectstate overlay none
+expectstate cfg.access.ssh on
+wait 1500
+expectstate settings.value on
+run grep -qx ssh=on simdata/access/status
+# keys only
+run grep -q -- "^-s -r " simdata/access/dropbear.started
+run test "$(wc -l < simdata/access/dropbear.started)" = 1
+shot shots/access-on.png
+
+# ---- a first key: password login, for a while ----
+key down
+key down
+key down
+key down
+expectstate settings.row Add_a_key_from_your_computer
+key ok
+expectstate overlay confirm
+key ok
+expectstate overlay door
+expectstate door.password (shown)
+wait 1500
+run grep -qx door=open simdata/access/status
+shot shots/access-door.png
+# the password went to the script on its standard input, is the root password now, and is not in the log
+run test "$(wc -c < simdata/access/password.given)" = 14
+run grep -q '^root:\$6\$stub\$' simdata/access/etc/shadow
+run ! grep -qF "$(cat simdata/access/password.given)" sim.log
+# the server was started again, this time without -s
+run test "$(wc -l < simdata/access/dropbear.started)" = 2
+run tail -1 simdata/access/dropbear.started | grep -q -- "^-r "
+# OK only hides the password screen; the door is still open
+key ok
+expectstate overlay none
+run grep -qx door=open simdata/access/status
+expectstate settings.row Password_login_is_open
+key ok
+expectstate overlay door
+
+# ---- the key arrives (ssh-copy-id adds a line): the door closes by itself ----
+run echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOeStCLCiE0njMGEkRNUHaNmd+dNxoLC9NECKxV/wLQ9 tom@desk" >> simdata/access/keep/ssh/authorized_keys
+waitstate overlay message 5000
+expectstate overlay.title Your_key_is_on_the_phone
+expectstate door.password (none)
+run grep -qx door=closed simdata/access/status
+run grep -qx 'root:\*:::::::' simdata/access/etc/shadow
+run grep -qx keys=1 simdata/access/status
+run tail -1 simdata/access/dropbear.started | grep -q -- "^-s -r "
+shot shots/access-key-arrived.png
+key ok
+expectstate overlay none
+shot shots/access-with-key.png
+
+# ---- closing it by hand ----
+key ok
+key ok
+expectstate overlay door
+wait 1500
+run grep -qx door=open simdata/access/status
+touch 500 407
+expectstate overlay none
+expectstate door.password (none)
+wait 1500
+run grep -qx door=closed simdata/access/status
+run grep -qx 'root:\*:::::::' simdata/access/etc/shadow
+expectstate settings.row Add_a_key_from_your_computer
+
+# ---- forgetting the keys ----
+key down
+expectstate settings.row Forget_all_keys
+key ok
+expectstate overlay confirm
+key ok
+wait 1500
+run grep -qx keys=0 simdata/access/status
+run test ! -s simdata/access/keep/ssh/authorized_keys
+
+# ---- off again: no question, and the server is stopped ----
+key up
+key up
+key up
+key up
+key up
+key up
+expectstate settings.row SSH
+key ok
+expectstate overlay none
+expectstate cfg.access.ssh off
+wait 1500
+run grep -qx ssh=off simdata/access/status
+expectstate settings.value off
+
+# ---- a development build: always on, whatever the setting says ----
+run mkdir -p simdata/access/dev && echo "ssh-rsa AAAAB3NzaC1yc2E dev@build" > simdata/access/dev/authorized_keys
+run sh ../tests/access/apply.sh access
+wait 1000
+expectstate settings.value on
+run grep -qx dev=yes simdata/access/status
+run grep -qx ssh=on simdata/access/status
+run grep -qx keys=1 simdata/access/status
+# the switch does nothing there
+key ok
+expectstate overlay none
+expectstate settings.value on
+run grep -qx ssh=on simdata/access/status
+shot shots/access-dev.png

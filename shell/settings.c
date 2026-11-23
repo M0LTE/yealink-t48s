@@ -37,7 +37,8 @@ static const char *const page_names[] = {"root", "sip", "network", "time", "time
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
 enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16 };
-enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL };
+enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
+              A_SSH, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS };
 
 struct row {
     int kind, flags;
@@ -69,8 +70,16 @@ static t48_kbd kbd;
 static int kbd_open;
 static struct row kbd_row;
 
-enum overlay_kind { O_NONE, O_BUSY, O_MSG, O_CONFIRM };
-static struct { enum overlay_kind kind; char title[96], text[300]; int percent; enum action act; char arg[64]; } ov;
+enum overlay_kind { O_NONE, O_BUSY, O_MSG, O_CONFIRM, O_DOOR };
+static struct {
+    enum overlay_kind kind;
+    char title[96], text[300];
+    char extra[120];              /* O_CONFIRM: one more line in small print, such as a key's fingerprint */
+    const char *yes, *no;         /* O_CONFIRM: what the two buttons say */
+    int percent;
+    enum action act;
+    char arg[64];
+} ov;
 
 /* ---------- time zones ---------- */
 
@@ -151,56 +160,109 @@ static void apply_tz(void)
     tzset();
 }
 
-/* ---------- the backlight: a place for the driver of issue #18 ---------- */
-
-/* Finds a standard Linux backlight device if a driver ever registers one.
- * There is none today, so the Screen page says so and stores nothing. */
-static int backlight_path(char *out, size_t n, const char *leaf)
-{
-    DIR *d = opendir("/sys/class/backlight");
-    struct dirent *de;
-    int found = 0;
-    if (!d) return 0;
-    while (!found && (de = readdir(d)))
-        if (de->d_name[0] != '.') { snprintf(out, n, "/sys/class/backlight/%s/%s", de->d_name, leaf); found = 1; }
-    closedir(d);
-    return found;
-}
-
-static int backlight_set(int level)   /* 0 to 10; -1 if there is no driver */
-{
-    char p[300];
-    int max = 0;
-    FILE *f;
-    if (!backlight_path(p, sizeof p, "max_brightness") || !(f = fopen(p, "r"))) return -1;
-    if (fscanf(f, "%d", &max) != 1) max = 0;
-    fclose(f);
-    if (max <= 0 || !backlight_path(p, sizeof p, "brightness") || !(f = fopen(p, "w"))) return -1;
-    fprintf(f, "%d\n", level <= 0 ? 1 : max * level / 10);   /* never fully dark: the screen is how you get back */
-    fclose(f);
-    return 0;
-}
-
 /* ---------- making the running system follow a changed file ---------- */
 
-static void run_apply(const char *what)
+/* input, if given, is one line for the program's standard input: a secret
+ * goes that way, never on a command line, which any program can read */
+static void run_apply_with(const char *what, const char *input)
 {
-    logmsg("settings: %s changed", what);
+    int p[2] = {-1, -1};
+    logmsg("settings: %s", what);
     if (!strcmp(what, "sip")) phone_reload_account();
     if (!opt.apply || !opt.apply[0]) return;
+    if (input && pipe(p) < 0) return;
     pid_t pid = fork();
     if (pid == 0) {
+        if (input) dup2(p[0], 0);
         for (int fd = 3; fd < 256; fd++) close(fd);
         execl(opt.apply, opt.apply, what, (char *)NULL);
         _exit(127);
     }
+    if (input) {
+        close(p[0]);
+        if (pid > 0 && (write(p[1], input, strlen(input)) < 0 || write(p[1], "\n", 1) < 0)) {}
+        close(p[1]);
+    }
 }
+
+static void run_apply(const char *what) { run_apply_with(what, NULL); }
 
 void settings_init(void)
 {
     apply_tz();
-    int b = atoi(cfg_str("screen", "brightness", "-1"));
-    if (b >= 0) backlight_set(b);
+}
+
+/* ---------- access: SSH, the host key, the owner's keys (issue #28) ---------- */
+
+/* What t48-access last wrote in its status file (docs/access.md). Nothing is
+ * known until it has run, which in the simulator is never unless --apply
+ * names a program that plays its part. */
+#define MAX_KEYS 8
+static struct {
+    char raw[1500];
+    int known, dev, running, door, nkeys;
+    long door_until;
+    char host_key[100];
+    char key[MAX_KEYS][80];
+} acc;
+static char door_password[20];    /* shown while password login is open; never logged, never stored */
+static int door_keys_before;
+static long long door_asked;      /* when password login was asked for */
+static long long acc_checked;
+
+/* 1 if it has changed since the last look */
+static int access_read(void)
+{
+    char path[300], raw[sizeof acc.raw] = "";
+    snprintf(path, sizeof path, "%s/status", opt.access);
+    FILE *f = fopen(path, "r");
+    if (f) {
+        size_t n = fread(raw, 1, sizeof raw - 1, f);
+        raw[n] = 0;
+        fclose(f);
+    }
+    if (acc.known == (f != NULL) && !strcmp(raw, acc.raw)) return 0;
+    memset(&acc, 0, sizeof acc);
+    snprintf(acc.raw, sizeof acc.raw, "%s", raw);
+    acc.known = f != NULL;
+    int listed = 0;
+    for (char *line = strtok(raw, "\n"); line; line = strtok(NULL, "\n")) {
+        if (!strcmp(line, "dev=yes")) acc.dev = 1;
+        else if (!strcmp(line, "ssh=on")) acc.running = 1;
+        else if (!strcmp(line, "door=open")) acc.door = 1;
+        else if (!strncmp(line, "door_until=", 11)) acc.door_until = atol(line + 11);
+        else if (!strncmp(line, "host_key=", 9)) snprintf(acc.host_key, sizeof acc.host_key, "%s", line + 9);
+        else if (!strncmp(line, "keys=", 5)) acc.nkeys = atoi(line + 5);
+        else if (!strncmp(line, "key=", 4) && listed < MAX_KEYS) snprintf(acc.key[listed++], sizeof acc.key[0], "%s", line + 4);
+    }
+    return 1;
+}
+
+/* a password to read off the screen and type once: 12 letters and digits
+ * that cannot be mistaken for each other, in three groups */
+static int make_password(char *out)
+{
+    static const char alphabet[] = "abcdefghjkmnpqrstuvwxyz23456789";   /* 31 of them */
+    unsigned char r[12];
+    FILE *f = fopen("/dev/urandom", "r");
+    if (!f) return -1;
+    size_t got = fread(r, 1, sizeof r, f);
+    fclose(f);
+    if (got != sizeof r) return -1;
+    char *p = out;
+    for (int i = 0; i < 12; i++) {
+        if (i && i % 4 == 0) *p++ = '-';
+        *p++ = alphabet[r[i] % 31];
+    }
+    *p = 0;
+    return 0;
+}
+
+static void door_left(char *out, size_t n)
+{
+    long left = acc.door_until - (long)time(NULL);
+    if (left < 0) left = 0;
+    snprintf(out, n, "%ld:%02ld", left / 60, left % 60);
 }
 
 /* ---------- the app manager's child process ---------- */
@@ -463,11 +525,11 @@ static const struct manifest *installed(const char *id)
 
 static void build_root(void)
 {
-    char v[200], acc[120];
+    char v[200], user[120];
     int up;
     snprintf(title, sizeof title, "Settings");
-    snprintf(acc, sizeof acc, "%s", cfg_str("sip", "user", ""));
-    if (acc[0]) snprintf(v, sizeof v, "%s@%s", acc, cfg_str("sip", "domain", "?"));
+    snprintf(user, sizeof user, "%s", cfg_str("sip", "user", ""));
+    if (user[0]) snprintf(v, sizeof v, "%s@%s", user, cfg_str("sip", "domain", "?"));
     else snprintf(v, sizeof v, "not set");
     add_menu("Phone account", P_SIP, v);
     ui_network_status(v, sizeof v, &up);
@@ -475,7 +537,8 @@ static void build_root(void)
     add_menu("Date and time", P_TIME, cfg_str("system", "timezone", "UTC"));
     add_menu("Sound", P_SOUND, "");
     add_menu("Screen", P_SCREEN, "");
-    add_menu("Access", P_ACCESS, "");
+    access_read();
+    add_menu("Access", P_ACCESS, acc.dev || !strcmp(cfg_str("access", "ssh", "off"), "on") ? "SSH on" : "SSH off");
     snprintf(v, sizeof v, "%d installed", napps);
     add_menu("Apps", P_STORE, v);
     add_menu("App settings", P_APPSETTINGS, "");
@@ -557,24 +620,59 @@ static void build_sound(void)
 
 static void build_screen(void)
 {
-    char p[300];
-    int have = backlight_path(p, sizeof p, "brightness");
+    int have = backlight_present();
     snprintf(title, sizeof title, "Screen");
     struct row *r = add(R_LEVEL, "Brightness");
     r->target = -1;
-    r->level_max = 10;
-    r->level = atoi(cfg_str("screen", "brightness", "10"));
+    r->level_max = BL_LEVELS;
+    r->level = backlight_level();
     if (!have) r->flags = F_DISABLED;
-    if (!have) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
-                        "Not available yet: the backlight has no driver (issue 18). The screen stays at full brightness.");
+    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%s",
+             have ? "The screen dims when nothing has been touched for a while, and later switches off. Any key or a touch brings it back." :
+                    "Not available here: there is no backlight to set.");
 }
 
 static void build_access(void)
 {
+    char v[200];
+    int up;
+    access_read();
     snprintf(title, sizeof title, "Access");
-    add_stored(R_TOGGLE, "SSH", "access", "ssh", "on", 0);
-    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
-             "Kept for later (issue 28). This test build always runs SSH, with the keys built into it, whatever this says.");
+    int on = acc.dev || !strcmp(cfg_str("access", "ssh", "off"), "on");
+    struct row *r = add_action("SSH", A_SSH, "");
+    r->kind = R_TOGGLE;
+    snprintf(r->value, sizeof r->value, "%s", on ? "on" : "off");
+    if (acc.dev) {
+        r->flags = F_DISABLED;
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
+                 "A development build: SSH is always on, and the keys built into this image can always log in.");
+    }
+    if (on) {
+        char net[80];
+        ui_network_status(net, sizeof net, &up);
+        const char *ip = strrchr(net, ' ');
+        snprintf(v, sizeof v, "ssh root@%s", up && ip ? ip + 1 : "this phone's address");
+        add_info("Log in with", !acc.known || acc.running ? v : "SSH is not running");
+    }
+    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "This phone's host key: %s",
+             acc.host_key[0] ? acc.host_key : "not known yet");
+    if (!acc.nkeys) add_info("Keys that can log in", on ? "none yet: nobody can log in" : "none");
+    for (int i = 0; i < acc.nkeys && i < MAX_KEYS && acc.key[i][0]; i++) {
+        snprintf(v, sizeof v, "Key %d", i + 1);
+        add_info(v, acc.key[i]);
+    }
+    if (acc.nkeys > MAX_KEYS) { snprintf(v, sizeof v, "and %d more", acc.nkeys - MAX_KEYS); add_info("", v); }
+    if (acc.door) {
+        door_left(v, sizeof v);
+        snprintf(add_action("Password login is open", A_DOOR_SHOW, "")->value, sizeof rows[0].value, "%s left", v);
+        add_action("Close password login now", A_DOOR_CLOSE, "");
+    } else {
+        r = add_action("Add a key from your computer", A_DOOR_OPEN, "");
+        if (!on) r->flags = F_DISABLED;
+    }
+    if (acc.nkeys) add_action(acc.dev ? "Forget the keys that were added" : "Forget all keys", A_FORGET_KEYS, "")->flags = F_DANGER;
+    if (!on) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
+                      "SSH gives full control of the phone over the network. It is off until you turn it on here.");
 }
 
 static void build_about(void)
@@ -839,9 +937,10 @@ static void set_level(struct row *r, int v)
         phone_set_volume(r->target, v);   /* stored, and told to the audio service; nothing is played */
     } else {
         char b[8];
+        if (v < 1) v = r->level = 1;   /* never fully dark: the screen is how you get back */
         snprintf(b, sizeof b, "%d", v);
         cfg_set("screen", "brightness", b);
-        backlight_set(v);
+        backlight_set_level(v);
     }
 }
 
@@ -884,9 +983,76 @@ static void do_action(const struct row *r)
         cfg_set("feed", "url", NULL);
         store_refresh();
         break;
+    case A_SSH:
+        if (!strcmp(r->value, "on")) {
+            /* off is the safe way: no question asked */
+            cfg_set("access", "ssh", "off");
+            door_password[0] = 0;
+            run_apply("access");
+        } else {
+            memset(&ov, 0, sizeof ov);
+            ov.kind = O_CONFIRM;
+            ov.act = A_SSH;
+            ov.yes = "Turn on";
+            ov.no = "Keep off";
+            snprintf(ov.title, sizeof ov.title, "Turn SSH on?");
+            snprintf(ov.text, sizeof ov.text, "Anyone on your network holding a key this phone accepts gets full control of it.");
+            snprintf(ov.extra, sizeof ov.extra, "Host key: %s", acc.host_key[0] ? acc.host_key : "not known yet");
+        }
+        break;
+    case A_DOOR_OPEN:
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_CONFIRM;
+        ov.act = A_DOOR_OPEN;
+        ov.yes = "Open";
+        ov.no = "Cancel";
+        snprintf(ov.title, sizeof ov.title, "Allow a password login?");
+        snprintf(ov.text, sizeof ov.text, "For ten minutes, with a password shown here, so ssh-copy-id can put your key on the phone.");
+        snprintf(ov.extra, sizeof ov.extra, "It closes by itself as soon as a key arrives.");
+        break;
+    case A_DOOR_SHOW:
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_DOOR;
+        break;
+    case A_DOOR_CLOSE:
+        door_password[0] = 0;
+        run_apply("access-door-close");
+        break;
+    case A_FORGET_KEYS:
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_CONFIRM;
+        ov.act = A_FORGET_KEYS;
+        ov.yes = "Forget";
+        ov.no = "Keep";
+        snprintf(ov.title, sizeof ov.title, "Forget %s?", acc.dev ? "the added keys" : "all keys");
+        snprintf(ov.text, sizeof ov.text, "%s", acc.dev ? "The keys built into this development build stay." :
+                 "Nobody will be able to log in until a key is added again.");
+        break;
     case A_NONE: break;
     }
     rebuild();
+}
+
+/* the owner said yes to a question */
+static void confirmed(enum action act, const char *arg)
+{
+    switch (act) {
+    case A_REMOVE: change_app(act, arg); break;
+    case A_SSH:
+        cfg_set("access", "ssh", "on");
+        run_apply("access");
+        break;
+    case A_DOOR_OPEN:
+        if (make_password(door_password) < 0) { message("Not opened", "The phone could not make up a password."); break; }
+        door_keys_before = acc.nkeys;
+        door_asked = t48_now_ms();
+        run_apply_with("access-door-open", door_password);
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_DOOR;
+        break;
+    case A_FORGET_KEYS: run_apply("access-forget-keys"); break;
+    default: break;
+    }
 }
 
 static void activate(int i, int dir)
@@ -918,6 +1084,7 @@ static void activate(int i, int dir)
     }
     case R_TOGGLE: {
         int on = !strcmp(r->value, "on");
+        if (r->target) { do_action(r); break; }   /* a switch that asks first */
         if (r->choices) store_value(r, on ? "false" : "true");   /* an app's bool */
         else store_value(r, on ? "off" : "on");
         rebuild();
@@ -956,7 +1123,8 @@ static void overlay_answer(int yes)
     enum overlay_kind k = ov.kind;
     if (k == O_BUSY) return;   /* nothing to press: it ends by itself */
     ov.kind = O_NONE;
-    if (k == O_CONFIRM && yes) change_app(ov.act, ov.arg);
+    if (k == O_DOOR && yes) { door_password[0] = 0; run_apply("access-door-close"); }   /* "Close now" */
+    if (k == O_CONFIRM && yes) confirmed(ov.act, ov.arg);
 }
 
 void settings_key(int code, int down)
@@ -971,7 +1139,8 @@ void settings_key(int code, int down)
     }
     if (!down) return;
     if (ov.kind != O_NONE) {
-        if (code == T48_KEY_OK) overlay_answer(1);
+        /* on the password screen both keys only hide it: closing it early is a touch on "Close now" */
+        if (code == T48_KEY_OK) overlay_answer(ov.kind != O_DOOR);
         else if (code == T48_KEY_BACK) overlay_answer(0);
         redraw_me();
         return;
@@ -1000,6 +1169,10 @@ void settings_key(int code, int down)
 #define OV_W 580
 #define OV_H 250
 #define SCROLL_W 60
+#define DOOR_X 60
+#define DOOR_Y 40
+#define DOOR_W 680
+#define DOOR_H 410
 
 static int list_w(void) { return SW - 2 * LIST_X - (nrows > VISIBLE ? SCROLL_W : 0); }
 
@@ -1018,6 +1191,8 @@ void settings_touch(int state, int x, int y)
         if (ov.kind == O_MSG && ui_inside(x, y, OV_X + OV_W / 2 - 80, OV_Y + OV_H - 76, 160, 56)) overlay_answer(1);
         else if (ov.kind == O_CONFIRM && ui_inside(x, y, OV_X + OV_W / 2 - 170, OV_Y + OV_H - 76, 160, 56)) overlay_answer(0);
         else if (ov.kind == O_CONFIRM && ui_inside(x, y, OV_X + OV_W / 2 + 10, OV_Y + OV_H - 76, 160, 56)) overlay_answer(1);
+        else if (ov.kind == O_DOOR && ui_inside(x, y, SW / 2 - 190, DOOR_Y + DOOR_H - 70, 180, 54)) overlay_answer(0);
+        else if (ov.kind == O_DOOR && ui_inside(x, y, SW / 2 + 10, DOOR_Y + DOOR_H - 70, 180, 54)) overlay_answer(1);
         redraw_me();
         return;
     }
@@ -1053,16 +1228,40 @@ void settings_touch(int state, int x, int y)
     redraw_me();
 }
 
+#define ACCESS_CHECK_MS 500   /* how often the Access page looks at what t48-access has done */
+
 int settings_timeout(long long now)
 {
-    (void)now;
-    return depth >= 0 && kbd_open ? t48_kbd_timeout(&kbd) : -1;
+    if (depth >= 0 && kbd_open) return t48_kbd_timeout(&kbd);
+    if (depth >= 0 && stack[depth].page == P_ACCESS)
+        return acc_checked + ACCESS_CHECK_MS > now ? (int)(acc_checked + ACCESS_CHECK_MS - now) : 0;
+    return -1;
 }
 
 void settings_tick(long long now)
 {
-    (void)now;
     if (depth >= 0 && kbd_open && t48_kbd_tick(&kbd) != T48_KBD_NOTHING) redraw_me();
+    if (depth < 0 || kbd_open || stack[depth].page != P_ACCESS || now < acc_checked + ACCESS_CHECK_MS) return;
+    static long shown_left = -1;
+    int was_open = acc.door, changed = access_read();
+    acc_checked = now;
+    if (was_open && !acc.door) {
+        /* password login has closed: because a key came, the time ran out, or it was closed by hand */
+        int had_password = door_password[0] != 0;
+        door_password[0] = 0;
+        if (ov.kind == O_DOOR || had_password) {
+            if (acc.nkeys > door_keys_before) message("Your key is on the phone", "Password login is closed again. From now on only keys can log in.");
+            else message("Password login is closed", "No key arrived. Only keys can log in.");
+        }
+    }
+    if (door_password[0] && !acc.door && !was_open && now > door_asked + 5000) {
+        /* asked for, and five seconds later still not open */
+        door_password[0] = 0;
+        if (ov.kind == O_DOOR) message("Password login did not open", "Nothing has changed: only keys can log in.");
+        changed = 1;
+    }
+    long left = acc.door ? acc.door_until - (long)time(NULL) : -1;
+    if (changed || left != shown_left) { shown_left = left; rebuild(); redraw_me(); }
 }
 
 /* ---------- drawing ---------- */
@@ -1098,7 +1297,7 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
     if (selected) t48_fill(&ui, x, y + 8, 4, h - 16, C_ACCENT);
 
     if (r->kind == R_ACTION) {
-        t48_text(&ui, x + 18, ty, &t48_font_bold, (r->flags & F_DANGER) ? C_BAD : C_ACCENT, r->label);
+        t48_text(&ui, x + 18, ty, &t48_font_bold, dis ? C_FAINT : (r->flags & F_DANGER) ? C_BAD : C_ACCENT, r->label);
         if (r->value[0]) t48_text_right(&ui, x + w - 18, ty, f, C_GOOD, r->value);
         return;
     }
@@ -1156,13 +1355,45 @@ static void draw_overlay(void)
         }
         return;
     }
-    two_lines(OV_X + 40, OV_Y + 78, OV_W - 80, &t48_font_normal, C_DIM, ov.text);
+    two_lines(OV_X + 40, OV_Y + 70, OV_W - 80, &t48_font_normal, C_DIM, ov.text);
+    if (ov.extra[0]) t48_text_centre(&ui, SW / 2, OV_Y + 136, &t48_font_small, C_TEXT, ov.extra);
     if (ov.kind == O_MSG) {
         ui_button(OV_X + OV_W / 2 - 80, OV_Y + OV_H - 76, 160, 56, "OK", C_ACCENT);
     } else {
-        ui_button(OV_X + OV_W / 2 - 170, OV_Y + OV_H - 76, 160, 56, "Keep", C_LINE);
-        ui_button(OV_X + OV_W / 2 + 10, OV_Y + OV_H - 76, 160, 56, "Remove", C_BAD);
+        ui_button(OV_X + OV_W / 2 - 170, OV_Y + OV_H - 76, 160, 56, ov.no ? ov.no : "Keep", C_LINE);
+        ui_button(OV_X + OV_W / 2 + 10, OV_Y + OV_H - 76, 160, 56, ov.yes ? ov.yes : "Remove", ov.yes && ov.act != A_FORGET_KEYS ? C_ACCENT : C_BAD);
     }
+}
+
+/* password login is open: what to type on the computer, and for how much longer */
+static void draw_door(void)
+{
+    char b[200], net[80];
+    int up;
+    t48_fill_alpha(&ui, 0, 0, SW, SH, C_BG, 200);
+    t48_round_fill(&ui, DOOR_X, DOOR_Y, DOOR_W, DOOR_H, 16, C_PANEL);
+    t48_fill(&ui, DOOR_X, DOOR_Y + 16, 6, DOOR_H - 32, C_ACCENT);
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 16, &t48_font_head, C_TEXT, "Add a key from your computer");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 66, &t48_font_small, C_DIM, "On your computer, run:");
+    ui_network_status(net, sizeof net, &up);
+    const char *ip = strrchr(net, ' ');
+    snprintf(b, sizeof b, "ssh-copy-id root@%s", up && ip ? ip + 1 : "the-phone");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 90, &t48_font_head, C_TEXT, b);
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 140, &t48_font_small, C_DIM, "It shows this host key. If it shows another, stop:");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 162, &t48_font_small, C_TEXT, acc.host_key[0] ? acc.host_key : "not known yet");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 194, &t48_font_small, C_DIM, "Then it asks for this password:");
+    if (door_password[0]) t48_text_centre(&ui, SW / 2, DOOR_Y + 216, &t48_font_big, C_ACCENT, door_password);
+    else t48_text_centre(&ui, SW / 2, DOOR_Y + 228, &t48_font_normal, C_DIM, "(no longer shown: close this and open it again for a new one)");
+    if (acc.door) {
+        char left[16];
+        door_left(left, sizeof left);
+        snprintf(b, sizeof b, "Password login closes when your key arrives, or in %s.", left);
+    } else {
+        snprintf(b, sizeof b, "Opening...");
+    }
+    t48_text_centre(&ui, SW / 2, DOOR_Y + DOOR_H - 104, &t48_font_small, C_DIM, b);
+    ui_button(SW / 2 - 190, DOOR_Y + DOOR_H - 70, 180, 54, "Hide", C_LINE);
+    ui_button(SW / 2 + 10, DOOR_Y + DOOR_H - 70, 180, 54, "Close now", C_BAD);
 }
 
 void settings_draw(void)
@@ -1191,7 +1422,8 @@ void settings_draw(void)
         ui_button(x, LIST_Y, SCROLL_W - 8, hh, "^", top > 0 ? C_KEY : C_PANEL);
         ui_button(x, LIST_Y + hh + 6, SCROLL_W - 8, hh, "v", top + VISIBLE < nrows ? C_KEY : C_PANEL);
     }
-    if (ov.kind != O_NONE) draw_overlay();
+    if (ov.kind == O_DOOR) draw_door();
+    else if (ov.kind != O_NONE) draw_overlay();
 }
 
 /* ---------- for the simulator's checks ---------- */
@@ -1217,7 +1449,9 @@ const char *settings_state(const char *key)
         for (char *p = b; *p; p++) if (*p == ' ') *p = '_';
         return b[0] ? b : "-";
     }
-    if (!strcmp(key, "overlay")) return ov.kind == O_BUSY ? "busy" : ov.kind == O_MSG ? "message" : ov.kind == O_CONFIRM ? "confirm" : "none";
+    if (!strcmp(key, "overlay")) return ov.kind == O_BUSY ? "busy" : ov.kind == O_MSG ? "message" : ov.kind == O_CONFIRM ? "confirm" :
+                                        ov.kind == O_DOOR ? "door" : "none";
+    if (!strcmp(key, "door.password")) return door_password[0] ? "(shown)" : "(none)";   /* never the password */
     if (!strcmp(key, "overlay.title")) {
         snprintf(b, sizeof b, "%s", ov.kind != O_NONE ? ov.title : "-");
         for (char *p = b; *p; p++) if (*p == ' ') *p = '_';

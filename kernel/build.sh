@@ -7,7 +7,10 @@
 #                                  Buildroot's root filesystem (buildroot/build.sh)
 #                                  built in as the initramfs. If AUTHORIZED_KEYS
 #                                  (default kexec-rootfs/root.authorized_keys)
-#                                  exists, it is added as /root/.ssh/authorized_keys.
+#                                  exists, it is added as /etc/t48-dev/authorized_keys,
+#                                  which makes the image a development build: SSH
+#                                  is on from boot and takes those keys
+#                                  (docs/access.md). Without it SSH starts off.
 set -e
 VARIANT=${1:-tftp}
 if [ "$VARIANT" = kexec ]; then
@@ -28,12 +31,12 @@ def entry(ino, name, mode, nlink, body=b""):
     return rec + body + b"\0" * (-len(body) % 4)
 if os.path.exists(keys):
     out += b"\0" * (-len(out) % 4)
-    out += entry(1, "root/.ssh", 0o40700, 2)
-    out += entry(2, "root/.ssh/authorized_keys", 0o100600, 1, open(keys, "rb").read())
+    out += entry(1, "etc/t48-dev", 0o40700, 2)
+    out += entry(2, "etc/t48-dev/authorized_keys", 0o100600, 1, open(keys, "rb").read())
     out += entry(0, "TRAILER!!!", 0, 1)
-    print("initramfs: added %s as /root/.ssh/authorized_keys" % keys)
+    print("initramfs: DEVELOPMENT BUILD: SSH on from boot, with the keys in %s" % keys)
 else:
-    print("initramfs: no %s, so no SSH keys (serial console only)" % keys)
+    print("initramfs: no %s: SSH is off until the owner turns it on at the screen" % keys)
 open(dst, "wb").write(out)
 EOP
     echo "CONFIG_INITRAMFS_SOURCE=\"$(pwd)/kexec-initramfs.cpio\"" > kexec-initramfs.config
@@ -125,6 +128,9 @@ grep -q "t48s_holtek.o" drivers/misc/Makefile || echo "obj-y += t48s_holtek.o" >
 cp ../kernel/drivers/t48s_holtek.h include/linux/t48s_holtek.h
 cp ../kernel/drivers/t48s_leds.c drivers/leds/t48s_leds.c
 grep -q "t48s_leds.o" drivers/leds/Makefile || echo 'obj-$(CONFIG_LEDS_CLASS) += t48s_leds.o' >> drivers/leds/Makefile
+# the screen backlight (backlight class: GPIO18 and the SoC's PWM)
+cp ../kernel/drivers/t48s_backlight.c drivers/video/backlight/t48s_backlight.c
+grep -q "t48s_backlight.o" drivers/video/backlight/Makefile || echo 'obj-$(CONFIG_BACKLIGHT_CLASS_DEVICE) += t48s_backlight.o' >> drivers/video/backlight/Makefile
 # our touchscreen driver (TSC2046 on the PL022 SPI host, polled)
 cp ../kernel/drivers/t48s_touch.c drivers/input/t48s_touch.c
 grep -q "t48s_touch.o" drivers/input/Makefile || echo 'obj-$(CONFIG_INPUT) += t48s_touch.o' >> drivers/input/Makefile
@@ -163,7 +169,7 @@ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- bcmring_defconfig
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kernel/kexec.config >/dev/null
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kexec-initramfs.config >/dev/null
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig >/dev/null 2>&1 || make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- oldnoconfig >/dev/null
-for o in CONFIG_LEDS_CLASS= CONFIG_LEDS_TRIGGER_TIMER= CONFIG_SND_T48S CONFIG_SND_PCM= CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
+for o in CONFIG_BACKLIGHT_CLASS_DEVICE= CONFIG_LEDS_CLASS= CONFIG_LEDS_TRIGGER_TIMER= CONFIG_SND_T48S CONFIG_SND_PCM= CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
 # the flash must stay read-only (issue #5): stop if the configuration holds anything
 # that could write it, or lacks our driver's layer
 for o in MTD_NAND_BCM_UMI MTD_NAND_VERIFY_WRITE MTD_BLOCK MTD_BLOCK_RO MTD_CMDLINE_PARTS \

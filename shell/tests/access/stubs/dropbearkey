@@ -1,0 +1,6 @@
+#!/bin/sh
+# stand-in: "makes" a host key, and prints a fingerprint for it
+case "$1" in
+-t) echo "host key $(date +%s)" > "$4" ;;
+-y) [ -s "$3" ] && echo "Fingerprint: SHA256:6Ru8gBwrS00sNCkM/wL0/lOtLVJuGwKvLVdhZR08WAg" ;;
+esac

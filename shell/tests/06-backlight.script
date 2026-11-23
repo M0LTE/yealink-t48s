@@ -1,0 +1,128 @@
+# The backlight (issue 18): dims, goes off, and what brings it back.
+# A folder of files stands in for /sys/class/backlight (T48_BACKLIGHT).
+run mkdir -p simdata/bl/t48s && echo 10 > simdata/bl/t48s/max_brightness && echo 8 > simdata/bl/t48s/brightness && echo 0 > simdata/bl/t48s/bl_power
+wait 200
+expectstate backlight on
+# short times for the test; the shell looks at the file again within five seconds
+run ./t48-config --config simdata/config set screen dim_seconds 2
+run ./t48-config --config simdata/config set screen off_seconds 4
+
+# ---- brightness, from Settings, Screen ----
+touch 590 420
+expectstate settings.page root
+key down
+key down
+key down
+key down
+expectstate settings.row Screen
+key ok
+expectstate settings.page screen
+expectstate settings.row Brightness
+key right
+key left
+key left
+key left
+key left
+expectstate settings.value 6
+expectstate cfg.screen.brightness 6
+run grep -qx 6 simdata/bl/t48s/brightness
+shot shots/settings-screen.png
+# never fully dark from here
+key left
+key left
+key left
+key left
+key left
+key left
+key left
+expectstate settings.value 1
+key right
+key right
+key right
+key right
+key right
+expectstate settings.value 6
+key x
+key x
+expect idle
+
+# ---- dimmed: still readable, so a key does what it always does ----
+waitstate backlight dim 8000
+expectstate backlight.level 1
+run grep -qx 1 simdata/bl/t48s/brightness
+key ok
+expectstate backlight on
+expectstate backlight.level 6
+run grep -qx 6 simdata/bl/t48s/brightness
+expect launcher
+key x
+expect idle
+
+# ---- off: the key that wakes it does nothing else ----
+waitstate backlight off 8000
+expectstate backlight.level 0
+run grep -qx 4 simdata/bl/t48s/bl_power
+key ok
+expectstate backlight on
+run grep -qx 0 simdata/bl/t48s/bl_power
+run grep -qx 6 simdata/bl/t48s/brightness
+expect idle
+# the next press works
+key ok
+expect launcher
+key x
+
+# ---- off: the same for a touch (this one is on the Settings button) ----
+waitstate backlight off 8000
+touch 590 420
+expectstate backlight on
+expect idle
+touch 590 420
+expect settings
+key x
+expect idle
+
+# ---- off: a phone key that is not asking for a line only wakes it too ----
+waitstate backlight off 8000
+key volup
+expectstate backlight on
+expectstate overlay none
+
+# ---- the handset wakes it and works; the screen stays on while the phone is in use ----
+waitstate backlight off 8000
+hook off
+expectstate backlight on
+expect call
+wait 5000
+expectstate backlight on
+hook on
+waitscreen idle 4000
+
+# ---- so does the Speakerphone key ----
+waitstate backlight off 12000
+key speaker
+expectstate backlight on
+expect call
+key speaker
+waitscreen idle 4000
+
+# ---- an app showing: dimmed, but never off ----
+key ok
+expect launcher
+key ok
+waitframe 3000
+expect app
+waitstate backlight dim 8000
+wait 4000
+expectstate backlight dim
+# a key goes to the app and brightens the screen
+key 5
+expectstate backlight on
+# Home: now the launcher is showing, and it goes off in the end
+key x 1000
+expect launcher
+waitstate backlight off 8000
+key x
+expect launcher
+key x
+expect idle

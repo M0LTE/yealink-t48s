@@ -1,0 +1,6 @@
+#!/bin/sh
+# stand-in: "hashes" the password on standard input, and keeps it so a test can
+# check it was given and that it is nowhere in the log
+pw=$(cat)
+printf %s "$pw" > "$T48_ACCESS_RUN/password.given"
+echo "\$6\$stub\$$(printf %s "$pw" | sha256sum | cut -c1-40)"

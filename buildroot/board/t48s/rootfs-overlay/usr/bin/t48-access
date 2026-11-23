@@ -1,0 +1,150 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# t48-access: who may log in to the phone (issue 28, docs/access.md).
+#
+# SSH is off until the owner turns it on at the phone's own screen (Settings,
+# Access), or "t48-config set access ssh on" on the serial console. Login is by
+# key only. To get a first key onto the phone, the screen can open password
+# login for ten minutes with a password it makes up and shows; it closes again
+# as soon as a key arrives.
+#
+#   t48-access boot          at start-up: folders, host key, then "apply"
+#   t48-access apply         make dropbear follow /data/config/access
+#   t48-access door-open     password login for a while; the password is one line on standard input
+#   t48-access door-close    key login only again
+#   t48-access forget-keys   empty the list of keys that may log in
+#   t48-access status        only write the status file again
+#
+# A development build (kernel/build.sh put our own keys in /etc/t48-dev) always
+# runs SSH and always accepts those keys, whatever the setting says, so a test
+# phone can never lock its developers out.
+#
+# Where things live. KEEP is the part that must survive a power cut once /data
+# is on flash (issue 29): the host key and the owner's keys. Today /data is in
+# RAM, so the host key is new at every boot.
+KEEP=${T48_ACCESS_KEEP:-/data/access}
+RUN=${T48_ACCESS_RUN:-/run/t48-access}
+DEV=${T48_ACCESS_DEV:-/etc/t48-dev}
+SHADOW=${T48_ACCESS_SHADOW:-/etc/shadow}
+PIDFILE=$RUN/dropbear.pid
+HOSTKEY=$KEEP/host_ed25519
+KEYS=$KEEP/ssh/authorized_keys     # /root/.ssh is a link to $KEEP/ssh
+DOOR_SECONDS=${T48_ACCESS_DOOR_SECONDS:-600}
+
+setting() { t48-config get access ssh 2>/dev/null || echo off; }
+is_dev() { [ -s "$DEV/authorized_keys" ]; }
+door_open() { [ -f "$RUN/door" ]; }
+wanted() { is_dev || [ "$(setting)" = on ]; }
+running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+
+prepare() {
+    mkdir -p "$RUN" "$KEEP/ssh"
+    chmod 700 "$KEEP" "$KEEP/ssh"
+    [ -f "$KEYS" ] || : > "$KEYS"
+    chmod 600 "$KEYS"
+    # the host key: kept if there is one, made if not
+    [ -s "$HOSTKEY" ] || { rm -f "$HOSTKEY"; dropbearkey -t ed25519 -f "$HOSTKEY" >/dev/null 2>&1; }
+    # a development build's own keys are always in the list
+    if is_dev; then
+        while IFS= read -r line; do
+            [ -n "$line" ] && ! grep -qxF "$line" "$KEYS" && echo "$line" >> "$KEYS"
+        done < "$DEV/authorized_keys"
+    fi
+    return 0
+}
+
+status() {
+    {
+        if is_dev; then echo dev=yes; else echo dev=no; fi
+        if running; then echo ssh=on; else echo ssh=off; fi
+        echo "host_key=$(dropbearkey -y -f "$HOSTKEY" 2>/dev/null | sed -n 's/^Fingerprint: *//p')"
+        if door_open; then echo door=open; echo "door_until=$(cat "$RUN/door")"; else echo door=closed; fi
+        # each key by its kind and its comment, never the key itself
+        awk '$1 ~ /^(ssh|ecdsa|sk)-/ { n++; c = $3; for (i = 4; i <= NF; i++) c = c " " $i; print "key=" $1 " " (c == "" ? "(no name)" : c) }
+             END { print "keys=" n + 0 }' "$KEYS" 2>/dev/null
+    } > "$RUN/status.new"
+    mv "$RUN/status.new" "$RUN/status"
+}
+
+# stop the listener; sessions that are already logged in carry on
+stop_listener() {
+    running || { rm -f "$PIDFILE"; return 0; }
+    pid=$(cat "$PIDFILE")
+    kill "$pid" 2>/dev/null
+    n=0
+    while kill -0 "$pid" 2>/dev/null && [ $n -lt 30 ]; do sleep 0.1; n=$((n + 1)); done
+    rm -f "$PIDFILE"
+}
+
+start_listener() {
+    # -s: no password logins, unless the door is open
+    if door_open; then s=; else s=-s; fi
+    dropbear $s -r "$HOSTKEY" -P "$PIDFILE"
+}
+
+set_password() {   # $1: a crypt(3) hash, or * for none
+    awk -F: -v OFS=: -v h="$1" '$1 == "root" { $2 = h } { print }' "$SHADOW" > "$SHADOW.new" &&
+        chmod 600 "$SHADOW.new" && mv "$SHADOW.new" "$SHADOW"
+}
+
+apply() {
+    prepare
+    if wanted; then
+        running || start_listener
+        echo "access: SSH is on" 2>/dev/null > /dev/console
+    else
+        # off means off: the listener, anyone logged in, and the password door
+        if door_open; then rm -f "$RUN/door"; set_password '*'; fi
+        stop_listener
+        killall dropbear 2>/dev/null
+        echo "access: SSH is off (turn it on at the screen: Settings, Access)" 2>/dev/null > /dev/console
+    fi
+    status
+}
+
+case "$1" in
+boot|apply)
+    apply ;;
+status)
+    prepare; status ;;
+door-open)
+    prepare
+    wanted || { echo "SSH is off" >&2; exit 1; }
+    IFS= read -r pw
+    [ ${#pw} -ge 8 ] || { echo "no password given" >&2; exit 1; }
+    hash=$(printf %s "$pw" | mkpasswd -m sha512 -P 0) || exit 1
+    pw=
+    set_password "$hash" || exit 1
+    until=$(($(date +%s) + DOOR_SECONDS))
+    echo "$until" > "$RUN/door"
+    stop_listener; start_listener
+    status
+    # close it when a key arrives, or when the time is up
+    before=$(cksum < "$KEYS")
+    (
+        while [ -f "$RUN/door" ] && [ "$(cat "$RUN/door" 2>/dev/null)" = "$until" ] &&
+              [ "$(date +%s)" -lt "$until" ] && [ "$(cksum < "$KEYS")" = "$before" ]; do
+            sleep 1
+        done
+        # only if it is still this opening of the door
+        [ "$(cat "$RUN/door" 2>/dev/null)" = "$until" ] && exec "$0" door-close
+    ) </dev/null >/dev/null 2>&1 &
+    ;;
+door-close)
+    prepare
+    set_password '*'
+    if door_open; then
+        rm -f "$RUN/door"
+        if running; then stop_listener; start_listener; fi
+    fi
+    chmod 600 "$KEYS"
+    status ;;
+forget-keys)
+    prepare
+    : > "$KEYS"
+    prepare
+    status ;;
+*)
+    sed -n '3,22p' "$0" >&2; exit 2 ;;
+esac
+exit 0

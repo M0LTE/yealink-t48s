@@ -246,24 +246,19 @@ expectstate cfg.audio.handset 11
 shot shots/settings-sound.png
 key x
 
-# ---- screen: no backlight driver yet ----
+# ---- screen: with no backlight (as here) the row does nothing; 06-backlight has one ----
 key down
 key ok
 expectstate settings.page screen
-shot shots/settings-screen.png
 key right
 expectstate cfg.screen.brightness (unset)
 key x
 
-# ---- access: stored only for now ----
+# ---- access: off until asked for; the rest is in 07-access ----
 key down
 key ok
-expectstate settings.value on
-key ok
-expectstate cfg.access.ssh off
-key ok
-expectstate cfg.access.ssh on
-shot shots/settings-access.png
+expectstate settings.page access
+expectstate settings.value off
 key x
 
 # ---- an app's own settings, from its manifest ----
