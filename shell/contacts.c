@@ -105,7 +105,7 @@ const char *contacts_name(const char *number)
 
 static void ask_name(const char *start)
 {
-    t48_kbd_open(&kbd, editing < 0 ? "New contact: name" : "Name", start, 40, 0);
+    t48_kbd_open(&kbd, "Name", start, 40, 0);
     mode = M_NAME;
 }
 
@@ -270,8 +270,7 @@ void contacts_draw(void)
     t48_fill(&ui, 0, 0, SW, SH, C_BG);
     ui_status_bar("Contacts");
     if (!n) {
-        t48_text_centre(&ui, SW / 2, 180, &t48_font_head, C_DIM, "No contacts yet");
-        t48_text_centre(&ui, SW / 2, 224, &t48_font_normal, C_FAINT, "Add one here, or from a call in the Calls list");
+        t48_text_centre(&ui, SW / 2, 180, &t48_font_head, C_DIM, "No contacts");
     }
     int top = sel >= ROWS ? sel - ROWS + 1 : 0;
     for (int r = 0; r < ROWS && top + r < n; r++) {
@@ -291,7 +290,7 @@ void contacts_draw(void)
         char b[120];
         snprintf(b, sizeof b, "Delete %.40s?", list[sel].name);
         t48_text_fit(&ui, 24, BTN_Y + 16, 380, &t48_font_normal, C_TEXT, b);
-        ui_button(416, BTN_Y, 170, BTN_H, "Keep", C_PANEL);
+        ui_button(416, BTN_Y, 170, BTN_H, "Cancel", C_PANEL);
         ui_button(596, BTN_Y, 188, BTN_H, "Delete", C_BAD);
     } else {
         for (int b = 0; b < 5; b++) {
@@ -299,7 +298,6 @@ void contacts_draw(void)
             ui_button(btn[b].x, BTN_Y, btn[b].w, BTN_H, btn[b].label, !usable ? C_PANEL : b == 0 ? C_GOOD : b == 1 ? C_KEY : C_PANEL);
         }
     }
-    t48_text_centre(&ui, SW / 2, 452, &t48_font_small, C_FAINT, "Up and Down to choose, OK or a touch to put the number in the dialler, X to go back");
 }
 
 /* ---------- for the simulator's checks ---------- */

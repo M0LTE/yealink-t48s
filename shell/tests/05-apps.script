@@ -70,11 +70,11 @@ key ok
 expectstate cfg.apps:demo.seconds false
 key down
 expectstate settings.row A_secret
-expectstate settings.value not_set
+expectstate settings.value Not_set
 key ok
 key 2
 key ok
-expectstate settings.value set
+expectstate settings.value Set
 run grep -qx pin=a simdata/config/apps/demo.conf
 shot shots/apps-settings.png
 key x
@@ -95,7 +95,7 @@ expectstate store.demo update
 key down
 key down
 expectstate settings.row Demo
-expectstate settings.value 1.0.0_installed,_1.1.0_available
+expectstate settings.value Update_1.1.0
 shot shots/apps-update-available.png
 key ok
 expectstate settings.row Update
@@ -152,13 +152,13 @@ expectstate settings.row Clock
 key down
 key down
 key down
-expectstate settings.row Look_again
+expectstate settings.row Refresh
 key ok
 waitstate store error 5000
 # the list now starts with a line about the feed; Feed address is the row after Look again
-expectstate settings.row Look_again
+expectstate settings.row Refresh
 key down
-expectstate settings.row Feed_address
+expectstate settings.row Feed_URL
 key ok
 expectstate kbd.text file:///x
 key left
@@ -173,13 +173,13 @@ key left
 key 4
 key ok
 expectstate overlay message
-expectstate overlay.title Not_a_feed_address
+expectstate overlay.title Not_a_feed_URL
 key ok
 expectstate cfg.feed.url file:///x
 # an app for a newer API level: no Install on its page, and the command line says why
 run ./t48-config --config simdata/config set feed url file://$PWD/feeds/1/index.json
 key up
-expectstate settings.row Look_again
+expectstate settings.row Refresh
 key ok
 waitstate store loaded 5000
 expectstate store.future unsupported
@@ -195,7 +195,7 @@ key down
 key down
 key down
 expectstate settings.row Future
-expectstate settings.value 3.0.0_needs_newer_firmware
+expectstate settings.value Needs_newer_firmware
 key ok
 expectstate settings.rows 5
 shot shots/apps-unsupported.png
@@ -209,7 +209,7 @@ expectstate settings.row Broken
 key ok
 key ok
 waitstate overlay message 10000
-expectstate overlay.title Broken_was_not_installed
+expectstate overlay.title Broken_not_installed
 shot shots/apps-checksum.png
 key ok
 expectstate installed.broken no

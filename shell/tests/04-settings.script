@@ -5,8 +5,8 @@ expect idle
 touch 700 420
 expect settings
 expectstate settings.page root
-expectstate settings.row Phone_accounts
-expectstate settings.value not_set
+expectstate settings.row Accounts
+expectstate settings.value Not_set
 shot shots/settings.png
 
 # ---- the SIP account: keypad typing ----
@@ -31,7 +31,7 @@ expectstate cfg.sip.user 1001
 # the password: typed blind, by touch (h, i) and keypad digits
 key down
 expectstate settings.row Password
-expectstate settings.value not_set
+expectstate settings.value Not_set
 key ok
 expectstate kbd.text (hidden)
 touch 439 248
@@ -50,7 +50,7 @@ wait 1300
 shot shots/keyboard-password-hidden.png
 touch 719 428
 expectstate kbd closed
-expectstate settings.value set
+expectstate settings.value Set
 expectstate cfg.sip.password (set)
 run grep -qx password=hi7355719 simdata/config/sip
 # the file can be read by root only
@@ -327,7 +327,7 @@ key down
 key down
 key down
 key down
-expectstate settings.row Back_to_the_app's_own_defaults
+expectstate settings.row Reset_to_defaults
 key ok
 expectstate cfg.apps:clock.title (unset)
 key x

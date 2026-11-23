@@ -200,7 +200,7 @@ static int fetch(const char *url, const char *dest, long max_bytes, long expect,
     for (;;) {
         pid_t r = waitpid(pid, &status, WNOHANG);
         if (r == pid) break;
-        if (r < 0 && errno != EINTR) { fail("lost track of the download"); return -1; }
+        if (r < 0 && errno != EINTR) { fail("download lost"); return -1; }
         struct stat st;
         if (expect > 0 && stat(dest, &st) == 0) {
             int pc = (int)((long long)st.st_size * 100 / expect);
@@ -215,13 +215,13 @@ static int fetch(const char *url, const char *dest, long max_bytes, long expect,
     unlink(dest);
     switch (code) {
     case 127: fail("curl is not installed"); break;
-    case 6: fail("the server's name was not found: is the network up?"); break;
-    case 7: fail("could not connect to the server"); break;
-    case 22: case 37: fail("the server has no such file"); break;
-    case 28: fail("the download took too long"); break;
-    case 35: case 51: case 60: case 77: fail("the secure connection was refused: is the phone's clock right?"); break;
-    case 63: fail("the file is bigger than allowed"); break;
-    default: fail("the download failed (curl error %d)", code);
+    case 6: fail("server not found: check the network"); break;
+    case 7: fail("cannot reach the server"); break;
+    case 22: case 37: fail("not found on the server"); break;
+    case 28: fail("download timed out"); break;
+    case 35: case 51: case 60: case 77: fail("TLS failed: check the clock"); break;
+    case 63: fail("file too large"); break;
+    default: fail("download failed (curl %d)", code);
     }
     return -1;
 }
@@ -277,11 +277,11 @@ static int unpack(const char *pkg, const char *dest, char *id, size_t idn)
 
     for (;;) {
         char name[300], path[700];
-        if (read_full(pfd[0], h, 512) != 512) { fail("the package is cut short or not a .t48app"); break; }
+        if (read_full(pfd[0], h, 512) != 512) { fail("not a .t48app, or truncated"); break; }
         int empty = 1;
         for (int i = 0; i < 512 && empty; i++) empty = !h[i];
-        if (empty) { ok = id[0] ? 0 : -1; if (ok) fail("the package is empty"); break; }
-        if (memcmp(h + 257, "ustar", 5)) { fail("the package is not a tar file"); break; }
+        if (empty) { ok = id[0] ? 0 : -1; if (ok) fail("empty package"); break; }
+        if (memcmp(h + 257, "ustar", 5)) { fail("not a tar file"); break; }
         /* the number fields need not end in a NUL */
         char num[13];
         snprintf(num, sizeof num, "%.12s", h + 124);
@@ -301,7 +301,7 @@ static int unpack(const char *pkg, const char *dest, char *id, size_t idn)
             continue;
         }
         if ((type != '0' && type != 0 && type != '5') || size < 0) {
-            fail("the package holds something that is not a plain file or folder (%s)", name);
+            fail("not a plain file or folder: %s", name);
             break;
         }
         /* every name: id/..., no empty, "." or ".." parts, nothing odd */
@@ -317,8 +317,8 @@ static int unpack(const char *pkg, const char *dest, char *id, size_t idn)
         char top[80];
         snprintf(top, sizeof top, "%.*s", (int)strcspn(name, "/"), name);
         if (!bad && !id[0] && manifest_id_ok(top) && top[0] != '.') snprintf(id, idn, "%s", top);
-        if (bad || strcmp(top, id)) { fail("the package is not one app folder (%s)", name); break; }
-        if (++files > MAX_FILES || (total += size) > MAX_UNPACKED) { fail("the package is too big when unpacked"); break; }
+        if (bad || strcmp(top, id)) { fail("not a single app folder: %s", name); break; }
+        if (++files > MAX_FILES || (total += size) > MAX_UNPACKED) { fail("too large unpacked"); break; }
 
         snprintf(path, sizeof path, "%s/%s", dest, name);
         if (type == '5') {
@@ -332,7 +332,7 @@ static int unpack(const char *pkg, const char *dest, char *id, size_t idn)
         int wrote = 1;
         while (left > 0 && wrote) {
             int want = left > 512 ? 512 : (int)left;
-            if (read_full(pfd[0], h, 512) != 512) { fail("the package is cut short"); wrote = 0; break; }
+            if (read_full(pfd[0], h, 512) != 512) { fail("package truncated"); wrote = 0; break; }
             if (write(out, h, (size_t)want) != want) { fail("cannot write %s (%s)", name, strerror(errno)); wrote = 0; }
             left -= want;
         }
@@ -345,7 +345,7 @@ static int unpack(const char *pkg, const char *dest, char *id, size_t idn)
     int status;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
     if (ok == 0 && !(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        fail(WIFEXITED(status) && WEXITSTATUS(status) == 127 ? "gzip is not installed" : "the package is damaged");
+        fail(WIFEXITED(status) && WEXITSTATUS(status) == 127 ? "gzip is not installed" : "package damaged");
         ok = -1;
     }
     return ok;
@@ -376,7 +376,7 @@ static int load_feed(void)
 
     nfeed = 0;
     if (strncmp(feed_url, "https://", 8) && strncmp(feed_url, "file://", 7)) {
-        fail("the feed address must start with https://");
+        fail("feed URL must start with https://");
         return -1;
     }
     work_dir(tmp, sizeof tmp);
@@ -389,12 +389,12 @@ static int load_feed(void)
     size_t n = f && txt ? fread(txt, 1, MAX_INDEX, f) : 0;
     if (f) fclose(f);
     unlink(path);
-    if (!n) { free(txt); fail("the feed is empty"); return -1; }
+    if (!n) { free(txt); fail("feed is empty"); return -1; }
     txt[n] = 0;
     const char *e = txt + n, *list = t48_json_get(txt, e, "apps");
     double v;
-    if (!t48_json_num(t48_json_get(txt, e, "feed"), e, &v) || !list) { free(txt); fail("that address is not an app feed"); return -1; }
-    if ((int)v != 1) { free(txt); fail("the feed is a newer kind (%d) than this phone understands", (int)v); return -1; }
+    if (!t48_json_num(t48_json_get(txt, e, "feed"), e, &v) || !list) { free(txt); fail("not an app feed"); return -1; }
+    if ((int)v != 1) { free(txt); fail("feed format %d is newer than this firmware", (int)v); return -1; }
 
     for (const char *a = t48_json_first(list, e); a && nfeed < MAX_FEED_APPS; a = t48_json_next(a, e)) {
         struct feed_app *fa = &feed[nfeed];
@@ -498,16 +498,16 @@ static int install_file(const char *pkg, const char *want_id, char *id, size_t i
     }
     progress("unpack", -1);
     if (unpack(pkg, stage, id, idn) < 0) return -1;
-    if (want_id && strcmp(want_id, id)) { fail("the package holds %s, not %s", id, want_id); return -1; }
+    if (want_id && strcmp(want_id, id)) { fail("package is %s, not %s", id, want_id); return -1; }
     snprintf(from, sizeof from, "%s/%s", stage, id);
-    if (manifest_read(from, &m, err, sizeof err) < 0) { manifest_free(&m); fail("the app cannot be used here: %s", err); return -1; }
+    if (manifest_read(from, &m, err, sizeof err) < 0) { manifest_free(&m); fail("%s", err); return -1; }
     int same = !strcmp(m.id, id);
     char prog[500];
     snprintf(prog, sizeof prog, "%s/%s", from, m.exec);
     snprintf(version, vn, "%s", m.version[0] ? m.version : "-");
     manifest_free(&m);
-    if (!same) { fail("the package's folder and its manifest disagree about the app's id"); return -1; }
-    if (access(prog, X_OK) < 0) { fail("the package has no program to run"); return -1; }
+    if (!same) { fail("folder name and manifest id differ"); return -1; }
+    if (access(prog, X_OK) < 0) { fail("no program in the package"); return -1; }
 
     chmod(stage, 0755);
     snprintf(final, sizeof final, "%s/%s", apps_dir, id);
@@ -536,18 +536,18 @@ static int cmd_install(const char *what, int only_if_newer)
         if (load_feed() < 0) return -1;
         const struct feed_app *fa = feed_find(what);
         const struct manifest *have = installed_find(what);
-        if (!fa) { fail("the feed has no app called %s", what); return -1; }
+        if (!fa) { fail("%s is not in the feed", what); return -1; }
         if (only_if_newer && have && version_cmp(fa->version, have->version) <= 0) {
             if (machine) printf("done %s %s\n", fa->id, have->version);
             else printf("%s is up to date (%s)\n", fa->id, have->version);
             return 0;
         }
         if (fa->api > T48_API_LEVEL) {
-            fail("%s needs API level %d and this phone speaks %d: update the phone's firmware first", fa->name, fa->api, T48_API_LEVEL);
+            fail("%s needs app API %d, this phone has %d: update the firmware", fa->name, fa->api, T48_API_LEVEL);
             return -1;
         }
-        if (strlen(fa->sha) != 64) { fail("the feed gives no SHA-256 for %s, so it cannot be checked", fa->name); return -1; }
-        if (fa->size <= 0 || fa->size > MAX_PACKAGE) { fail("the feed gives no sensible size for %s", fa->name); return -1; }
+        if (strlen(fa->sha) != 64) { fail("no SHA-256 for %s in the feed", fa->name); return -1; }
+        if (fa->size <= 0 || fa->size > MAX_PACKAGE) { fail("bad size for %s in the feed", fa->name); return -1; }
         struct statvfs vfs;
         if (statvfs(apps_dir, &vfs) == 0 && vfs.f_blocks > 0 &&
             (unsigned long long)vfs.f_bavail * vfs.f_frsize < (unsigned long long)fa->size * 5 + 262144) {
@@ -559,10 +559,10 @@ static int cmd_install(const char *what, int only_if_newer)
         progress("download", 0);
         if (fetch(fa->url, pkg, fa->size, fa->size, "download") < 0) return -1;
         progress("verify", -1);
-        if (sha_file(pkg, hex, &size) < 0) { fail("the download went missing"); return -1; }
+        if (sha_file(pkg, hex, &size) < 0) { fail("download missing"); return -1; }
         if (size != fa->size || strcasecmp(hex, fa->sha)) {
             unlink(pkg);
-            fail("the download does not match the checksum in the feed, so it was thrown away");
+            fail("checksum mismatch");
             return -1;
         }
         r = install_file(pkg, fa->id, id, sizeof id, version, sizeof version);
@@ -598,7 +598,7 @@ static int cmd_remove(const char *id)
     char p[600];
     const struct manifest *m = installed_find(id);
     if (!manifest_id_ok(id) || !m) { fail("%s is not installed", id); return -1; }
-    if (!ours(m)) { fail("%s is part of the phone's firmware and cannot be removed", m->name); return -1; }
+    if (!ours(m)) { fail("%s is built in", m->name); return -1; }
     snprintf(p, sizeof p, "%s/%s", apps_dir, id);
     rm_rf(p);
     if (access(p, F_OK) == 0) { fail("could not remove %s", id); return -1; }
@@ -663,7 +663,7 @@ static int cmd_list(void)
     }
     if (!feed_ok) {
         if (machine) printf("feederror %s\n", errtxt);
-        else fprintf(stderr, "t48-app: the feed could not be read: %s\n", errtxt);
+        else fprintf(stderr, "t48-app: feed error: %s\n", errtxt);
     }
     fflush(stdout);
     return 0;

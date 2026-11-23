@@ -207,8 +207,8 @@ class Pairing(unittest.TestCase):
         b = Browser(self.p)
         r = b.get("/")
         self.assertEqual(r.status, 200)
-        self.assertIn("Show a code on the phone", r.body)
-        self.assertIn("plain HTTP", r.body)
+        self.assertIn("Show code", r.body)
+        self.assertIn("Plain HTTP", r.body)
         self.assertEqual(r.getheader("X-Frame-Options"), "DENY")
         self.assertIn("default-src 'none'", r.getheader("Content-Security-Policy"))
         for path in ("/accounts", "/backup", "/contacts/export.csv", "/access"):
@@ -233,7 +233,7 @@ class Pairing(unittest.TestCase):
         self.assertEqual(st["pair_from"], "127.0.0.1")
         self.assertGreater(int(st["pair_until"]), time.time() + 60)
         self.assertEqual(os.stat(os.path.join(self.p.run, "status")).st_mode & 0o777, 0o600)
-        self.assertIn("Type the code", b.get("/pair").body)
+        self.assertIn("Enter code", b.get("/pair").body)
         # the code is never in a page or the log
         self.assertNotIn(st["pair_code"], b.get("/pair").body)
         self.assertNotIn(st["pair_code"], self.p.logtext())
@@ -258,7 +258,7 @@ class Pairing(unittest.TestCase):
         self.assertNotIn("pair_code", st)
         r = b.get("/")
         self.assertIn("Overview", r.body)
-        self.assertIn("plain HTTP", r.body)
+        self.assertIn("Plain HTTP", r.body)
         # the cookie is not in the log either
         self.assertNotIn(b.cookies["t48s"], self.p.logtext())
         # signing out
@@ -306,7 +306,7 @@ class Pairing(unittest.TestCase):
         self.assertEqual(last, "/?e=locked")
         self.assertEqual(b.post("/pair/start", csrf=False).getheader("Location"), "/?e=locked")
         self.assertNotIn("pair_code", self.p.status())
-        self.assertIn("closed for ten minutes", b.get("/?e=locked").body)
+        self.assertIn("locked for 10 minutes", b.get("/?e=locked").body)
         self.assertIn("closed for 10 minutes", self.p.logtext())
 
     def test_another_site_cannot_ask_for_a_code(self):
@@ -382,7 +382,7 @@ class Paired(unittest.TestCase):
         text = self.ok("/accounts/save", {"n": "1", "user": "1001", "domain": "pbx.example.org", "password": secret,
                                           "outbound_proxy": "", "auth_user": "tom", "display_name": "Tom <M0LTE> & Co", "transport": "tls",
                                           "label": "Home", "voicemail": "*97", "enabled": "on"}, "/accounts")
-        self.assertIn("Account 1 is saved", text)
+        self.assertIn("Account 1 saved", text)
         self.assertEqual(p.get("sip", "user"), "1001")
         self.assertEqual(p.get("sip", "domain"), "pbx.example.org")
         self.assertEqual(p.get("sip", "password"), secret)
@@ -395,7 +395,7 @@ class Paired(unittest.TestCase):
         page = b.get("/accounts").body
         # write only: the page says it is set and never what it is; what is shown is escaped
         self.assertNotIn("s3cret", page)
-        self.assertIn("set: leave empty to keep it", page)
+        self.assertIn("Set. Empty keeps it", page)
         self.assertIn("Tom &lt;M0LTE&gt; &amp; Co", page)
         self.assertNotIn("<M0LTE>", page)
         # an empty password keeps the old one
@@ -407,7 +407,7 @@ class Paired(unittest.TestCase):
         # the sixth account, and which is usual
         self.ok("/accounts/save", {"n": "6", "user": "2002", "domain": "other.example", "password": "pw6-hunter2", "transport": "tcp", "enabled": "on"}, "/accounts")
         self.assertEqual(p.get("sip6", "user"), "2002")
-        self.assertIn("Calls usually go out from", b.get("/accounts").body)
+        self.assertIn("Default account", b.get("/accounts").body)
         self.ok("/accounts/default", {"n": "6"}, "/accounts")
         self.assertEqual(p.get("phone", "default_account"), "6")
         # refusals
@@ -538,15 +538,15 @@ class Paired(unittest.TestCase):
         self.bad("/history/clear", {}, "/history")
         self.ok("/history/clear", {"sure": "yes"}, "/history")
         self.assertEqual(read(os.path.join(p.state, "history")), "seen %d\n" % (now - 50))
-        self.assertIn("No calls yet", b.get("/history").body)
+        self.assertIn("No calls", b.get("/history").body)
 
     def test_70_apps(self):
         b, p = self.b, self.p
         page = b.get("/apps").body
         self.assertIn("<h2>Clock</h2>", page)
-        self.assertIn("part of the firmware", page)
+        self.assertIn("Built in", page)
         self.assertIn("<h2>Demo</h2>", page)
-        self.assertIn("needs newer firmware", page)        # the feed's "future" app
+        self.assertIn("Needs newer firmware", page)        # the feed's "future" app
         self.assertNotIn("value='future'", page)           # and no button for it
         self.assertIn("installed", self.ok("/apps/install", {"id": "demo"}, "/apps"))
         self.assertTrue(os.path.exists(os.path.join(p.installed, "demo", "manifest.json")))
@@ -569,9 +569,9 @@ class Paired(unittest.TestCase):
         # an update from the second feed keeps them
         self.bad("/apps/feed", {"url": "http://plain.example/index.json"}, "/apps")
         self.ok("/apps/feed", {"url": "file://" + os.path.join(SHELL_BUILD, "feeds", "2", "index.json")}, "/apps")
-        self.assertIn("update ready", b.get("/apps").body)
+        self.assertIn("pill warn'>Update<", b.get("/apps").body)
         self.ok("/apps/update", {"id": "demo"}, "/apps")
-        self.assertIn("Version 1.1.0 on the phone", b.get("/apps").body)
+        self.assertIn("Installed 1.1.0", b.get("/apps").body)
         self.assertEqual(p.get("apps/demo", "title"), "Kitchen")
         self.ok("/apps/settings", {"id": "demo", "defaults": "yes"}, "/apps")
         self.assertIsNone(p.get("apps/demo", "title"))
@@ -593,12 +593,12 @@ class Paired(unittest.TestCase):
             f.write("dev=no\nssh=off\nhost_key=SHA256:abcDEF123 (ed25519)\ndoor=closed\nkeys=0\n")
         page = b.get("/access").body
         self.assertIn("SHA256:abcDEF123", page)
-        self.assertIn("Turn SSH on", page)
+        self.assertIn(">Turn on<", page)
         before = len(p.applied_list())
         self.ok("/access/ssh", {"to": "on"}, "/access")
         self.assertEqual(p.get("access", "ssh"), "on")
         self.assertEqual(p.applied_list()[before:], ["access"])
-        self.assertIn("Turn SSH off", b.get("/access").body)
+        self.assertIn(">Turn off<", b.get("/access").body)
         # a key pasted in, with the mess a paste brings
         self.ok("/access/key-add", {"keys": "\r\n  " + KEY1 + "  \r\n\r\n"}, "/access")
         self.assertEqual(self.keys(), [KEY1])
@@ -639,7 +639,7 @@ class Paired(unittest.TestCase):
         # a second browser, signed out from the first
         other = Browser(p).pair()
         self.assertEqual(p.status()["paired"], "2")
-        self.assertIn("2 browsers are paired", b.get("/access").body)
+        self.assertIn("2 browsers paired", b.get("/access").body)
         self.ok("/access/browsers", {}, "/access")
         self.assertEqual(p.status()["paired"], "1")
         self.assertEqual(other.get("/accounts").status, 303)
@@ -681,7 +681,7 @@ class Paired(unittest.TestCase):
         r = b.post("/backup/download", {"passwords": "yes"})
         full = r.body
         self.assertIn("# passwords: included", full)
-        self.assertIn("# SENSITIVE: this file holds passwords", full)
+        self.assertIn("# SENSITIVE: contains passwords", full)
         self.assertIn("SENSITIVE", r.getheader("Content-Disposition"))
         self.assertIn("password=" + secret, full)
         self.assertIn("password=second-pw", full)
@@ -739,7 +739,7 @@ class Paired(unittest.TestCase):
             self.assertEqual(b.upload("/backup/restore", {"sure": "yes"}, "b.txt", text).status, 303, what)
             bad, msg = b.flash("/backup")
             self.assertTrue(bad, what)
-            self.assertIn("Nothing was restored", msg, what)
+            self.assertIn("Not restored", msg, what)
             self.assertEqual(p.get("sip", "label"), wreck_user, what)
         self.assertEqual(p.get("access", "ssh"), "off")
         self.assertFalse(os.path.exists(os.path.join(p.dir, "etc")))
@@ -749,7 +749,7 @@ class Paired(unittest.TestCase):
         for path in ("/", "/accounts", "/network", "/time", "/sound", "/contacts", "/history", "/apps", "/access", "/backup"):
             r = b.get(path)
             self.assertEqual(r.status, 200, path)
-            self.assertIn("plain HTTP", r.body, path)
+            self.assertIn("Plain HTTP", r.body, path)
             self.assertIn("name='csrf'", r.body, path)
             for secret in ("s3cret", "second-pw", "changed-pw", "4711"):
                 self.assertNotIn(secret, r.body, path)
@@ -763,7 +763,7 @@ class Paired(unittest.TestCase):
         self.bad("/access/web-off", {}, "/access")
         self.assertEqual(p.get("access", "web"), "on")
         r = b.post("/access/web-off", {"sure": "yes"})
-        self.assertIn("The web page is off", r.body)
+        self.assertIn("Web setup is off", r.body)
         self.assertEqual(p.get("access", "web"), "off")
         self.assertEqual(p.proc.wait(5), 0)
         time.sleep(1.3)

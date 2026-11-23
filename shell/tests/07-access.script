@@ -26,7 +26,7 @@ expectstate cfg.access.ssh (unset)
 # ---- turning it on asks first, and shows the host key ----
 key ok
 expectstate overlay confirm
-expectstate overlay.title Turn_SSH_on?
+expectstate overlay.title Turn_on_SSH?
 shot shots/access-confirm.png
 # no: nothing changes
 key x
@@ -51,7 +51,7 @@ key down
 key down
 key down
 key down
-expectstate settings.row Add_a_key_from_your_computer
+expectstate settings.row Add_key
 key ok
 expectstate overlay confirm
 key ok
@@ -71,14 +71,14 @@ run tail -1 simdata/access/dropbear.started | grep -q -- "^-r "
 key ok
 expectstate overlay none
 run grep -qx door=open simdata/access/status
-expectstate settings.row Password_login_is_open
+expectstate settings.row Password_login
 key ok
 expectstate overlay door
 
 # ---- the key arrives (ssh-copy-id adds a line): the door closes by itself ----
 run echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOeStCLCiE0njMGEkRNUHaNmd+dNxoLC9NECKxV/wLQ9 tom@desk" >> simdata/access/keep/ssh/authorized_keys
 waitstate overlay message 5000
-expectstate overlay.title Your_key_is_on_the_phone
+expectstate overlay.title Key_added
 expectstate door.password (none)
 run grep -qx door=closed simdata/access/status
 run grep -qx 'root:\*:::::::' simdata/access/etc/shadow
@@ -101,11 +101,11 @@ expectstate door.password (none)
 wait 1500
 run grep -qx door=closed simdata/access/status
 run grep -qx 'root:\*:::::::' simdata/access/etc/shadow
-expectstate settings.row Add_a_key_from_your_computer
+expectstate settings.row Add_key
 
 # ---- forgetting the keys ----
 key down
-expectstate settings.row Forget_all_keys
+expectstate settings.row Remove_all_keys
 key ok
 expectstate overlay confirm
 key ok

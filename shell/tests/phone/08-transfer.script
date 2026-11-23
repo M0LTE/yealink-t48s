@@ -20,7 +20,7 @@ key transfer
 run $FAR waitlog $CAROLLOG CALL_INCOMING.*1002 8
 run $FAR $CAROL accept
 waitstate phone ended 8000
-expectstate ended Call_transferred
+expectstate ended Transferred
 shot shots/phone-transferred.png
 hook on
 waitstate phone idle 4000

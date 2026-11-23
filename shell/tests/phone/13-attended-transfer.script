@@ -55,7 +55,7 @@ key transfer
 # 1002 calls 1003 in our place. (A phone takes such a call over by itself; the test's far end has to be told.)
 run $FAR $CAROL accept
 waitstate phone ended 10000
-expectstate ended Call_transferred
+expectstate ended Transferred
 shot shots/phone-transferred.png
 hook on
 waitstate phone idle 4000

@@ -198,7 +198,7 @@ void t48_kbd_draw(t48_kbd *k, t48_surface *s)
     t48_fill(s, 0, 0, s->w, s->h, K_BG);
     t48_text_fit(s, 16, 10, s->w - 260, &t48_font_bold, K_DIM, k->title);
     char m[40];
-    snprintf(m, sizeof m, "keypad: %s  (# changes)", mode_label[k->mode]);
+    snprintf(m, sizeof m, "# %s", mode_label[k->mode]);
     t48_text_right(s, s->w - 16, 12, &t48_font_small, K_DIM, m);
 
     /* what to show: a password is stars, but for the character just typed */
@@ -229,8 +229,6 @@ void t48_kbd_draw(t48_kbd *k, t48_surface *s)
         x = t48_text(s, x, ty, f, K_TEXT, one);
     }
     t48_fill(s, cx, fy + 10, 2, fh - 20, K_ACCENT);
-    if (!k->len && (k->flags & T48_KBD_PASSWORD))
-        t48_text(s, fx + pad + 10, fy + (fh - t48_font_normal.height) / 2, &t48_font_normal, K_DIM, "hidden as you type");
 
     int n = layout(k, b);
     for (int i = 0; i < n; i++) {
@@ -243,14 +241,14 @@ void t48_kbd_draw(t48_kbd *k, t48_surface *s)
         one[0] = (char)a;
         if (k->page == 0 && k->shift && a >= 'a' && a <= 'z') one[0] = (char)(a - 32);
         switch (a) {
-        case A_SHIFT: label = k->shift == 2 ? "CAPS" : "Shift"; lf = &t48_font_bold; break;
+        case A_SHIFT: label = k->shift == 2 ? "Caps" : "Shift"; lf = &t48_font_bold; break;
         case A_BKSP: label = "Del"; lf = &t48_font_bold; break;
         case A_PAGE: label = page_label[k->page]; lf = &t48_font_bold; break;
         case A_LEFT: label = "<"; break;
         case A_RIGHT: label = ">"; break;
         case A_CANCEL: label = "Cancel"; lf = &t48_font_bold; break;
         case A_DONE: label = "Done"; lf = &t48_font_bold; break;
-        case ' ': label = "space"; lf = &t48_font_normal; break;
+        case ' ': label = "Space"; lf = &t48_font_normal; break;
         }
         t48_round_fill(s, b[i].x, b[i].y, b[i].w, b[i].h, 8, fill);
         int dark = a == A_DONE || (a == A_SHIFT && k->shift == 2);

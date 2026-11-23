@@ -9,7 +9,7 @@ key ok
 expectstate settings.page accounts
 key down
 expectstate settings.row Account_2
-expectstate settings.value not_set
+expectstate settings.value Not_set
 key ok
 expectstate settings.page sip
 # user 1004
@@ -84,7 +84,7 @@ key down
 key down
 key down
 key down
-expectstate settings.row Name_on_this_phone_(optional)
+expectstate settings.row Label
 key ok
 key 9
 key 6
@@ -196,7 +196,7 @@ key down
 key down
 key down
 key down
-expectstate settings.row Usual_account_for_calls
+expectstate settings.row Default_account
 key ok
 expectstate cfg.phone.default_account 2
 expectstate acct.default 2
@@ -221,7 +221,7 @@ key down
 key down
 key down
 key down
-expectstate settings.row Remove_this_account
+expectstate settings.row Remove_account
 key ok
 expectstate overlay confirm
 wait 200

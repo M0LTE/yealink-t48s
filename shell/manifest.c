@@ -37,11 +37,11 @@ int manifest_read(const char *dir, struct manifest *m, char *err, size_t errn)
     memset(m, 0, sizeof *m);
     snprintf(path, sizeof path, "%s/manifest.json", dir);
     f = fopen(path, "rb");
-    if (!f) { snprintf(err, errn, "it has no manifest.json"); return -1; }
+    if (!f) { snprintf(err, errn, "no manifest.json"); return -1; }
     txt = malloc(65536);
     n = txt ? (long)fread(txt, 1, 65535, f) : 0;
     fclose(f);
-    if (n <= 0) { free(txt); snprintf(err, errn, "its manifest.json is empty"); return -1; }
+    if (n <= 0) { free(txt); snprintf(err, errn, "manifest.json is empty"); return -1; }
     txt[n] = 0;
     const char *e = txt + n;
 
@@ -54,13 +54,13 @@ int manifest_read(const char *dir, struct manifest *m, char *err, size_t errn)
         !t48_json_str(t48_json_get(txt, e, "exec"), e, m->exec, sizeof m->exec) ||
         m->exec[0] == '/' || strstr(m->exec, "..") ||
         !t48_json_num(t48_json_get(txt, e, "api"), e, &api)) {
-        snprintf(err, errn, "its manifest needs \"id\" (a-z, 0-9, - . _), \"exec\" (inside the app's folder) and \"api\"");
+        snprintf(err, errn, "manifest needs \"id\" (a-z, 0-9, - . _), \"exec\" (inside the app's folder) and \"api\"");
         free(txt);
         return -1;
     }
     m->api = (int)api;
     if (m->api < 1 || m->api > T48_API_LEVEL) {
-        snprintf(err, errn, "it is written for API level %d and this phone speaks %d", m->api, T48_API_LEVEL);
+        snprintf(err, errn, "needs app API %d, this phone has %d", m->api, T48_API_LEVEL);
         free(txt);
         return -1;
     }

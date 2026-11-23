@@ -15,13 +15,13 @@ const [url, statusFile, out] = process.argv.slice(2);
 
   await page.goto(url);
   await shot('welcome');
-  await page.click('text=Show a code on the phone');
+  await page.click('text=Show code');
   await page.waitForURL('**/pair');
   const code = /pair_code=(\d+)/.exec(fs.readFileSync(statusFile, 'utf8'))[1];
   await page.fill('input[name=code]', code.slice(0, 3) + ' ' + code.slice(3));
   await shot('pair');
   // a picture with a real code in it is harmless: it was good for two minutes, once
-  await page.click('text=Pair this browser');
+  await page.click('button:has-text("Pair")');
   await page.waitForURL(url + '/');
   await shot('overview');
 

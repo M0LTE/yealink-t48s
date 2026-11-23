@@ -22,7 +22,7 @@ expectstate number 1005
 # OK calls: with nothing to call through, that ends at once
 key ok
 expectstate phone ended
-expectstate ended No_phone_service
+expectstate ended No_service
 shot shots/phone-alone-failed.png
 key x
 expect idle

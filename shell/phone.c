@@ -26,7 +26,7 @@ enum ph { PH_IDLE, PH_DIAL, PH_OUTGOING, PH_INCOMING, PH_INCALL, PH_ENDED };
 static const char *const ph_names[] = {"idle", "dial", "outgoing", "incoming", "incall", "ended"};
 static const char *const route_names[] = {"none", "handset", "speaker", "headset"};
 static const char *const route_labels[] = {"On hook", "Handset", "Speaker", "Headset"};
-static const char *const vol_labels[] = {"", "Handset volume", "Speaker volume", "Headset volume", "Ringer volume"};
+static const char *const vol_labels[] = {"", "Handset", "Speaker", "Headset", "Ringer"};
 
 enum reg { REG_NONE, REG_TRYING, REG_OK, REG_FAIL };
 
@@ -466,7 +466,7 @@ static void finish(const char *text, const char *detail, int tone)
 
     log_call(&P.c);
     if (P.o_st) { promote(text); return; }
-    if (P.joining) text = "Call transferred";
+    if (P.joining) text = "Transferred";
     snprintf(P.ended, sizeof P.ended, "%s", text);
     if (detail) snprintf(P.ended_detail, sizeof P.ended_detail, "%s", detail);
     else if (P.c.answered) snprintf(P.ended_detail, sizeof P.ended_detail, "%d:%02d", secs / 60, secs % 60);
@@ -515,7 +515,7 @@ static void place_call(const char *number, int route, int acct)
         P.c.outgoing = 1;
         P.c.acct = acct;
         set_peer(&P.c, n, NULL);
-        finish("No phone service", "The SIP service is not running", T48AC_TONE_ERROR);
+        finish("No service", NULL, T48AC_TONE_ERROR);
         return;
     }
     dial_out(n, acct);
@@ -537,7 +537,7 @@ static void hang_up(void)
     else if (P.st == PH_OUTGOING && !P.o_st) sipc_cmd("hangup", NULL);
     else if (P.st == PH_OUTGOING) return;   /* baresip has not named the new call yet: a moment */
     if (P.st == PH_INCOMING) P.c.rejected = 1;
-    finish(P.st == PH_INCOMING ? "Call declined" : "Call ended", NULL, T48AC_TONE_OFF);
+    finish(P.st == PH_INCOMING ? "Declined" : "Call ended", NULL, T48AC_TONE_OFF);
 }
 
 static void incoming(const char *id, const char *peer, const char *name, int acct)
@@ -569,14 +569,14 @@ static void call_closed(const char *why)
     int code = atoi(why);
     if (P.st == PH_INCOMING) { finish("Missed call", NULL, T48AC_TONE_OFF); return; }
     if (P.st == PH_INCALL) {
-        finish(strstr(why, "ransfer") ? "Call transferred" : "Call ended", NULL, T48AC_TONE_OFF);
+        finish(strstr(why, "ransfer") ? "Transferred" : "Call ended", NULL, T48AC_TONE_OFF);
         return;
     }
     /* an outgoing call that never connected */
     if (code == 486 || code == 600) finish("Busy", NULL, T48AC_TONE_BUSY);
-    else if (code == 404 || code == 604) finish("Number not found", why, T48AC_TONE_ERROR);
+    else if (code == 404 || code == 604) finish("Not found", why, T48AC_TONE_ERROR);
     else if (code == 408 || code == 480) finish("No answer", why, T48AC_TONE_BUSY);
-    else if (code == 603) finish("Call declined", NULL, T48AC_TONE_BUSY);
+    else if (code == 603) finish("Declined", NULL, T48AC_TONE_BUSY);
     else finish("Call failed", why, T48AC_TONE_ERROR);
 }
 
@@ -694,7 +694,7 @@ void phone_sip_link(int up)
         for (int i = 0; i < MAX_ACCTS; i++) { A[i].reg = REG_NONE; A[i].msgs = 0; }
         if (P.st == PH_OUTGOING || P.st == PH_INCOMING || P.st == PH_INCALL) {
             if (P.o_st) { log_call(&P.o); memset(&P.o, 0, sizeof P.o); P.o_st = O_NONE; }
-            finish("Call lost", "The SIP service stopped", T48AC_TONE_ERROR);
+            finish("Call lost", "No service", T48AC_TONE_ERROR);
         }
         update_lamps();
     }
@@ -706,7 +706,7 @@ void phone_sip_response(const char *token, int ok, const char *data)
     if (ok) return;
     logmsg("sip: %s failed: %.80s", token, data);
     if (!strcmp(token, "dial") && P.st == PH_OUTGOING && !P.c.id[0]) {
-        finish("Call failed", "That number cannot be called", T48AC_TONE_ERROR);
+        finish("Call failed", "Invalid number", T48AC_TONE_ERROR);
     } else if ((!strcmp(token, "hold") || !strcmp(token, "resume")) && !P.o_st) {
         P.c.held = !P.c.held;
         changed();
@@ -995,7 +995,7 @@ static void message_key(void)
     for (int i = MAX_ACCTS - 1; i >= 0; i--)
         if (A[i].on && A[i].msgs && A[i].voicemail[0]) a = i;
     if (!A[a].on || !A[a].voicemail[0]) {
-        logmsg("phone: Message key: no voicemail number is set (Settings, Phone accounts)");
+        logmsg("phone: Message key: no voicemail number is set (Settings, Accounts)");
         return;
     }
     place_call(A[a].voicemail, route_for_now(), a);
@@ -1328,7 +1328,7 @@ static void chips(int cx, int x, int y)
     t[n] = route_labels[P.route]; fill[n] = C_PANEL; ink[n++] = P.route ? C_GOOD : C_DIM;
     if (P.muted) { t[n] = "Muted"; fill[n] = C_BAD; ink[n++] = C_BG; }
     if (P.c.held) { t[n] = "On hold"; fill[n] = C_ACCENT; ink[n++] = C_BG; }
-    if (P.c.remote_held) { t[n] = "Held by the other end"; fill[n] = C_PANEL; ink[n++] = C_ACCENT; }
+    if (P.c.remote_held) { t[n] = "Held remotely"; fill[n] = C_PANEL; ink[n++] = C_ACCENT; }
     for (int i = 0; i < n; i++) w += t48_text_width(&t48_font_bold, t[i]) + 28 + (i ? 10 : 0);
     if (cx >= 0) x = cx - w / 2;
     for (int i = 0; i < n; i++) x = chip(x, y, t[i], fill[i], ink[i]);
@@ -1362,13 +1362,10 @@ static void draw_dial(void)
         big_text(248, KP_Y + (n ? 18 : 30), 420, P.number, C_TEXT);
         if (n) t48_text_centre(&ui, 248, KP_Y + 76, &t48_font_normal, C_ACCENT, n);
     } else {
-        t48_text_centre(&ui, 248, KP_Y + 40, &t48_font_head, C_FAINT, "Enter a number");
+        t48_text_centre(&ui, 248, KP_Y + 40, &t48_font_head, C_FAINT, "Number");
     }
     chips(-1, 24, KP_Y + 130);
-    const char *hint = !sipc_connected() ? "No phone service" :
-        P.route == T48AC_ROUTE_NONE ? "Lift the handset, or press OK or Speaker" :
-        P.number[0] ? "Press OK to call" : "Dial tone";
-    t48_text(&ui, 28, KP_Y + 186, &t48_font_normal, sipc_connected() ? C_DIM : C_BAD, hint);
+    if (!sipc_connected()) t48_text(&ui, 28, KP_Y + 186, &t48_font_normal, C_BAD, "No service");
     if (accts_on() > 1) {
         char b[120], a[100];
         enum reg r = A[P.dial_acct].reg;
@@ -1401,8 +1398,8 @@ static void draw_outgoing(void)
         t48_text_centre(&ui, SW / 2, 246, &t48_font_normal, C_DIM, b);
     }
     chips(SW / 2, 0, 276);
-    ui_button(180, ROW_Y, 200, ROW_H, P.route == T48AC_ROUTE_SPEAKER ? "Speaker off" : "Speaker", P.route == T48AC_ROUTE_SPEAKER ? C_ACCENT : C_PANEL);
-    ui_button(420, ROW_Y, 200, ROW_H, "End call", C_BAD);
+    ui_button(180, ROW_Y, 200, ROW_H, "Speaker", P.route == T48AC_ROUTE_SPEAKER ? C_ACCENT : C_PANEL);
+    ui_button(420, ROW_Y, 200, ROW_H, "End", C_BAD);
 }
 
 static void draw_incoming(void)
@@ -1417,9 +1414,7 @@ static void draw_incoming(void)
         snprintf(b, sizeof b, "For %s", a);
         t48_text_centre(&ui, SW / 2, 234, &t48_font_normal, C_TEXT, b);
     }
-    t48_text_centre(&ui, SW / 2, 268, &t48_font_normal, C_DIM,
-                    P.route != T48AC_ROUTE_NONE ? "Press OK to answer" : "Lift the handset, or press Speaker or Headset, to answer");
-    if (!P.ring) t48_text_centre(&ui, SW / 2, 304, &t48_font_normal, C_FAINT, "Ringer silenced");
+    if (!P.ring) t48_text_centre(&ui, SW / 2, 304, &t48_font_normal, C_FAINT, "Silenced");
     ui_button(120, 372, 260, 76, "Answer", C_GOOD);
     ui_button(420, 372, 260, 76, "Decline", C_BAD);
 }
@@ -1461,10 +1456,10 @@ static void draw_incall(void)
     call_time(t, sizeof t);
     ui_status_bar(P.xfer ? "Transfer" : P.c.held ? "On hold" : "In call");
     if (P.xfer) {
-        t48_text_centre(&ui, cx, 62, &t48_font_normal, C_DIM, "Transfer this call to");
+        t48_text_centre(&ui, cx, 62, &t48_font_normal, C_DIM, "Transfer to");
         t48_round_fill(&ui, 24, 96, 448, 96, 14, C_PANEL);
         if (P.number[0]) big_text(cx, 120, 420, P.number, C_TEXT);
-        else t48_text_centre(&ui, cx, 128, &t48_font_head, C_FAINT, "Enter a number");
+        else t48_text_centre(&ui, cx, 128, &t48_font_head, C_FAINT, "Number");
         t48_text_centre(&ui, cx, 214, &t48_font_bold, C_TEXT, who());
         t48_text_centre(&ui, cx, 244, &t48_font_head, C_DIM, t);
     } else if (side) {
@@ -1473,8 +1468,6 @@ static void draw_incall(void)
         if (P.c.dtmf[0]) {
             t48_round_fill(&ui, 24, 196, 448, 56, 12, C_PANEL);
             t48_text_centre(&ui, cx, 196 + (56 - t48_font_head.height) / 2, &t48_font_head, C_TEXT, P.c.dtmf);
-        } else {
-            t48_text_centre(&ui, cx, 214, &t48_font_normal, C_FAINT, "Keys send tones");
         }
     } else {
         big_text(cx, 60, maxw, who(), C_TEXT);
@@ -1488,7 +1481,7 @@ static void draw_incall(void)
     } else if (P.note[0]) {
         t48_text_centre(&ui, cx, 274, &t48_font_normal, C_ACCENT, P.note);
     } else if (P.parked && !side) {
-        t48_text_centre(&ui, cx, 274, &t48_font_normal, C_ACCENT, "Lift the handset or press Speaker to carry on");
+        t48_text_centre(&ui, cx, 274, &t48_font_normal, C_ACCENT, "Lift handset to resume");
     }
     chips(cx, 0, 318);
 
@@ -1502,8 +1495,7 @@ static void draw_incall(void)
     static const char *const label[6] = {"Mute", "Hold", "Keypad", "Speaker", "Transfer", "End"};
     for (int i = 0; i < 6; i++) {
         int on = (i == 0 && P.muted) || (i == 1 && P.c.held) || (i == 2 && P.keypad) || (i == 3 && P.route == T48AC_ROUTE_SPEAKER);
-        const char *l = i == 0 && P.muted ? "Unmute" : i == 1 && P.c.held ? "Resume" : label[i];
-        ui_button(24 + i * 127, ROW_Y, 117, ROW_H, l, i == 5 ? C_BAD : on ? C_ACCENT : C_PANEL);
+        ui_button(24 + i * 127, ROW_Y, 117, ROW_H, label[i], i == 5 ? C_BAD : on ? C_ACCENT : C_PANEL);
     }
 }
 
@@ -1513,7 +1505,6 @@ static void draw_ended(void)
     t48_text_centre(&ui, SW / 2, 120, &t48_font_big, C_TEXT, P.ended);
     if (hist[0].number[0] && nhist) t48_text_centre(&ui, SW / 2, 196, &t48_font_head, C_DIM, hist_name(&hist[0]));
     if (P.ended_detail[0]) t48_text_centre(&ui, SW / 2, 250, &t48_font_normal, C_DIM, P.ended_detail);
-    if (P.tone != T48AC_TONE_OFF) t48_text_centre(&ui, SW / 2, 320, &t48_font_normal, C_FAINT, "Hang up to go back");
 }
 
 void phone_draw(void)
@@ -1637,8 +1628,7 @@ void phone_draw_history(void)
     t48_fill(&ui, 0, 0, SW, SH, C_BG);
     ui_status_bar("Calls");
     if (!nhist) {
-        t48_text_centre(&ui, SW / 2, 200, &t48_font_head, C_DIM, "No calls yet");
-        t48_text_centre(&ui, SW / 2, 244, &t48_font_normal, C_FAINT, "Press X to go back");
+        t48_text_centre(&ui, SW / 2, 200, &t48_font_head, C_DIM, "No calls");
         return;
     }
     if (P.hist_sel >= nhist) P.hist_sel = nhist - 1;
@@ -1668,9 +1658,9 @@ void phone_draw_history(void)
         t48_text_right(&ui, SW - 34, y + 12, &t48_font_normal, C_DIM, when);
     }
     if (P.hist_confirm) {
-        t48_text(&ui, 24, HIST_BTN_Y + 16, &t48_font_normal, C_TEXT, "Forget every call in this list?");
-        ui_button(416, HIST_BTN_Y, 170, HIST_BTN_H, "Keep them", C_PANEL);
-        ui_button(596, HIST_BTN_Y, 188, HIST_BTN_H, "Forget all", C_BAD);
+        t48_text(&ui, 24, HIST_BTN_Y + 16, &t48_font_normal, C_TEXT, "Clear all calls?");
+        ui_button(416, HIST_BTN_Y, 170, HIST_BTN_H, "Cancel", C_PANEL);
+        ui_button(596, HIST_BTN_Y, 188, HIST_BTN_H, "Clear", C_BAD);
     } else {
         int known = contacts_name(hist[P.hist_sel].number) != NULL;
         ui_button(16, HIST_BTN_Y, 180, HIST_BTN_H, "Dial", C_GOOD);
@@ -1678,7 +1668,6 @@ void phone_draw_history(void)
         ui_button(416, HIST_BTN_Y, 170, HIST_BTN_H, "Delete", C_PANEL);
         ui_button(596, HIST_BTN_Y, 188, HIST_BTN_H, "Clear all", C_PANEL);
     }
-    t48_text_centre(&ui, SW / 2, 452, &t48_font_small, C_FAINT, "Up and Down to choose, OK or a touch to put the number in the dialler, X to go back");
 }
 
 static void history_pick(int i)
@@ -1758,7 +1747,7 @@ static void acct_status(int i, char *out, size_t n, uint32_t *colour, const char
     if (A[i].reg == REG_OK) { snprintf(out, n, "%s", name); *colour = C_GOOD; }
     else if (A[i].reg == REG_FAIL) { snprintf(out, n, "%s: not registered", name); *colour = C_BAD; }
     else if (A[i].reg == REG_TRYING) { snprintf(out, n, "%s: registering", name); *colour = C_ACCENT; }
-    else snprintf(out, n, "%s: not in use", name);
+    else snprintf(out, n, "%s: off", name);
 }
 
 /* the usual account and how it stands, for the status bar */
@@ -1767,9 +1756,9 @@ void phone_account_text(char *out, size_t n, uint32_t *colour)
     char acc[140];
     *colour = C_DIM;
     if (A[def_acct].used) snprintf(acc, sizeof acc, "%s@%s", A[def_acct].user, A[def_acct].domain);
-    else snprintf(acc, sizeof acc, "SIP account");
-    if (!opt.sip || !sipc_connected()) { snprintf(out, n, "No phone service"); *colour = C_BAD; }
-    else if (!A[def_acct].on || A[def_acct].reg == REG_NONE) snprintf(out, n, "No SIP account");
+    else snprintf(acc, sizeof acc, "Account");
+    if (!opt.sip || !sipc_connected()) { snprintf(out, n, "No service"); *colour = C_BAD; }
+    else if (!A[def_acct].on || A[def_acct].reg == REG_NONE) snprintf(out, n, "No account");
     else acct_status(def_acct, out, n, colour, acc);
 }
 
@@ -1785,7 +1774,7 @@ int phone_account_line(int k, char *out, size_t n, uint32_t *colour, int *is_def
         if (A[i].msgs) {
             size_t at = strlen(out);
             if (A[i].msgs > 0) snprintf(out + at, n - at, "  (%d new)", A[i].msgs);
-            else snprintf(out + at, n - at, "  (new messages)");
+            else snprintf(out + at, n - at, "  (new)");
         }
         *is_default = i == def_acct;
         return i + 1;

@@ -23,13 +23,12 @@ key down
 key down
 key down
 key down
-key down
-expectstate settings.row Web_setup_page
+expectstate settings.row Web_setup
 expectstate settings.value off
 shot shots/web-phone-off.png
 key ok
 expectstate overlay confirm
-expectstate overlay.title Turn_the_web_page_on?
+expectstate overlay.title Turn_on_web_setup?
 shot shots/web-phone-confirm.png
 key x
 expectstate cfg.access.web (unset)
@@ -38,8 +37,8 @@ key ok
 expectstate overlay none
 expectstate cfg.access.web on
 wait 1500
-run $B expect / "Show a code on the phone"
-run $B expect / "plain HTTP"
+run $B expect / "Show code"
+run $B expect / "Plain HTTP"
 # nothing else without pairing
 run $B absent /accounts "Account 1"
 expectstate settings.value on
@@ -83,7 +82,7 @@ run $B post /accounts/save n=1 user=1001 domain=pbx.example.org password=hunter2
 waitstate accounts 1 3000
 shot shots/web-phone-idle-account.png
 touch 700 420
-expectstate settings.row Phone_accounts
+expectstate settings.row Accounts
 expectstate settings.value 1001@pbx.example.org
 # while Settings is showing: the ringer level and the brightness follow under the owner's eyes
 key down
@@ -169,7 +168,7 @@ expectstate overlay confirm
 key ok
 expectstate cfg.access.ssh on
 wait 1500
-run $B expect /access "Turn SSH off"
+run $B expect /access ">Turn off<"
 # a key added on the page shows on the phone's Access page
 run $B post /access/key-add "keys=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOeStCLCiE0njMGEkRNUHaNmd+dNxoLC9NECKxV/wLQ9 tom@desk"
 wait 1500
@@ -186,8 +185,7 @@ key down
 key down
 key down
 key down
-key down
-expectstate settings.row Web_setup_page
+expectstate settings.row Web_setup
 expectstate settings.value on
 key ok
 expectstate overlay none
@@ -202,7 +200,7 @@ key ok
 key ok
 expectstate cfg.access.web on
 wait 1500
-run $B expect / "Show a code on the phone"
+run $B expect / "Show code"
 key ok
 wait 2000
 run ! curl -s -m 2 -o /dev/null http://127.0.0.1:$WEB_PORT/

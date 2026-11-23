@@ -106,7 +106,7 @@ void ui_network_status(char *out, size_t n, int *up)
         if (!a->ifa_addr || a->ifa_addr->sa_family != AF_INET) continue;
         if ((a->ifa_flags & IFF_LOOPBACK) || !(a->ifa_flags & IFF_UP) || !(a->ifa_flags & IFF_RUNNING)) continue;
         inet_ntop(AF_INET, &((struct sockaddr_in *)a->ifa_addr)->sin_addr, ip, sizeof ip);
-        snprintf(out, n, "%s  %s", a->ifa_name, ip);
+        snprintf(out, n, "%s", ip);
         *up = 1;
         break;
     }
@@ -238,8 +238,8 @@ static void draw_idle(void)
         acc_box(i, naccts, &x, &y, &w);
         t48_round_fill(&ui, x, y, w, ACC_H, 10, C_PANEL);
         t48_round_fill(&ui, x + 12, y + 13, 10, 10, 5, c);
-        t48_text_fit(&ui, x + 30, y + (ACC_H - t48_font_normal.height) / 2, w - (def ? 96 : 40), &t48_font_normal, C_TEXT, line);
-        if (def) t48_text_right(&ui, x + w - 10, y + (ACC_H - t48_font_small.height) / 2, &t48_font_small, C_ACCENT, "usual");
+        t48_text_fit(&ui, x + 30, y + (ACC_H - t48_font_normal.height) / 2, w - (def ? 108 : 40), &t48_font_normal, C_TEXT, line);
+        if (def) t48_text_right(&ui, x + w - 10, y + (ACC_H - t48_font_small.height) / 2, &t48_font_small, C_ACCENT, "Default");
     }
     /* One row of notices, the most important first: the standing notice from a file
      * (t48-live: nothing is installed, which the owner must not lose sight of), missed
@@ -276,12 +276,11 @@ static void draw_idle(void)
     for (int i = 0, x = (SW - total) / 2; i < idle_notices; i++) x = notice_pill(x, ny, note[i], fill[i]);
     static const char *const labels[5] = {"Apps", "Calls", "Contacts", "DND", "Settings"};
     for (int i = 0; i < 5; i++)
-        ui_button(IDLE_BTN_X(i), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, i == IB_DND && phone_dnd() ? "DND on" : labels[i],
+        ui_button(IDLE_BTN_X(i), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, labels[i],
                   i == IB_DND && phone_dnd() ? C_BAD : C_PANEL);
-    /* the bottom line: the notice's second line (how to go back to Yealink) when there is one, else the keys */
+    /* the bottom line: the notice's second line (how to go back to Yealink) when there is one */
     if (file[1][0] && t48_text_width(&t48_font_small, file[1]) > SW - 20) t48_text_fit(&ui, 10, 456, SW - 20, &t48_font_small, C_DIM, file[1]);
     else if (file[1][0]) t48_text_centre(&ui, SW / 2, 456, &t48_font_small, C_DIM, file[1]);
-    else t48_text_centre(&ui, SW / 2, 456, &t48_font_small, C_FAINT, "OK apps, Up calls, Left contacts, Right do not disturb, Down settings, or just dial");
 }
 
 /* launcher grid: 4 across, 2 down, a page at a time */
@@ -322,7 +321,6 @@ static void draw_launcher(void)
             t48_fill(&ui, ix + 44, iy + 24, 8, 48, C_ACCENT);
             t48_fill(&ui, ix + 24, iy + 44, 48, 8, C_ACCENT);
             t48_text_centre(&ui, x + TILE_W / 2, y + 122, &t48_font_bold, C_TEXT, "Get apps");
-            t48_text_centre(&ui, x + TILE_W / 2, y + 152, &t48_font_small, C_FAINT, "install, remove");
             continue;
         }
         const struct manifest *m = &apps[i];
@@ -340,13 +338,13 @@ static void draw_launcher(void)
         if (tw > TILE_W - 16) t48_text_fit(&ui, x + 8, y + 122, TILE_W - 16, &t48_font_bold, C_TEXT, m->name);
         else t48_text_centre(&ui, x + TILE_W / 2, y + 122, &t48_font_bold, C_TEXT, m->name);
         if (!strcmp(app_id(), m->id))
-            t48_text_centre(&ui, x + TILE_W / 2, y + 152, &t48_font_small, C_GOOD, "open");
+            t48_text_centre(&ui, x + TILE_W / 2, y + 152, &t48_font_small, C_GOOD, "Open");
         else if (m->version[0])
             t48_text_centre(&ui, x + TILE_W / 2, y + 152, &t48_font_small, C_FAINT, m->version);
     }
     if (pages > 1) {
         char b[24];
-        snprintf(b, sizeof b, "page %d of %d", page + 1, pages);
+        snprintf(b, sizeof b, "%d/%d", page + 1, pages);
         t48_text_centre(&ui, SW / 2, 14, &t48_font_small, C_DIM, b);
     }
 }
@@ -515,8 +513,8 @@ void shell_app_gone(const char *name, const char *why)
     int was_front = scr == SCR_APP || (scr == SCR_CALL && under_call == SCR_APP);
 
     if (why) {
-        snprintf(msg_title, sizeof msg_title, "%s has stopped", name);
-        snprintf(msg_text, sizeof msg_text, "It %s.", why);
+        snprintf(msg_title, sizeof msg_title, "%s stopped", name);
+        snprintf(msg_text, sizeof msg_text, "%s", why);
         if (was_front) next = SCR_MESSAGE;
     }
     if (pending_id[0]) {

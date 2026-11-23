@@ -100,15 +100,14 @@ void watch_draw_overlay(void)
     if (!pairing()) return;
     t48_round_fill(&ui, BOX_X - 3, BOX_Y - 3, BOX_W + 6, BOX_H + 6, 21, C_ACCENT);
     t48_round_fill(&ui, BOX_X, BOX_Y, BOX_W, BOX_H, 18, C_PANEL);
-    t48_text_centre(&ui, SW / 2, BOX_Y + 22, &t48_font_head, C_TEXT, "A browser wants to set up this phone");
-    t48_text_centre(&ui, SW / 2, BOX_Y + 66, &t48_font_normal, C_DIM, "If that is you, type this code into the page:");
+    t48_text_centre(&ui, SW / 2, BOX_Y + 22, &t48_font_head, C_TEXT, "Pairing code");
     /* in two groups, as it is easier to carry across the room */
     size_t n = strlen(web.code), half = (n + 1) / 2;
     snprintf(spaced, sizeof spaced, "%.*s %s", (int)half, web.code, web.code + half);
     t48_text_centre(&ui, SW / 2, BOX_Y + 96, &t48_font_huge, C_ACCENT, spaced);
-    snprintf(from, sizeof from, "Asked for from %s", web.from[0] ? web.from : "the network");
+    snprintf(from, sizeof from, "Requested by %s", web.from[0] ? web.from : "a browser");
     t48_text_centre(&ui, SW / 2, BOX_Y + BOX_H - 62, &t48_font_small, C_DIM, from);
-    t48_text_centre(&ui, SW / 2, BOX_Y + BOX_H - 36, &t48_font_small, C_DIM, "Not you? Press X, or touch here, and the code is thrown away.");
+    t48_text_centre(&ui, SW / 2, BOX_Y + BOX_H - 36, &t48_font_small, C_DIM, "X to refuse");
 }
 
 /* the owner says no: the server throws the code away when it sees this file */

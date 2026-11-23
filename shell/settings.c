@@ -316,8 +316,8 @@ static void job_line(char *line)
         int pc = -1;
         sscanf(line + 9, "%23s %d", what, &pc);
         ov.percent = pc;
-        const char *doing = !strcmp(what, "index") ? "Reading the feed" : !strcmp(what, "download") ? "Downloading" :
-                            !strcmp(what, "verify") ? "Checking it is the real thing" : !strcmp(what, "unpack") ? "Unpacking" : what;
+        const char *doing = !strcmp(what, "index") ? "Reading feed" : !strcmp(what, "download") ? "Downloading" :
+                            !strcmp(what, "verify") ? "Verifying" : !strcmp(what, "unpack") ? "Unpacking" : what;
         snprintf(ov.text, sizeof ov.text, "%s", doing);
         redraw_me();
     } else if (!strncmp(line, "done ", 5)) {
@@ -371,7 +371,7 @@ int settings_reaped(pid_t pid, int status)
     if (job.kind == J_LIST) {
         store_state = ST_LOADED;
         if (!job.listed) nstore = 0;
-        if (!ok && !feed_error[0]) snprintf(feed_error, sizeof feed_error, "the app manager stopped unexpectedly");
+        if (!ok && !feed_error[0]) snprintf(feed_error, sizeof feed_error, "installer stopped");
         logmsg("apps: %d listed%s%s", nstore, feed_error[0] ? "; feed: " : "", feed_error);
         /* the list has just appeared where there was none: start at its top */
         if (depth >= 0 && stack[depth].page == P_STORE && job.blank) stack[depth].sel = stack[depth].top = 0;
@@ -381,12 +381,11 @@ int settings_reaped(pid_t pid, int status)
         logmsg("apps: %s %s: %s", job.verb, job.name, ok ? "done" : job.result[0] ? job.result : "failed");
         if (ok) {
             snprintf(t, sizeof t, "%s %s", job.name, job.verb);
-            message(t, !strcmp(job.verb, "removed") ? "The app, what it kept and its settings have gone." :
-                       "It is in the Apps list, ready to open.");
+            message(t, "");
         } else {
-            snprintf(t, sizeof t, "%s was not %s", job.name, job.verb);
+            snprintf(t, sizeof t, "%s not %s", job.name, job.verb);
             if (job.result[0] >= 'a' && job.result[0] <= 'z') job.result[0] -= 32;
-            message(t, job.result[0] ? job.result : "The app manager stopped unexpectedly.");
+            message(t, job.result[0] ? job.result : "Installer stopped");
         }
         manifests_scan(opt.apps);
         store_refresh();
@@ -401,12 +400,12 @@ static void change_app(enum action act, const char *id)
 {
     const struct store_app *a = store_find(id);
     const char *cmd = act == A_REMOVE ? "remove" : act == A_UPDATE ? "update" : "install";
-    if (job.pid > 0) { message("Busy", "Another app is being installed. Try again in a moment."); return; }
+    if (job.pid > 0) { message("Busy", "Another install is running"); return; }
     /* an app cannot be changed under its own feet */
     if (!strcmp(app_id(), id)) app_quit();
     snprintf(job.verb, sizeof job.verb, "%s", act == A_REMOVE ? "removed" : act == A_UPDATE ? "updated" : "installed");
     snprintf(job.name, sizeof job.name, "%s", a ? a->name : id);
-    if (job_start(J_CHANGE, cmd, id) < 0) { message("Could not start", "The app manager could not be run."); return; }
+    if (job_start(J_CHANGE, cmd, id) < 0) { message("Not started", "Could not run the installer"); return; }
     memset(&ov, 0, sizeof ov);
     ov.kind = O_BUSY;
     ov.percent = -1;
@@ -440,7 +439,7 @@ static struct row *add_stored(int kind, const char *label, const char *file, con
     snprintf(r->key, sizeof r->key, "%s", key);
     snprintf(r->def, sizeof r->def, "%s", def);
     r->flags = flags;
-    if (flags & F_PASSWORD) snprintf(r->value, sizeof r->value, "%s", cfg_str(file, key, "")[0] ? "set" : "not set");
+    if (flags & F_PASSWORD) snprintf(r->value, sizeof r->value, "%s", cfg_str(file, key, "")[0] ? "Set" : "Not set");
     else snprintf(r->value, sizeof r->value, "%s", cfg_str(file, key, def));
     return r;
 }
@@ -480,16 +479,16 @@ static void build_root(void)
     snprintf(title, sizeof title, "Settings");
     snprintf(user, sizeof user, "%s", cfg_str("sip", "user", ""));
     if (user[0]) snprintf(v, sizeof v, "%s@%s", user, cfg_str("sip", "domain", "?"));
-    else snprintf(v, sizeof v, "not set");
+    else snprintf(v, sizeof v, "Not set");
     int extra = 0;
     for (int i = 2; i <= 6; i++) {
         char f[8];
         snprintf(f, sizeof f, "sip%d", i);
         if (cfg_str(f, "user", "")[0]) extra++;
     }
-    if (extra && user[0]) { size_t at = strlen(v); snprintf(v + at, sizeof v - at, " and %d more", extra); }
+    if (extra && user[0]) { size_t at = strlen(v); snprintf(v + at, sizeof v - at, " +%d", extra); }
     else if (extra) snprintf(v, sizeof v, "%d set", extra);
-    add_menu("Phone accounts", P_ACCOUNTS, v);
+    add_menu("Accounts", P_ACCOUNTS, v);
     ui_network_status(v, sizeof v, &up);
     add_menu("Network", P_NET, v);
     add_menu("Date and time", P_TIME, cfg_str("system", "timezone", "UTC"));
@@ -528,7 +527,7 @@ static int sip_usable(int n)
 static void build_accounts(void)
 {
     char label[40], v[200], choices[24] = "";
-    snprintf(title, sizeof title, "Phone accounts");
+    snprintf(title, sizeof title, "Accounts");
     for (int n = 1; n <= 6; n++) {
         const char *f = sip_file(n);
         char user[64] = "", domain[64] = "?", name[40] = "", on[8] = "on";
@@ -537,7 +536,7 @@ static void build_accounts(void)
         cfg_get(f, "label", name, sizeof name);
         cfg_get(f, "enabled", on, sizeof on);
         snprintf(label, sizeof label, "Account %d", n);
-        if (!user[0]) snprintf(v, sizeof v, "not set");
+        if (!user[0]) snprintf(v, sizeof v, "Not set");
         else snprintf(v, sizeof v, "%s%s%s@%s%s", name, name[0] ? ": " : "", user, domain, strcmp(on, "off") ? "" : " (off)");
         snprintf(add_menu(label, P_SIP, v)->arg, sizeof rows[0].arg, "%d", n);
         if (sip_usable(n)) { size_t at = strlen(choices); snprintf(choices + at, sizeof choices - at, "%s%d", at ? "|" : "", n); }
@@ -547,12 +546,10 @@ static void build_accounts(void)
         struct row *r;
         snprintf(keep, sizeof keep, "%s", choices);
         snprintf(v, sizeof v, "%d", atoi(phone_state("acct.default")));
-        r = add_stored(R_CHOICE, "Usual account for calls", "phone", "default_account", v, 0);
+        r = add_stored(R_CHOICE, "Default account", "phone", "default_account", v, 0);
         r->choices = keep;
         if (!strstr(keep, r->value)) snprintf(r->value, sizeof r->value, "%s", v);
     }
-    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
-             "Each account rings this phone. In the dialler, Left and Right choose which one a call goes out from.");
 }
 
 static void build_sip(const char *arg)
@@ -565,19 +562,19 @@ static void build_sip(const char *arg)
     add_stored(R_TEXT, "User", f, "user", "", 0);
     add_stored(R_TEXT, "Password", f, "password", "", F_PASSWORD);
     add_stored(R_TEXT, "Domain", f, "domain", "", 0);
-    add_stored(R_TEXT, "Server or proxy (optional)", f, "outbound_proxy", "", 0);
-    add_stored(R_TEXT, "Login name, if not the user", f, "auth_user", "", 0);
-    add_stored(R_TEXT, "Name shown to others", f, "display_name", "", 0);
+    add_stored(R_TEXT, "Proxy", f, "outbound_proxy", "", 0);
+    add_stored(R_TEXT, "Auth user", f, "auth_user", "", 0);
+    add_stored(R_TEXT, "Display name", f, "display_name", "", 0);
     add_stored(R_CHOICE, "Transport", f, "transport", "udp", 0)->choices = "udp|tcp|tls";
-    add_stored(R_TEXT, "Name on this phone (optional)", f, "label", "", 0);
-    add_stored(R_TEXT, "Voicemail number (the Message key)", f, "voicemail", "", F_DIGITS);
-    add_stored(R_TOGGLE, "In use", f, "enabled", "on", 0);
+    add_stored(R_TEXT, "Label", f, "label", "", 0);
+    add_stored(R_TEXT, "Voicemail", f, "voicemail", "", F_DIGITS);
+    add_stored(R_TOGGLE, "Enabled", f, "enabled", "on", 0);
     snprintf(acc, sizeof acc, "reg.%d", n);
     const char *reg = phone_state(acc);
-    add_info("Now", !strcmp(phone_state("sip"), "up") ? (!strcmp(reg, "ok") ? "registered" : !strcmp(reg, "fail") ? "not registered" :
-             !strcmp(reg, "trying") ? "registering" : "not in use") : "no phone service");
+    add_info("Status", !strcmp(phone_state("sip"), "up") ? (!strcmp(reg, "ok") ? "Registered" : !strcmp(reg, "fail") ? "Not registered" :
+             !strcmp(reg, "trying") ? "Registering" : "Off") : "No service");
     if (cfg_str(f, "user", "")[0] || cfg_str(f, "domain", "")[0])
-        snprintf(add_action("Remove this account", A_ACCOUNT_REMOVE, "")->def, sizeof rows[0].def, "%s", f);
+        snprintf(add_action("Remove account", A_ACCOUNT_REMOVE, "")->def, sizeof rows[0].def, "%s", f);
     rows[nrows - 1].flags |= rows[nrows - 1].kind == R_ACTION ? F_DANGER : 0;
 }
 
@@ -586,17 +583,14 @@ static void build_net(void)
     char v[100];
     int up, fixed = !strcmp(cfg_str("network", "mode", "dhcp"), "static");
     snprintf(title, sizeof title, "Network");
-    add_stored(R_CHOICE, "Address from", "network", "mode", "dhcp", 0)->choices = "dhcp|static";
+    add_stored(R_CHOICE, "Mode", "network", "mode", "dhcp", 0)->choices = "dhcp|static";
     add_stored(R_TEXT, "Address", "network", "address", "", F_DIGITS | F_IP | (fixed ? 0 : F_DISABLED));
     add_stored(R_TEXT, "Netmask", "network", "netmask", "255.255.255.0", F_DIGITS | F_IP | (fixed ? 0 : F_DISABLED));
     add_stored(R_TEXT, "Gateway", "network", "gateway", "", F_DIGITS | F_IP | (fixed ? 0 : F_DISABLED));
-    add_stored(R_TEXT, "DNS server", "network", "dns", "", F_DIGITS | F_IP | (fixed ? 0 : F_DISABLED));
+    add_stored(R_TEXT, "DNS", "network", "dns", "", F_DIGITS | F_IP | (fixed ? 0 : F_DISABLED));
     ui_network_status(v, sizeof v, &up);
-    add_info("Now", v);
-    add(R_NOTE, "")->value[0] = 0;
-    snprintf(rows[nrows - 1].value, sizeof rows[0].value, "%s",
-             fixed ? "Changes take effect when you leave this page." :
-                     "The address, netmask, gateway and DNS come from the network (DHCP).");
+    add_info("Status", v);
+    if (fixed) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Applied when you leave this page");
 }
 
 static void build_time(void)
@@ -609,7 +603,7 @@ static void build_time(void)
     localtime_r(&t, &tm);
     strftime(now, sizeof now, "%H:%M, %A %e %B %Y", &tm);
     add_info("Now", now);
-    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "The clock is set from the network (NTP).");
+    add_info("Clock source", "NTP");
 }
 
 static void build_tz(void)
@@ -619,13 +613,13 @@ static void build_tz(void)
     for (int i = 0; i < NZONES; i++) {
         struct row *r = add_action(zones[i].name, A_SET_TZ, "");
         snprintf(r->def, sizeof r->def, "%s", zones[i].name);
-        if (!strcmp(cur, zones[i].name)) snprintf(r->value, sizeof r->value, "current");
+        if (!strcmp(cur, zones[i].name)) snprintf(r->value, sizeof r->value, "Current");
     }
 }
 
 static void build_sound(void)
 {
-    static const char *const names[] = {"", "Handset", "Speakerphone", "Headset", "Ringer"};
+    static const char *const names[] = {"", "Handset", "Speaker", "Headset", "Ringer"};
     static const int order[] = {T48AC_VOL_RINGER, T48AC_VOL_HANDSET, T48AC_VOL_SPEAKER, T48AC_VOL_HEADSET};
     snprintf(title, sizeof title, "Sound");
     for (int i = 0; i < 4; i++) {
@@ -634,8 +628,19 @@ static void build_sound(void)
         r->level = phone_volume(order[i]);
         r->level_max = T48AC_VOL_MAX;
     }
-    add_info("Audio service", audioc_connected() ? "running" : "not running");
-    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Ringer at 0 is silent. The volume keys change the same levels.");
+    if (!audioc_connected()) add_info("Audio service", "Not running");
+}
+
+/* "2 min", "45 s", "Never" */
+static const char *idle_time(int secs)
+{
+    static char b[2][16];
+    static int at;
+    char *o = b[at = !at];
+    if (secs <= 0) snprintf(o, sizeof b[0], "Never");
+    else if (secs % 60) snprintf(o, sizeof b[0], "%d s", secs);
+    else snprintf(o, sizeof b[0], "%d min", secs / 60);
+    return o;
 }
 
 static void build_screen(void)
@@ -647,9 +652,9 @@ static void build_screen(void)
     r->level_max = BL_LEVELS;
     r->level = backlight_level();
     if (!have) r->flags = F_DISABLED;
-    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%s",
-             have ? "The screen dims when nothing has been touched for a while, and later switches off. Any key or a touch brings it back." :
-                    "Not available here: there is no backlight to set.");
+    if (!have) { add_info("Backlight", "None"); return; }
+    add_info("Dim after", idle_time(atoi(cfg_str("screen", "dim_seconds", "120"))));
+    add_info("Off after", idle_time(atoi(cfg_str("screen", "off_seconds", "1800"))));
 }
 
 static void build_access(void)
@@ -664,55 +669,45 @@ static void build_access(void)
     snprintf(r->value, sizeof r->value, "%s", on ? "on" : "off");
     if (acc.dev) {
         r->flags = F_DISABLED;
-        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
-                 "A development build: SSH is always on, and the keys built into this image can always log in.");
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Development build: SSH always on, built-in keys accepted");
     }
     if (on) {
         char net[80];
         ui_network_status(net, sizeof net, &up);
-        const char *ip = strrchr(net, ' ');
-        snprintf(v, sizeof v, "ssh root@%s", up && ip ? ip + 1 : "this phone's address");
-        add_info("Log in with", !acc.known || acc.running ? v : "SSH is not running");
+        snprintf(v, sizeof v, "ssh root@%s", up ? net : "ADDRESS");
+        add_info("Login", !acc.known || acc.running ? v : "Not running");
     }
-    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "This phone's host key: %s",
-             acc.host_key[0] ? acc.host_key : "not known yet");
-    if (!acc.nkeys) add_info("Keys that can log in", on ? "none yet: nobody can log in" : "none");
+    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Host key %s", acc.host_key[0] ? acc.host_key : "unknown");
+    if (!acc.nkeys) add_info("Keys", "None");
     for (int i = 0; i < acc.nkeys && i < MAX_KEYS && acc.key[i][0]; i++) {
         snprintf(v, sizeof v, "Key %d", i + 1);
         add_info(v, acc.key[i]);
     }
-    if (acc.nkeys > MAX_KEYS) { snprintf(v, sizeof v, "and %d more", acc.nkeys - MAX_KEYS); add_info("", v); }
+    if (acc.nkeys > MAX_KEYS) { snprintf(v, sizeof v, "+%d more", acc.nkeys - MAX_KEYS); add_info("", v); }
     if (acc.door) {
         door_left(v, sizeof v);
-        snprintf(add_action("Password login is open", A_DOOR_SHOW, "")->value, sizeof rows[0].value, "%s left", v);
-        add_action("Close password login now", A_DOOR_CLOSE, "");
+        snprintf(add_action("Password login", A_DOOR_SHOW, "")->value, sizeof rows[0].value, "Open, %s left", v);
+        add_action("Close password login", A_DOOR_CLOSE, "");
     } else {
-        r = add_action("Add a key from your computer", A_DOOR_OPEN, "");
+        r = add_action("Add key", A_DOOR_OPEN, "");
         if (!on) r->flags = F_DISABLED;
     }
-    if (acc.nkeys) add_action(acc.dev ? "Forget the keys that were added" : "Forget all keys", A_FORGET_KEYS, "")->flags = F_DANGER;
-    if (!on) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
-                      "SSH gives full control of the phone over the network. It is off until you turn it on here.");
+    if (acc.nkeys) add_action(acc.dev ? "Remove added keys" : "Remove all keys", A_FORGET_KEYS, "")->flags = F_DANGER;
     /* the web setup page (issue #37, docs/web.md) */
     int web = !strcmp(cfg_str("access", "web", "off"), "on");
-    r = add_action("Web setup page", A_WEB, "");
+    r = add_action("Web setup", A_WEB, "");
     r->kind = R_TOGGLE;
     snprintf(r->value, sizeof r->value, "%s", web ? "on" : "off");
     if (web) {
         char net[80];
         ui_network_status(net, sizeof net, &up);
-        const char *ip = strrchr(net, ' ');
         if (watch_web_url()[0]) snprintf(v, sizeof v, "%s", watch_web_url());
-        else if (up && ip) snprintf(v, sizeof v, "http://%s/", ip + 1);
-        else snprintf(v, sizeof v, "this phone's address");
-        add_info("Open in a browser", v);
+        else if (up) snprintf(v, sizeof v, "http://%s/", net);
+        else snprintf(v, sizeof v, "No network");
+        add_info("Address", v);
         snprintf(v, sizeof v, "%d", watch_web_paired());
-        add_info("Browsers paired", v);
-        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
-                 "A new browser must type a code that is shown on this screen. Off and on again forgets every browser.");
-    } else {
-        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
-                 "Set the phone up from a computer's browser. It is off until you turn it on here.");
+        add_info("Paired browsers", v);
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Turning off signs out every browser");
     }
 }
 
@@ -733,12 +728,12 @@ static void build_about(void)
     add_info("Firmware", v);
     add_info("Shell", T48_VERSION ", built " __DATE__);
     snprintf(v, sizeof v, "%d", T48_API_LEVEL);
-    add_info("App API level", v);
+    add_info("App API", v);
     if (uname(&u) == 0) { snprintf(v, sizeof v, "%s %s", u.sysname, u.release); add_info("Kernel", v); }
     ui_network_status(v, sizeof v, &up);
-    add_info("Network", v);
+    add_info("Address", v);
     if ((f = fopen("/sys/class/net/eth0/address", "r"))) {
-        if (fgets(v, sizeof v, f)) { v[strcspn(v, "\r\n")] = 0; add_info("MAC address", v); }
+        if (fgets(v, sizeof v, f)) { v[strcspn(v, "\r\n")] = 0; add_info("MAC", v); }
         fclose(f);
     }
     if ((f = fopen("/proc/meminfo", "r"))) {
@@ -750,15 +745,15 @@ static void build_about(void)
             sscanf(line, "MemAvailable: %ld", &avail);
         }
         fclose(f);
-        snprintf(v, sizeof v, "%ld MB free of %ld MB", (avail ? avail : fr) / 1024, total / 1024);
+        snprintf(v, sizeof v, "%ld of %ld MB free", (avail ? avail : fr) / 1024, total / 1024);
         add_info("Memory", v);
     }
     snprintf(path, sizeof path, "%.*s", (int)strcspn(opt.apps, ":"), opt.apps);
     if (statvfs(path, &vfs) == 0 && vfs.f_blocks > 0) {
         snprintf(v, sizeof v, "%llu MB free", (unsigned long long)vfs.f_bavail * vfs.f_frsize / 1048576);
-        add_info("Storage for apps", v);
+        add_info("App storage", v);
     } else {
-        add_info("Storage for apps", "in memory: lost at power off");
+        add_info("App storage", "RAM, lost at power off");
     }
     add_info("Licence", "AGPL-3.0-or-later");
     add_info("Source", "github.com/M0LTE/yealink-t48s");
@@ -775,7 +770,7 @@ static void build_appsettings(void)
         snprintf(add_menu(apps[i].name, P_APPCONF, v)->arg, sizeof rows[0].arg, "%s", apps[i].id);
         n++;
     }
-    if (!n) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "No installed app has settings.");
+    if (!n) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "No apps with settings");
 }
 
 static void build_appconf(const char *id)
@@ -798,8 +793,7 @@ static void build_appconf(const char *id)
                        !strcmp(type, "password") ? F_PASSWORD : !strcmp(type, "number") ? F_DIGITS : 0);
         }
     }
-    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "The app picks changes up the next time it is opened.");
-    snprintf(add_action("Back to the app's own defaults", A_APP_DEFAULTS, m->id)->def, sizeof rows[0].def, "%s", m->id);
+    snprintf(add_action("Reset to defaults", A_APP_DEFAULTS, m->id)->def, sizeof rows[0].def, "%s", m->id);
 }
 
 static void build_store(void)
@@ -808,29 +802,29 @@ static void build_store(void)
     snprintf(title, sizeof title, "Apps");
     if (store_state == ST_NONE) store_refresh();
     if (store_state == ST_LOADING && !nstore) {
-        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Reading the feed...");
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Loading");
     } else {
         if (feed_error[0] && store_state == ST_LOADED) {
             struct row *r = add(R_NOTE, "");
-            snprintf(r->value, sizeof r->value, "The feed could not be read: %s", feed_error);
+            snprintf(r->value, sizeof r->value, "Feed error: %s", feed_error);
             r->flags = F_DANGER;
         }
         for (int i = 0; i < nstore; i++) {
             const struct store_app *a = &store[i];
             char v[100], size[24];
             kb(size, sizeof size, a->disk_bytes ? a->disk_bytes : a->pkg_bytes);
-            if (!strcmp(a->state, "update")) { snprintf(v, sizeof v, "%s installed, %s available", a->have, a->offered); updates++; }
-            else if (!strcmp(a->state, "installed")) snprintf(v, sizeof v, "%s installed, %s", a->have, size);
-            else if (!strcmp(a->state, "builtin")) snprintf(v, sizeof v, "%s, part of the firmware", a->have);
-            else if (!strcmp(a->state, "unsupported")) snprintf(v, sizeof v, "%s needs newer firmware", a->offered);
+            if (!strcmp(a->state, "update")) { snprintf(v, sizeof v, "Update %s", a->offered); updates++; }
+            else if (!strcmp(a->state, "installed")) snprintf(v, sizeof v, "Installed %s", a->have);
+            else if (!strcmp(a->state, "builtin")) snprintf(v, sizeof v, "Built in %s", a->have);
+            else if (!strcmp(a->state, "unsupported")) snprintf(v, sizeof v, "Needs newer firmware");
             else snprintf(v, sizeof v, "%s, %s", a->offered, size);
             snprintf(add_menu(a->name, P_STOREAPP, v)->arg, sizeof rows[0].arg, "%s", a->id);
         }
         if (updates > 1) add_action("Update all", A_UPDATE_ALL, "");
-        add_action("Look again", A_REFRESH, "");
+        add_action("Refresh", A_REFRESH, "");
     }
-    add_stored(R_TEXT, "Feed address", "feed", "url", pkg_default_feed(), 0);
-    if (strcmp(feed_now(), pkg_default_feed())) add_action("Use the standard feed", A_FEED_DEFAULT, "");
+    add_stored(R_TEXT, "Feed URL", "feed", "url", pkg_default_feed(), 0);
+    if (strcmp(feed_now(), pkg_default_feed())) add_action("Use default feed", A_FEED_DEFAULT, "");
 }
 
 static void build_storeapp(const char *id)
@@ -839,7 +833,7 @@ static void build_storeapp(const char *id)
     const struct manifest *m = installed(id);
     char v[200];
     snprintf(title, sizeof title, "%s", a ? a->name : m ? m->name : id);
-    if (!a) { snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, store_state == ST_LOADING ? "Reading the feed..." : "No longer listed."); return; }
+    if (!a) { snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, store_state == ST_LOADING ? "Loading" : "Not in the feed"); return; }
     int inst = strcmp(a->have, "-") != 0, update = !strcmp(a->state, "update");
     if (!strcmp(a->state, "available")) add_action("Install", A_INSTALL, id);
     if (update) add_action("Update", A_UPDATE, id);
@@ -848,14 +842,14 @@ static void build_storeapp(const char *id)
     if (a->description[0]) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%s", a->description);
     if (!strcmp(a->state, "unsupported")) {
         struct row *r = add(R_NOTE, "");
-        snprintf(r->value, sizeof r->value, "This version needs a newer app API than this phone's (level %d). Update the phone's firmware to install it.", T48_API_LEVEL);
+        snprintf(r->value, sizeof r->value, "Needs an app API above %d: update the firmware", T48_API_LEVEL);
         r->flags = F_DANGER;
     }
-    if (inst) add_info("Installed version", a->have);
-    if (strcmp(a->offered, "-")) add_info(inst ? "Version in the feed" : "Version", a->offered);
-    if (a->disk_bytes) { kb(v, sizeof v, a->disk_bytes); add_info("Size on the phone", v); }
-    if (a->pkg_bytes) { kb(v, sizeof v, a->pkg_bytes); add_info("Download size", v); }
-    if (!a->perms[0]) snprintf(v, sizeof v, "nothing special");
+    if (inst) add_info("Installed", a->have);
+    if (strcmp(a->offered, "-")) add_info(inst ? "In the feed" : "Version", a->offered);
+    if (a->disk_bytes) { kb(v, sizeof v, a->disk_bytes); add_info("Size", v); }
+    if (a->pkg_bytes) { kb(v, sizeof v, a->pkg_bytes); add_info("Download", v); }
+    if (!a->perms[0]) snprintf(v, sizeof v, "None");
     else {
         v[0] = 0;
         char perms[96], *save = NULL;
@@ -863,11 +857,11 @@ static void build_storeapp(const char *id)
         for (char *p = strtok_r(perms, " ", &save); p; p = strtok_r(NULL, " ", &save)) {
             size_t at = strlen(v);
             snprintf(v + at, sizeof v - at, "%s%s", at ? ", " : "",
-                     !strcmp(p, "network") ? "the network" : !strcmp(p, "audio-out") ? "playing sound" : p);
+                     !strcmp(p, "network") ? "Network" : !strcmp(p, "audio-out") ? "Audio out" : p);
         }
     }
-    add_info("May use", v);
-    if (!strcmp(a->state, "builtin")) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Part of the firmware: it cannot be removed.");
+    add_info("Permissions", v);
+    if (!strcmp(a->state, "builtin")) add_info("Source", "Built in");
     else if (inst) add_action("Remove", A_REMOVE, id)->flags = F_DANGER;
 }
 
@@ -963,7 +957,7 @@ static void mark_dirty(const char *file)
 static void store_value(const struct row *r, const char *value)
 {
     if (cfg_set(r->file, r->key, value) < 0) {
-        message("Not saved", errno == EINVAL ? "That value has something in it that cannot be stored." : strerror(errno));
+        message("Not saved", errno == EINVAL ? "Invalid characters" : strerror(errno));
         return;
     }
     logmsg("settings: %s %s set", r->file, r->key);   /* never the value */
@@ -1013,7 +1007,7 @@ static void do_action(const struct row *r)
         ov.act = A_REMOVE;
         snprintf(ov.arg, sizeof ov.arg, "%s", r->arg);
         snprintf(ov.title, sizeof ov.title, "Remove %s?", a ? a->name : r->arg);
-        snprintf(ov.text, sizeof ov.text, "What it kept and its settings go too.");
+        snprintf(ov.text, sizeof ov.text, "Deletes its data and settings");
         break;
     }
     case A_OPEN: shell_settings_open_app(r->arg); return;
@@ -1039,10 +1033,9 @@ static void do_action(const struct row *r)
             ov.kind = O_CONFIRM;
             ov.act = A_SSH;
             ov.yes = "Turn on";
-            ov.no = "Keep off";
-            snprintf(ov.title, sizeof ov.title, "Turn SSH on?");
-            snprintf(ov.text, sizeof ov.text, "Anyone on your network holding a key this phone accepts gets full control of it.");
-            snprintf(ov.extra, sizeof ov.extra, "Host key: %s", acc.host_key[0] ? acc.host_key : "not known yet");
+            snprintf(ov.title, sizeof ov.title, "Turn on SSH?");
+            snprintf(ov.text, sizeof ov.text, "Root access for anyone on the network with an accepted key");
+            snprintf(ov.extra, sizeof ov.extra, "Host key %s", acc.host_key[0] ? acc.host_key : "unknown");
         }
         break;
     case A_WEB:
@@ -1054,10 +1047,8 @@ static void do_action(const struct row *r)
             ov.kind = O_CONFIRM;
             ov.act = A_WEB;
             ov.yes = "Turn on";
-            ov.no = "Keep off";
-            snprintf(ov.title, sizeof ov.title, "Turn the web page on?");
-            snprintf(ov.text, sizeof ov.text, "Anyone on your network can open it, but only a browser that types a code shown here gets in.");
-            snprintf(ov.extra, sizeof ov.extra, "It is plain HTTP: use it on a network you trust.");
+            snprintf(ov.title, sizeof ov.title, "Turn on web setup?");
+            snprintf(ov.text, sizeof ov.text, "Plain HTTP. A browser pairs with a code shown here");
         }
         break;
     case A_DOOR_OPEN:
@@ -1065,10 +1056,8 @@ static void do_action(const struct row *r)
         ov.kind = O_CONFIRM;
         ov.act = A_DOOR_OPEN;
         ov.yes = "Open";
-        ov.no = "Cancel";
-        snprintf(ov.title, sizeof ov.title, "Allow a password login?");
-        snprintf(ov.text, sizeof ov.text, "For ten minutes, with a password shown here, so ssh-copy-id can put your key on the phone.");
-        snprintf(ov.extra, sizeof ov.extra, "It closes by itself as soon as a key arrives.");
+        snprintf(ov.title, sizeof ov.title, "Open password login?");
+        snprintf(ov.text, sizeof ov.text, "For ssh-copy-id. Closes after 10 minutes, or when a key arrives");
         break;
     case A_DOOR_SHOW:
         memset(&ov, 0, sizeof ov);
@@ -1083,18 +1072,14 @@ static void do_action(const struct row *r)
         ov.kind = O_CONFIRM;
         ov.act = A_ACCOUNT_REMOVE;
         snprintf(ov.arg, sizeof ov.arg, "%s", r->def);
-        snprintf(ov.title, sizeof ov.title, "Remove this account?");
-        snprintf(ov.text, sizeof ov.text, "Its user, password and server are forgotten.");
+        snprintf(ov.title, sizeof ov.title, "Remove account %d?", atoi(stack[depth].arg) < 1 ? 1 : atoi(stack[depth].arg));
         break;
     case A_FORGET_KEYS:
         memset(&ov, 0, sizeof ov);
         ov.kind = O_CONFIRM;
         ov.act = A_FORGET_KEYS;
-        ov.yes = "Forget";
-        ov.no = "Keep";
-        snprintf(ov.title, sizeof ov.title, "Forget %s?", acc.dev ? "the added keys" : "all keys");
-        snprintf(ov.text, sizeof ov.text, "%s", acc.dev ? "The keys built into this development build stay." :
-                 "Nobody will be able to log in until a key is added again.");
+        snprintf(ov.title, sizeof ov.title, "Remove %s?", acc.dev ? "added keys" : "all keys");
+        snprintf(ov.text, sizeof ov.text, "%s", acc.dev ? "Built-in keys stay" : "");
         break;
     case A_NONE: break;
     }
@@ -1115,7 +1100,7 @@ static void confirmed(enum action act, const char *arg)
         run_apply("access");
         break;
     case A_DOOR_OPEN:
-        if (make_password(door_password) < 0) { message("Not opened", "The phone could not make up a password."); break; }
+        if (make_password(door_password) < 0) { message("Not opened", "No random source"); break; }
         door_keys_before = acc.nkeys;
         door_asked = t48_now_ms();
         run_apply_with("access-door-open", door_password);
@@ -1146,7 +1131,7 @@ static void activate(int i, int dir)
     case R_TEXT:
         kbd_row = *r;
         /* a password starts empty: what is stored is never put on the screen */
-        t48_kbd_open(&kbd, (r->flags & F_PASSWORD) ? "New password (leave empty to keep the one set)" : r->label,
+        t48_kbd_open(&kbd, (r->flags & F_PASSWORD) ? "New password (empty: no change)" : r->label,
                      (r->flags & F_PASSWORD) ? "" : r->value, 160,
                      ((r->flags & F_PASSWORD) ? T48_KBD_PASSWORD : 0) | ((r->flags & F_DIGITS) ? T48_KBD_DIGITS : 0));
         kbd_open = 1;
@@ -1185,12 +1170,12 @@ static void kbd_done(void)
     kbd_open = 0;
     if ((kbd_row.flags & F_PASSWORD) && !text[0]) return;
     if ((kbd_row.flags & F_IP) && text[0] && inet_pton(AF_INET, text, &a) != 1) {
-        message("Not an address", "It should look like 192.168.1.20: four numbers with dots between.");
+        message("Not an address", "Use the form 192.168.1.20");
         return;
     }
     if (!strcmp(kbd_row.file, "feed") && !strcmp(kbd_row.key, "url") && strncmp(text, "https://", 8) &&
         strncmp(text, "file://", 7)) {
-        message("Not a feed address", "A feed's address starts with https://");
+        message("Not a feed URL", "Must start with https://");
         return;
     }
     /* emptied: the setting goes back to not being set (an app's own may really be empty) */
@@ -1332,14 +1317,14 @@ void settings_tick(long long now)
         int had_password = door_password[0] != 0;
         door_password[0] = 0;
         if (ov.kind == O_DOOR || had_password) {
-            if (acc.nkeys > door_keys_before) message("Your key is on the phone", "Password login is closed again. From now on only keys can log in.");
-            else message("Password login is closed", "No key arrived. Only keys can log in.");
+            if (acc.nkeys > door_keys_before) message("Key added", "Password login closed");
+            else message("Password login closed", "No key arrived");
         }
     }
     if (door_password[0] && !acc.door && !was_open && now > door_asked + 5000) {
         /* asked for, and five seconds later still not open */
         door_password[0] = 0;
-        if (ov.kind == O_DOOR) message("Password login did not open", "Nothing has changed: only keys can log in.");
+        if (ov.kind == O_DOOR) message("Password login failed", "");
         changed = 1;
     }
     long left = acc.door ? acc.door_until - (long)time(NULL) : -1;
@@ -1361,6 +1346,15 @@ static void two_lines(int x, int y, int w, const t48_font *f, uint32_t c, const 
     if (cut == n) { t48_text(&ui, x, y + f->height / 2 + 1, f, c, line); return; }
     t48_text(&ui, x, y, f, c, line);
     t48_text_fit(&ui, x, y + f->height + 2, w, f, c, text + cut + 1);
+}
+
+/* a stored choice as it is shown: the files keep "dhcp", the screen says DHCP */
+static const char *choice_text(const char *v)
+{
+    static const char *const map[][2] = {{"dhcp", "DHCP"}, {"static", "Static"}, {"udp", "UDP"}, {"tcp", "TCP"}, {"tls", "TLS"}};
+    for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
+        if (!strcmp(v, map[i][0])) return map[i][1];
+    return v;
 }
 
 static void draw_row(const struct row *r, int x, int y, int w, int selected)
@@ -1411,11 +1405,12 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
     if (lw > room * 2 / 3 && r->value[0]) lw = room * 2 / 3;
     t48_text_fit(&ui, x + 18, ty, lw + 2, f, text, r->label);
     if (r->value[0]) {
-        int vw = t48_text_width(f, r->value), max = room - lw - 24;
+        const char *shown = r->kind == R_CHOICE ? choice_text(r->value) : r->value;
+        int vw = t48_text_width(f, shown), max = room - lw - 24;
         uint32_t vc = r->kind == R_INFO ? (dis ? C_FAINT : C_TEXT) : C_DIM;
         if (dis) vc = C_FAINT;
-        if (vw <= max) t48_text_right(&ui, right, ty, f, vc, r->value);
-        else if (max > 40) t48_text_fit(&ui, right - max, ty, max, f, vc, r->value);
+        if (vw <= max) t48_text_right(&ui, right, ty, f, vc, shown);
+        else if (max > 40) t48_text_fit(&ui, right - max, ty, max, f, vc, shown);
     }
 }
 
@@ -1442,7 +1437,7 @@ static void draw_overlay(void)
     if (ov.kind == O_MSG) {
         ui_button(OV_X + OV_W / 2 - 80, OV_Y + OV_H - 76, 160, 56, "OK", C_ACCENT);
     } else {
-        ui_button(OV_X + OV_W / 2 - 170, OV_Y + OV_H - 76, 160, 56, ov.no ? ov.no : "Keep", C_LINE);
+        ui_button(OV_X + OV_W / 2 - 170, OV_Y + OV_H - 76, 160, 56, ov.no ? ov.no : "Cancel", C_LINE);
         ui_button(OV_X + OV_W / 2 + 10, OV_Y + OV_H - 76, 160, 56, ov.yes ? ov.yes : "Remove", ov.yes && ov.act != A_FORGET_KEYS ? C_ACCENT : C_BAD);
     }
 }
@@ -1455,27 +1450,26 @@ static void draw_door(void)
     t48_fill_alpha(&ui, 0, 0, SW, SH, C_BG, 200);
     t48_round_fill(&ui, DOOR_X, DOOR_Y, DOOR_W, DOOR_H, 16, C_PANEL);
     t48_fill(&ui, DOOR_X, DOOR_Y + 16, 6, DOOR_H - 32, C_ACCENT);
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 16, &t48_font_head, C_TEXT, "Add a key from your computer");
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 66, &t48_font_small, C_DIM, "On your computer, run:");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 16, &t48_font_head, C_TEXT, "Add key");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 66, &t48_font_small, C_DIM, "Run");
     ui_network_status(net, sizeof net, &up);
-    const char *ip = strrchr(net, ' ');
-    snprintf(b, sizeof b, "ssh-copy-id root@%s", up && ip ? ip + 1 : "the-phone");
+    snprintf(b, sizeof b, "ssh-copy-id root@%s", up ? net : "ADDRESS");
     t48_text_centre(&ui, SW / 2, DOOR_Y + 90, &t48_font_head, C_TEXT, b);
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 140, &t48_font_small, C_DIM, "It shows this host key. If it shows another, stop:");
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 162, &t48_font_small, C_TEXT, acc.host_key[0] ? acc.host_key : "not known yet");
-    t48_text_centre(&ui, SW / 2, DOOR_Y + 194, &t48_font_small, C_DIM, "Then it asks for this password:");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 140, &t48_font_small, C_DIM, "Host key must match");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 162, &t48_font_small, C_TEXT, acc.host_key[0] ? acc.host_key : "unknown");
+    t48_text_centre(&ui, SW / 2, DOOR_Y + 194, &t48_font_small, C_DIM, "Password");
     if (door_password[0]) t48_text_centre(&ui, SW / 2, DOOR_Y + 216, &t48_font_big, C_ACCENT, door_password);
-    else t48_text_centre(&ui, SW / 2, DOOR_Y + 228, &t48_font_normal, C_DIM, "(no longer shown: close this and open it again for a new one)");
+    else t48_text_centre(&ui, SW / 2, DOOR_Y + 228, &t48_font_normal, C_DIM, "Hidden. Close and reopen for a new one");
     if (acc.door) {
         char left[16];
         door_left(left, sizeof left);
-        snprintf(b, sizeof b, "Password login closes when your key arrives, or in %s.", left);
+        snprintf(b, sizeof b, "Closes in %s, or when a key arrives", left);
     } else {
-        snprintf(b, sizeof b, "Opening...");
+        snprintf(b, sizeof b, "Opening");
     }
     t48_text_centre(&ui, SW / 2, DOOR_Y + DOOR_H - 104, &t48_font_small, C_DIM, b);
     ui_button(SW / 2 - 190, DOOR_Y + DOOR_H - 70, 180, 54, "Hide", C_LINE);
-    ui_button(SW / 2 + 10, DOOR_Y + DOOR_H - 70, 180, 54, "Close now", C_BAD);
+    ui_button(SW / 2 + 10, DOOR_Y + DOOR_H - 70, 180, 54, "Close", C_BAD);
 }
 
 void settings_draw(void)

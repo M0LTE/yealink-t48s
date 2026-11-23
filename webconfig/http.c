@@ -363,7 +363,7 @@ static void plain(struct req *r, int status, const char *text)
     page.n = 0;
     H("<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
       "<title>T48S</title><link rel='stylesheet' href='/style.css'><main class='lone'><div class='card'><h1>%s</h1>"
-      "<p><a href='/'>Back to the start</a></p></div></main></html>", text);
+      "<p><a href='/'>Overview</a></p></div></main></html>", text);
     send_page(r, status);
 }
 
@@ -659,7 +659,7 @@ static void pair_finish(struct req *r)
     redirect(r, "/");
 }
 
-#define HTTP_NOTE "This page is plain HTTP, not HTTPS. Anyone who can watch your network can read what is sent, passwords included. Use it on a network you trust."
+#define HTTP_NOTE "Plain HTTP: readable by anyone on this network, passwords included."
 
 static void lone_begin(const char *title)
 {
@@ -678,17 +678,16 @@ static void lone_end(struct req *r)
 static void page_welcome(struct req *r)
 {
     const char *e = query(r, "e");
-    lone_begin("Set up this phone");
-    H("<h1>Set up this phone</h1>");
-    if (!strcmp(e, "locked")) H("<p class='flash bad'>Too many wrong codes. Pairing is closed for ten minutes.</p>");
-    else if (!strcmp(e, "wait")) H("<p class='flash bad'>A code was asked for a moment ago. Wait a few seconds and try again.</p>");
-    else if (!strcmp(e, "tries")) H("<p class='flash bad'>Five wrong tries: that code is thrown away. Ask for a new one.</p>");
-    else if (!strcmp(e, "gone")) H("<p class='flash bad'>That code is no longer good: it ran out, was refused at the phone, or was asked for by another browser. Ask for a new one.</p>");
-    else if (!strcmp(e, "out")) H("<p class='flash'>This browser is signed out.</p>");
-    H("<p>Accounts, network, contacts, apps and the rest, from a keyboard instead of the phone's screen.</p>"
-      "<p>To prove you are at the phone, it will show a six digit code on its screen for you to type here.</p>"
-      "<form method='post' action='/pair/start'><button class='primary' type='submit'>Show a code on the phone</button></form>"
-      "<p class='dim small'>The phone must be showing its home screen or its settings, not an app or a call.</p>");
+    lone_begin("T48S setup");
+    H("<h1>Pair this browser</h1>");
+    if (!strcmp(e, "locked")) H("<p class='flash bad'>Too many wrong codes. Pairing is locked for 10 minutes.</p>");
+    else if (!strcmp(e, "wait")) H("<p class='flash bad'>Too soon. Try again in a few seconds.</p>");
+    else if (!strcmp(e, "tries")) H("<p class='flash bad'>Five wrong tries. Request a new code.</p>");
+    else if (!strcmp(e, "gone")) H("<p class='flash bad'>Code expired or refused. Request a new one.</p>");
+    else if (!strcmp(e, "out")) H("<p class='flash'>Signed out.</p>");
+    H("<p>The phone shows a six-digit code. Enter it here.</p>"
+      "<form method='post' action='/pair/start'><button class='primary' type='submit'>Show code</button></form>"
+      "<p class='dim small'>Not shown during a call or in an app.</p>");
     lone_end(r);
 }
 
@@ -696,15 +695,15 @@ static void page_pair(struct req *r)
 {
     pair_tick();
     if (!pair_mine(r)) { redirect(r, "/?e=gone"); return; }
-    lone_begin("Type the code");
-    H("<h1>Type the code</h1>");
+    lone_begin("T48S setup");
+    H("<h1>Enter code</h1>");
     if (!strcmp(query(r, "e"), "wrong"))
-        H("<p class='flash bad'>That is not the code on the phone. %d %s left.</p>", PAIR_TRIES - pair.tries, PAIR_TRIES - pair.tries == 1 ? "try" : "tries");
-    H("<p>The phone's screen is showing six digits. They are good for two minutes.</p>"
+        H("<p class='flash bad'>Wrong code. %d %s left.</p>", PAIR_TRIES - pair.tries, PAIR_TRIES - pair.tries == 1 ? "try" : "tries");
+    H("<p>On the phone's screen. Valid for 2 minutes.</p>"
       "<form method='post' action='/pair/finish' autocomplete='off'>"
       "<input class='code' name='code' inputmode='numeric' pattern='[0-9 ]*' maxlength='7' placeholder='000 000' autofocus required>"
-      "<button class='primary' type='submit'>Pair this browser</button></form>"
-      "<p class='dim small'>No code on the screen? Leave any app that is open on the phone (hold X), then <a href='/'>ask again</a>.</p>");
+      "<button class='primary' type='submit'>Pair</button></form>"
+      "<p class='dim small'>No code? Close any open app on the phone (hold X), then <a href='/'>request another</a>.</p>");
     lone_end(r);
 }
 
@@ -713,7 +712,7 @@ static void page_pair(struct req *r)
 void page_begin(struct req *r, const char *title, const char *nav)
 {
     static const struct { const char *path, *label; } items[] = {
-        {"/", "Overview"}, {"/accounts", "Phone accounts"}, {"/network", "Network"}, {"/time", "Date and time"},
+        {"/", "Overview"}, {"/accounts", "Accounts"}, {"/network", "Network"}, {"/time", "Date and time"},
         {"/sound", "Sound and screen"}, {"/contacts", "Contacts"}, {"/history", "Calls"}, {"/apps", "Apps"},
         {"/access", "Access"}, {"/backup", "Backup"},
     };
@@ -734,8 +733,8 @@ void page_begin(struct req *r, const char *title, const char *nav)
 
 void page_end(struct req *r)
 {
-    H("<footer><p class='note warn'>%s</p><p class='dim small'>Firmware %s. This page is on while Settings, Access, Web setup page is on at the phone. "
-      "Free software under the AGPL: <a href='https://github.com/M0LTE/yealink-t48s'>the source</a>.</p></footer>"
+    H("<footer><p class='note warn'>%s</p><p class='dim small'>Firmware %s. AGPL-3.0-or-later. "
+      "<a href='https://github.com/M0LTE/yealink-t48s'>Source</a></p></footer>"
       "</main></div></body></html>", HTTP_NOTE, T48_VERSION);
     send_page(r, 200);
 }
@@ -837,7 +836,7 @@ static void handle(struct req *r)
     char *body = NULL;
     int bad = read_request(r, &body);
     if (bad) {
-        plain(r, bad, bad == 413 ? "That is too big to send to the phone." : "The phone did not understand that.");
+        plain(r, bad, bad == 413 ? "Too large" : "Bad request");
         free(body);
         return;
     }
@@ -861,7 +860,7 @@ static void handle(struct req *r)
         snprintf(want, sizeof want, "http://%s", r->host);
         if (strcmp(r->origin, want)) {
             logmsg("refused %s from %s: sent from another site", r->path, r->peer);
-            plain(r, 403, "Refused: that did not come from this page.");
+            plain(r, 403, "Refused: cross-site request");
             goto done;
         }
     }
@@ -870,7 +869,7 @@ static void handle(struct req *r)
     if (!r->s) {
         if (post && !strcmp(r->path, "/pair/start")) pair_start(r);
         else if (post && !strcmp(r->path, "/pair/finish")) pair_finish(r);
-        else if (post) { logmsg("refused %s from %s: not paired", r->path, r->peer); plain(r, 403, "This browser is not paired with the phone."); }
+        else if (post) { logmsg("refused %s from %s: not paired", r->path, r->peer); plain(r, 403, "Not paired"); }
         else if (!strcmp(r->path, "/pair")) page_pair(r);
         else if (!strcmp(r->path, "/")) page_welcome(r);
         else redirect(r, "/");
@@ -878,7 +877,7 @@ static void handle(struct req *r)
     }
     if (post && !same(r->s->csrf, form(r, "csrf"))) {
         logmsg("refused %s from %s: the form's token is missing or wrong", r->path, r->peer);
-        plain(r, 403, "Refused: that form is out of date. Go back, load the page again and try once more.");
+        plain(r, 403, "Form expired. Reload the page and try again.");
         goto done;
     }
     if (post && !strcmp(r->path, "/logout")) {
@@ -897,7 +896,7 @@ static void handle(struct req *r)
         status_write();
         goto done;
     }
-    plain(r, 404, "There is no such page.");
+    plain(r, 404, "Not found");
 done:
     free(body);
 }

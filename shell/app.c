@@ -108,7 +108,7 @@ static void send_msg(int type, const void *payload, size_t len)
     if (k == (ssize_t)(sizeof h + len)) return;
     /* The socket's queue is full: the app has not read its events for a long
      * time. (A partial write cannot be told apart and is as bad.) */
-    if (k >= 0 || errno == EAGAIN || errno == EWOULDBLOCK) misbehaved("stopped responding");
+    if (k >= 0 || errno == EAGAIN || errno == EWOULDBLOCK) misbehaved("Not responding");
     /* any other error: the app has gone, and SIGCHLD will tell us */
 }
 
@@ -117,17 +117,17 @@ int app_launch(const struct manifest *m)
     int sv[2], buf_fd;
     char path[400], data[400], conf[400];
 
-    if (app.state != APP_NONE) { snprintf(errbuf, sizeof errbuf, "another app is still running"); return -1; }
+    if (app.state != APP_NONE) { snprintf(errbuf, sizeof errbuf, "Another app is running"); return -1; }
     snprintf(path, sizeof path, "%s/%s", m->dir, m->exec);
     if (access(path, X_OK) < 0) {
-        snprintf(errbuf, sizeof errbuf, "its program (%s) is missing or cannot be run", m->exec);
+        snprintf(errbuf, sizeof errbuf, "Program missing: %s", m->exec);
         return -1;
     }
     buf_fd = make_buffer();
-    if (buf_fd < 0) { snprintf(errbuf, sizeof errbuf, "no room for a screen buffer"); return -1; }
+    if (buf_fd < 0) { snprintf(errbuf, sizeof errbuf, "No memory for the screen"); return -1; }
     uint32_t *buf = mmap(NULL, BUF_BYTES, PROT_READ, MAP_SHARED, buf_fd, 0);
     if (buf == MAP_FAILED || socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) < 0) {
-        snprintf(errbuf, sizeof errbuf, "out of memory or descriptors");
+        snprintf(errbuf, sizeof errbuf, "Out of memory");
         if (buf != MAP_FAILED) munmap(buf, BUF_BYTES);
         close(buf_fd);
         return -1;
@@ -142,7 +142,7 @@ int app_launch(const struct manifest *m)
 
     pid_t pid = fork();
     if (pid < 0) {
-        snprintf(errbuf, sizeof errbuf, "cannot start a new program (%s)", strerror(errno));
+        snprintf(errbuf, sizeof errbuf, "Cannot start: %s", strerror(errno));
         munmap(buf, BUF_BYTES);
         close(buf_fd); close(sv[0]); close(sv[1]);
         return -1;
@@ -271,7 +271,7 @@ void app_readable(void)
         struct t48_msg_hdr h;
         if (app.rx_n < sizeof h) break;
         memcpy(&h, app.rx, sizeof h);
-        if (h.len > sizeof app.rx - sizeof h) { misbehaved("sent something that is not the app protocol"); return; }
+        if (h.len > sizeof app.rx - sizeof h) { misbehaved("Protocol error"); return; }
         if (app.rx_n < sizeof h + h.len) break;
         const unsigned char *p = app.rx + sizeof h;
         if (h.type == T48_MSG_READY && h.len >= sizeof(struct t48_msg_ready)) {
@@ -304,7 +304,7 @@ void app_tick(long long now)
 {
     if (app_timeout(now) != 0) return;
     if (app.state == APP_STARTING) {
-        misbehaved("did not start");
+        misbehaved("Did not start");
         app.deadline = now + GRACE_MS;
     } else if (app.state == APP_PAUSING) {
         freeze();
@@ -328,12 +328,12 @@ void app_reaped(pid_t pid, int status)
     } else if (app.state == APP_QUITTING) {
         reason = NULL;
     } else if (WIFSIGNALED(status)) {
-        snprintf(why, sizeof why, "crashed (%s)", strsignal(WTERMSIG(status)));
+        snprintf(why, sizeof why, "Crashed: %s", strsignal(WTERMSIG(status)));
         reason = why;
     } else if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
-        reason = "could not be started";
+        reason = "Could not start";
     } else if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-        snprintf(why, sizeof why, "stopped with an error (exit status %d)", WEXITSTATUS(status));
+        snprintf(why, sizeof why, "Exit status %d", WEXITSTATUS(status));
         reason = why;
     }
     logmsg("app %s gone: %s", app.id, reason ? reason : "closed");
