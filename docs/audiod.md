@@ -8,7 +8,7 @@ Issue [#24](https://github.com/M0LTE/yealink-t48s/issues/24). Design: [architect
 - **Tested off the phone, with nothing played anywhere.** Unit tests, a test of the real daemon over its sockets, and real calls: a sound file as one phone's microphone goes through its audio service, baresip, SIP and RTP to a second baresip and its audio service, and the same back. That passes in G.722 and G.711, and with one side running the phone's own ARM binaries under qemu.
 - **Runs on the phone (2026-11-23).** With the kernel driver's playback it plays tones and call audio through the loudspeaker and the handset, and a real call to an echo service went round the whole loop. [Results below](#on-the-phone). Which input and output is which is settled by the daytime tests and kept in [one table](#the-route-table) that a text file can override. How it sounds still needs an ear.
 - **Cost, measured on the phone:** about 2.6% of the processor while a speakerphone call's audio runs, kernel side included. The sample work alone is 0.4%; the rest is waking up fifty times a second. All integer.
-- **Echo:** nothing for handset and headset. The speakerphone uses voice switching (whoever is talking gets the channel), which costs almost nothing. [Reasons below](#echo).
+- **Echo:** nothing for handset and headset. The speakerphone uses voice switching (whoever is talking gets the channel), which costs almost nothing. [Reasons below](#echo). A real echo canceller is built in as `echo aec`, off until it has been tried by ear: [aec.md](aec.md).
 
 ## What it does
 
@@ -120,7 +120,7 @@ A routes file replaces any of it without a rebuild; `t48-audiod --print-routes` 
 [speaker]
 capture 0              # ALSA device to record from: 0 codec A, 1 codec B
 playback 0
-echo switch            # or: none
+echo switch            # or: none, or aec (the echo canceller, aec.md)
 coupling 512           # how loud the loudspeaker is at the microphone, 256 = the same
 confirmed 1
 set Codec A Capture Switch = 1
@@ -142,7 +142,9 @@ There are four rows: handset, speaker, headset, and alert (the loudspeaker for r
 
 The service sees each loudspeaker frame about 40 ms before it leaves the loudspeaker, so the microphone is already down when the echo arrives.
 
-Why this and not an echo canceller:
+**Since issue #35 there is a canceller too**, as `echo aec` in the routes file, off by default. It was measured on the phone at 16.5% of the processor (the estimate in the table below was too high) and lets both sides talk at once; the switch described here stays behind it as its fallback. Everything about it is in [aec.md](aec.md).
+
+Why voice switching was chosen first, as written before that measurement:
 
 | | Voice switching (chosen) | Echo canceller (speexdsp, fixed point) |
 |---|---|---|

@@ -8,7 +8,8 @@
 T48_AUDIOD_VERSION = local
 T48_AUDIOD_SITE = $(BR2_EXTERNAL_T48S_PATH)/../audiod
 T48_AUDIOD_SITE_METHOD = local
-T48_AUDIOD_LICENSE = AGPL-3.0-or-later
+T48_AUDIOD_LICENSE = AGPL-3.0-or-later, BSD-3-Clause (speexdsp echo canceller)
+T48_AUDIOD_LICENSE_FILES = third_party/speexdsp/COPYING
 
 # the call stream's header lives with baresip's module in sip/modules
 define T48_AUDIOD_BUILD_CMDS

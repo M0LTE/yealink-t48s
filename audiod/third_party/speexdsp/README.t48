@@ -1,0 +1,15 @@
+speexdsp's acoustic echo canceller, for t48-audiod's "echo aec" (issue #35,
+docs/aec.md).
+
+From https://github.com/xiph/speexdsp at commit
+7a158783df74efe7c2d1c6ee8363c1e695c71226 (2025-07-05). Licence: BSD
+3-clause, in COPYING; compatible with this project's AGPL-3.0-or-later.
+
+Taken: only what the canceller needs (mdf.c, the integer FFT it uses and
+their headers). Built with -DFIXED_POINT -DUSE_KISS_FFT: no floating point
+on the audio path.
+
+Changed from upstream:
+- mdf.c: one function added at the end, speex_echo_t48_status(), marked there.
+- speex/speexdsp_config_types.h: written here; upstream generates it.
+Everything else is byte for byte upstream's.

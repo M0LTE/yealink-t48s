@@ -94,6 +94,22 @@ int main(void)
 	sink = mo[5] + so[7];
 	report("speakerphone call (adds voice switching)", now() - t, n);
 
+	/* "echo aec": far fewer frames, it is some hundred times the work */
+	routes[T48AC_ROUTE_SPEAKER].echo = ECHO_AEC;
+	engine_set_route(&e, T48AC_ROUTE_NONE);
+	t = now();
+	engine_set_route(&e, T48AC_ROUTE_SPEAKER);
+	printf("%-52s %7.2f ms here   %7.1f ms on the phone, once\n", "starting the echo canceller (a route change)",
+	       (now() - t) * 1e3, (now() - t) * 1e3 * scale);
+	t = now();
+	for (i = 0; i < n / 20; i++)
+		engine_tick(&e, mic[i & 63], spk[i & 63], mo, so);
+	sink = mo[5] + so[7];
+	report("speakerphone call with \"echo aec\"", now() - t, n / 20);
+	routes[T48AC_ROUTE_SPEAKER].echo = ECHO_SWITCH;
+	engine_set_route(&e, T48AC_ROUTE_NONE);
+	engine_set_route(&e, T48AC_ROUTE_SPEAKER);
+
 	engine_set_tone(&e, T48AC_TONE_DIAL);
 	t = now();
 	for (i = 0; i < n; i++) {

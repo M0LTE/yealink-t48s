@@ -46,6 +46,7 @@ void engine_set_route(struct engine *e, int route)
 	e->route = route;
 	if (!route)
 		e->mute = 0;
+	echo_free(&e->echo);
 	echo_init(&e->echo, route ? routes[route].echo : ECHO_NONE,
 		  route ? routes[route].coupling_q8 : 0);
 	memset(&e->dc, 0, sizeof(e->dc));

@@ -2,6 +2,7 @@
 /* t48-audiod: voice-switched echo control. See echo.h. */
 #include <string.h>
 #include "dsp.h"
+#include "aec.h"
 #include "echo.h"
 
 #define RX_MIC_GAIN   519	/* -36 dB: microphone while the far end talks */
@@ -11,6 +12,9 @@
 #define TX_HOLD       12	/* frames: 240 ms, bridges gaps between words */
 #define SLEW_DOWN     205	/* per sample: full swing in 10 ms */
 #define SLEW_UP       51	/* per sample: full swing in 40 ms */
+/* with the canceller, once it has learned the path */
+#define AEC_SPK_GAIN  16422	/* -6 dB: loudspeaker while the owner talks */
+#define AEC_MIC_MAX   8231	/* -12 dB: the least the microphone is cut */
 
 void echo_init(struct echo *e, enum echo_mode mode, int coupling_q8)
 {
@@ -20,6 +24,32 @@ void echo_init(struct echo *e, enum echo_mode mode, int coupling_q8)
 	e->mic_g = e->spk_g = Q15_ONE;
 	e->mic_noise_q4 = MIC_FLOOR << 4;
 	e->rng = 0x2545f491;
+	e->resid_q8 = 256;
+	if (mode == ECHO_AEC) {
+		e->aec = aec_new();
+		if (!e->aec)
+			e->mode = ECHO_SWITCH;
+	}
+}
+
+void echo_free(struct echo *e)
+{
+	aec_free(e->aec);
+	e->aec = 0;
+}
+
+static int isqrt(int v)
+{
+	int r = 0, b;
+	for (b = 1 << 14; b; b >>= 2) {
+		if (v >= r + b) {
+			v -= r + b;
+			r = (r >> 1) + b;
+		} else {
+			r >>= 1;
+		}
+	}
+	return r;
 }
 
 static inline int32_t slew(int32_t g, int32_t target)
@@ -36,11 +66,32 @@ void echo_process(struct echo *e, int16_t *spk, int16_t *mic, int n)
 	int lf, lm, far_env, echo_est, noise, i;
 	int32_t mic_t, spk_t, mg, sg, cn_amp;
 	uint32_t r;
+	int good = 0;	/* the canceller is on and has learned the path */
 
-	if (e->mode != ECHO_SWITCH)
+	if (e->mode == ECHO_NONE)
 		return;
 
 	lf = dsp_level(spk, n);
+	if (e->mode == ECHO_AEC && n == FRAME) {
+		int16_t out[FRAME];
+		int leak, rq8, ly;
+
+		aec_cancel(e->aec, e->ref, mic, out, &e->adapted, &leak);
+		/* what it took out is its estimate of the echo */
+		for (i = 0; i < n; i++)
+			mic[i] = sat16((int32_t)mic[i] - out[i]);
+		ly = dsp_level(mic, n);
+		memcpy(mic, out, sizeof(out));
+		/* The share of that still left in, as an amplitude. Up at
+		 * once (it is doing worse: the room changed), down slowly. */
+		rq8 = e->adapted ? isqrt(leak << 1) : 256;
+		if (rq8 > e->resid_q8)
+			e->resid_q8 = rq8;
+		else
+			e->resid_q8 -= (e->resid_q8 - rq8 + 7) >> 3;
+		good = e->adapted;
+		e->echo_now = (ly * e->resid_q8) >> 8;
+	}
 	lm = dsp_level(mic, n);
 
 	/* What the microphone may be hearing of the loudspeaker: the loudest
@@ -51,6 +102,10 @@ void echo_process(struct echo *e, int16_t *spk, int16_t *mic, int n)
 		if (e->hist[i] > far_env)
 			far_env = e->hist[i];
 	echo_est = (int)(((int64_t)far_env * e->coupling_q8) >> 8);
+	/* With the canceller working, what matters is the echo it left behind,
+	 * as it reckons it; never more than the echo there could be at all */
+	if (good && e->echo_now < echo_est)
+		echo_est = e->echo_now;
 
 	/* Background noise: follows the level down at once, up slowly, and
 	 * only while the loudspeaker is quiet */
@@ -74,10 +129,19 @@ void echo_process(struct echo *e, int16_t *spk, int16_t *mic, int n)
 		e->tx_hold--;
 		e->state = ECHO_TX;
 		mic_t = Q15_ONE;
-		spk_t = lf > FAR_FLOOR ? TX_SPK_GAIN : Q15_ONE;
+		spk_t = lf <= FAR_FLOOR ? Q15_ONE : good ? AEC_SPK_GAIN : TX_SPK_GAIN;
 	} else if (lf > FAR_FLOOR || far_env > FAR_FLOOR) {
 		e->state = ECHO_RX;
 		mic_t = RX_MIC_GAIN;
+		/* The canceller's share of the 36 dB is already done: cut
+		 * only the rest. Left with all the echo this is RX_MIC_GAIN. */
+		if (good) {
+			mic_t = (4 * Q15_ONE) / (e->resid_q8 > 4 ? e->resid_q8 : 4);
+			if (mic_t > AEC_MIC_MAX)
+				mic_t = AEC_MIC_MAX;
+			if (mic_t < RX_MIC_GAIN)
+				mic_t = RX_MIC_GAIN;
+		}
 		spk_t = Q15_ONE;
 	} else {
 		e->state = ECHO_IDLE;
@@ -107,6 +171,8 @@ void echo_process(struct echo *e, int16_t *spk, int16_t *mic, int n)
 	e->mic_g = mg;
 	e->spk_g = sg;
 	e->rng = r;
+	if (e->mode == ECHO_AEC && n == FRAME)
+		memcpy(e->ref, spk, sizeof(e->ref));
 
 	/* Remember what was played */
 	e->tail -= e->tail >> 2;
