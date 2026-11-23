@@ -1,0 +1,13 @@
+{
+  "id": "clock",
+  "name": "Clock",
+  "version": "0.1.0",
+  "api": 1,
+  "exec": "clock",
+  "icon": "icon.ppm",
+  "permissions": [],
+  "settings": [
+    { "key": "title", "label": "Title", "type": "text", "default": "Clock" },
+    { "key": "seconds", "label": "Show seconds", "type": "bool", "default": true }
+  ]
+}
