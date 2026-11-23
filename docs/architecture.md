@@ -35,7 +35,7 @@ Four long-running programs, each replaceable: the shell, baresip, the audio serv
 - Checked against Buildroot master on 2026-11-23: custom kernel headers back to 3.0 are still offered (`BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_3_6`), the CPU is listed (`arm1176jzf-s`), musl supports ARM. Latest release tag is 2026.08.2; pin one release and move deliberately.
 - Stay soft-float (`-mfloat-abi=soft`), as now. Everything in a call path is integer code, and existing binaries keep working. Revisit only if a measurement says so.
 - Buildroot does not build the kernel: 3.6.11 needs gcc 4.7, so `kernel/build.sh` stays in its Ubuntu 14.04 container. CI runs both and joins the outputs.
-- Base packages: busybox (init, runit, udhcpc, ntpd), dropbear, curl with mbedTLS and a CA bundle, mtd-utils. baresip and libre are not in Buildroot, so they are packages in our external tree. Our own programs are packages too.
+- Base packages: busybox (init, runit, udhcpc, ntpd), dropbear, curl with mbedTLS and a CA bundle, mtd-utils (left out of the image until flash writes are approved, see `docs/nand.md`). baresip and libre are not in Buildroot, so they are packages in our external tree. Our own programs are packages too.
 - Almost everything is statically linked, as today. It keeps apps independent of the system image.
 
 **Build in CI.** GitHub Actions builds the kernel (in the container) and the Buildroot tree on every push, with the download directory and toolchain cached; a first build is under an hour on a hosted runner, later ones minutes. A tag publishes a release: kernel image, system image, live-image files, SDK, checksums. No personal SSH keys in published images ([#28](https://github.com/M0LTE/yealink-t48s/issues/28)).
@@ -247,7 +247,7 @@ Answered 2026-11-23:
 
 - **Audio** is the one thing that could stop this being a phone. Everything else has a known route. The design keeps it behind one daemon so the rest does not wait.
 - **Kernel slot size.** 2.5 MB for kernel plus first stage is tight; xz compression and a minimal first stage should do it, with the rfs partition as the fallback home for rescue.
-- **NAND ECC and UBI** on this controller under 3.6 are unproven ([#5](https://github.com/M0LTE/yealink-t48s/issues/5)). U-Boot must still be able to read the kernel partition we write.
+- **NAND writes and UBI** on this controller under 3.6 are unproven. Reading is done and the ECC layout is known and matches U-Boot's and Yealink's ([#5](https://github.com/M0LTE/yealink-t48s/issues/5), `docs/nand.md`), so U-Boot should read a kernel we write; how its loader treats a bad block in the kernel partition is still to check. Backups must include the spare bytes, or Yealink's partitions cannot be put back.
 - **Speakerphone echo cancelling in software** on this CPU, if there is no DSP. Half-duplex is the fallback.
 - **TFTP server address in the live image**: our kernel ignores what U-Boot passes, so the live image needs another way to find its settings file (DHCP, or reading U-Boot's environment). Part of [#7](https://github.com/M0LTE/yealink-t48s/issues/7).
 - **USB** is not planned: no driver in our kernel, and nothing above needs it.

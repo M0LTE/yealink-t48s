@@ -179,6 +179,14 @@ static int t48s_mtd_erase(struct mtd_info *mtd, struct erase_info *instr)
 	return -EROFS;
 }
 
+/* kept as a stub, not NULL: without it the MTD core says the device has no spare
+ * area at all and refuses raw reads */
+static int t48s_mtd_write_oob(struct mtd_info *mtd, loff_t to, struct mtd_oob_ops *ops)
+{
+	t48s_nand_refuse("mtd write_oob");
+	return -EROFS;
+}
+
 static int t48s_mtd_block_markbad(struct mtd_info *mtd, loff_t ofs)
 {
 	t48s_nand_refuse("mtd block_markbad");
@@ -381,7 +389,7 @@ static int __devinit t48s_nand_probe(struct platform_device *pdev)
 	/* layer 3: nothing above this driver may write, whatever the layers below do */
 	mtd->flags &= ~MTD_WRITEABLE;
 	mtd->_write = NULL;
-	mtd->_write_oob = NULL;
+	mtd->_write_oob = t48s_mtd_write_oob;
 	mtd->_panic_write = NULL;
 	mtd->_erase = t48s_mtd_erase;
 	mtd->_block_markbad = t48s_mtd_block_markbad;

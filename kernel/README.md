@@ -1,6 +1,6 @@
 # Our kernel for the T48S
 
-**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 498.89, matching Yealink's 498.07 (see "CPU speed" below). Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. The screen, keys, hook switch and touchscreen have drivers too (below); and the microphones (ALSA capture, below); none yet for NAND or audio playback.
+**Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 498.89, matching Yealink's 498.07 (see "CPU speed" below). Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. The screen, keys, hook switch and touchscreen have drivers too (below); and the microphones (ALSA capture, below); and the NAND flash, read-only (`docs/nand.md`); none yet for audio playback.
 
 Linux 3.6.11 (the last mainline release with Broadcom's `mach-bcmring` platform, the BCM11107 family the phone's BCM11188 belongs to), patched and configured for the phone. Built with gcc 4.7 in an Ubuntu 14.04 container.
 
@@ -23,7 +23,7 @@ Board changes:
 | RAM | 256 MB from 0 (forced by the platform fixup, which also drops U-Boot's tags and command line) | 0x00400000 to 0x07A20000, stopping below U-Boot's framebuffer at 0x07A24000 |
 | UART clock | 142.857 MHz | 100 MHz, measured from the divider U-Boot programmed |
 | PLL spread spectrum | enabled at boot | left as U-Boot set it |
-| Flash (MTD/NAND) | built in | not built: this kernel cannot write the NAND |
+| Flash (MTD/NAND) | `bcm_umi_nand`, read and write, 13 ECC bytes per 512 | our `drivers/t48s_nand.c`: read-only, the phone's 7 ECC bytes per 512; no block devices, UBI or flash filesystems (see [docs/nand.md](../docs/nand.md)) |
 | Command line | from U-Boot | built in: serial console on ttyAMA0 at 115200, ramdisk at 0x02a80000 |
 | Delay loop | wherever the link puts it | on an 8-byte boundary (see "CPU speed" below) |
 | Early debug output | none for this platform | `mach/debug-macro.S` for UARTA (phys 0x80012000, virt 0xF8012000) |
@@ -131,6 +131,16 @@ tools/ourkernel.sh ssh touchtest
 tools/ourkernel.sh ssh 't48rec -d 1 -s 5 -o /tmp/b.wav'    # record 5 s from codec B, report rate and level
 tools/ourkernel.sh ssh t48mix                              # list the controls
 tools/ourkernel.sh ssh 'cat /proc/asound/card0/t48s'       # counters and registers
+```
+
+## NAND flash, read-only (2026-11-23, issue #5)
+
+`drivers/t48s_nand.c` (copied into `drivers/mtd/nand/`) gives `/dev/mtd0` to `/dev/mtd12` with Yealink's partition numbers. It can only read: the chip commands it will send are a fixed list with no program or erase in it, the write hooks are stubs, and every partition is registered read-only. `build.sh` refuses to build a configuration with anything that could write the flash. Dumps match Yealink's byte for byte. Details, the ECC layout and what writing will need: [docs/nand.md](../docs/nand.md).
+
+```
+tools/ourkernel.sh ssh 'cat /proc/mtd'
+tools/ourkernel.sh ssh 'nandread -o /dev/mtd7' > kernel.dataoob    # data and spare bytes
+tools/nandcheck.py ecc kernel.dataoob                              # check the ECC on a PC
 ```
 
 ## CPU speed (2026-11-22, issue #9)

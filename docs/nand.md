@@ -4,7 +4,11 @@ Issue [#5](https://github.com/M0LTE/yealink-t48s/issues/5). **Read-only.** Nothi
 
 ## Summary
 
-RESULT_SUMMARY
+Reading works (2026-11-23). Our kernel finds the chip, sees no bad blocks, and reads the whole flash in 69 seconds over SSH. Every partition was dumped, data and spare bytes, under Yealink's kernel and then under ours: 11 of the 12 are identical byte for byte (124 MB). The twelfth, `cfg`, is the one Yealink writes to while it runs; it differs between two reads under Yealink seconds apart, and is steady under ours.
+
+The error correction matches U-Boot's and Yealink's once set to their values, which are not mainline's defaults. The code is a standard one and is now reproduced in software, so dumps and future images can be checked on a PC.
+
+One thing is not proven: correcting a real bit error. The flash has none (zero corrected under either kernel), so that path has never run.
 
 ## The chip and how it is used
 
@@ -46,7 +50,7 @@ It cannot change the flash. Three layers, each enough on its own:
 2. **No write code.** Every write hook the NAND layer offers (page write, spare write, erase, mark bad, raw data out) is a stub that sends nothing. The driver refuses to register the flash if any hook is not its stub.
 3. **Read-only to the rest of the kernel.** The device and every partition are registered without the writeable flag, so the MTD core answers "read-only file system" to write, erase and mark-bad, and `/dev/mtdN` cannot be opened for writing.
 
-Around that: the kernel has no flash filesystems, no UBI, no MTD block devices and no partitions from the command line, and `kernel/build.sh` stops if any of them is configured, or mainline's driver. The root filesystem has no mtd-utils. The only flash tool in it is `nandread` (`native/nandread.c`), which opens the device read-only and uses read calls only.
+Around that: the kernel has no flash filesystems, no UBI, no MTD block devices and no partitions from the command line, and `kernel/build.sh` stops if any of them is configured, or mainline's driver. The root filesystem has no mtd-utils. The only flash tool in it is `nandread` (`native/nandread.c`), which opens the device read-only and uses read calls only. (Root can still reach any hardware register through `/dev/mem`, the flash controller included; nothing in the image does.)
 
 The driver leaves the controller's timing, chip select and write-protect settings as it finds them. It drives only the ECC engine.
 
@@ -61,7 +65,22 @@ tools/nandcheck.py cmp a.dataoob b.dataoob                          # two dumps,
 
 `nandread` also runs under Yealink's kernel (copy it to `/tmp`, use `/dev/mtdNro`), which is how the reference dumps were taken.
 
-RESULT_COMPARE
+Result, 2026-11-23 (dumps in `dumps/nand-yealink/` and `dumps/nand-ours/`, not committed):
+
+| Partition | Pages | Yealink's read against ours |
+|---|---|---|
+| ubl, uboot, env, userenv, logo | 64 + 4 x 512 | identical, data and spare |
+| smkern, kernel | 1280 each | identical |
+| smrfs, rfs | 7680 each | identical |
+| app | 38336 | identical |
+| data | 5120 | identical |
+| cfg | 2048 | 141 pages differ (81 on a second try straight before the jump) |
+
+`cfg` is `/config`, mounted writable by Yealink, whose software keeps writing it: two reads under Yealink a few seconds apart already differ from each other. Under our kernel two reads 30 seconds apart, and two reads of the whole chip, are identical, and our read of `cfg` passes the ECC check throughout. In the differing pages looked at, Yealink's read had data and ours, taken later, found them erased: Yealink's filesystem tidying up in between.
+
+The older data-only dumps of ubl, uboot, env, smkern and kernel (22 November) also match. `userenv` has changed since then; U-Boot rewrites it on recovery boots.
+
+Counters after all of that: 1 chip command blocked (the reset the NAND layer sends when it looks for the chip; it is not needed), 0 write attempts reached the stubs. Speed is about 1.9 MB/s, byte at a time without DMA.
 
 ## What writing safely will need
 
