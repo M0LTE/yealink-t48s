@@ -1,0 +1,35 @@
+From: Yealink T48S open firmware <noreply@example.invalid>
+Subject: [PATCH] ARM: bcm: add the BCMRING family (BCM11107, BCM11188), device tree only
+
+Mainline dropped mach-bcmring in 3.7. Bring the family back as a device
+tree only platform: no board file, only the Kconfig entry that selects the
+drivers the SoC needs (PL192 interrupt controllers, SP804 timers, AMBA
+peripherals). Everything else comes from the device tree.
+
+---
+--- a/arch/arm/mach-bcm/Kconfig
++++ b/arch/arm/mach-bcm/Kconfig
+@@ -6,6 +6,23 @@ menuconfig ARCH_BCM
+ 
+ if ARCH_BCM
+ 
++comment "BCMRING SoCs"
++
++config ARCH_BCMRING
++	bool "Broadcom BCMRING SoCs (BCM11107 family, BCM11188)"
++	depends on ARCH_MULTI_V6
++	select ARM_AMBA
++	select ARM_VIC
++	select ARM_TIMER_SP804
++	select GPIOLIB
++	help
++	  Broadcom's BCM11107 family of VoIP SoCs (ARM1176JZF-S), as found
++	  in the BCM11188 of the Yealink SIP-T48S desk phone. Device tree
++	  only: PL192 interrupt controllers, SP804 timers, PL011 UARTs.
++	  The boot loader is expected to have set up the PLLs, the pin
++	  functions and the memory controller; the clocks are described
++	  as fixed in the device tree.
++
+ comment "IPROC architected SoCs"
+ 
+ config ARCH_BCM_IPROC

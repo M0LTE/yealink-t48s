@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Yealink SIP-T48S desk phone (hardware id 65).
+ */
+/dts-v1/;
+
+#include "bcm11188.dtsi"
+
+/ {
+	model = "Yealink SIP-T48S";
+	compatible = "yealink,sip-t48s", "brcm,bcm11188", "brcm,bcm11107";
+
+	aliases {
+		serial0 = &uarta;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		bootargs = "console=ttyAMA0,115200 earlycon loglevel=8";
+	};
+
+	/*
+	 * 124 MB from 0x00400000 (the first 4 MB are not ours). The top 6 MB
+	 * hold the frame buffers the boot loader set up; the LCD controller is
+	 * scanning out of them when the kernel starts.
+	 */
+	memory@400000 {
+		device_type = "memory";
+		reg = <0x00400000 0x07c00000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		fb_mem: framebuffer@7a24000 {
+			reg = <0x07a24000 0x005dc000>;
+			no-map;
+		};
+	};
+};
+
+&uarta {
+	status = "okay";
+};

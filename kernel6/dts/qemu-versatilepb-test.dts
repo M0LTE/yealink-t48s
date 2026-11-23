@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Not a phone: QEMU's "versatilepb" machine with an ARM1176, described just
+ * far enough to smoke-test the T48S kernel configuration and root filesystem
+ * on a PC (kernel6/qemu-test.sh). It has the same kinds of parts as the
+ * BCM11188 (a VIC, SP804 timers, a PL011) at other addresses, and its RAM
+ * starts at 0.
+ */
+/dts-v1/;
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	model = "QEMU versatilepb (T48S kernel smoke test)";
+	compatible = "qemu,versatilepb-t48s-test";
+	interrupt-parent = <&vic>;
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		bootargs = "console=ttyAMA0,115200 earlycon loglevel=8";
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,arm1176jzf-s";
+			reg = <0>;
+		};
+	};
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x08000000>;
+	};
+
+	clk_1m: clk-1m {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <1000000>;
+	};
+
+	clk_24m: clk-24m {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		vic: interrupt-controller@10140000 {
+			compatible = "arm,versatile-vic";
+			reg = <0x10140000 0x1000>;
+			interrupt-controller;
+			#interrupt-cells = <1>;
+		};
+
+		timer@101e2000 {
+			compatible = "arm,sp804";
+			reg = <0x101e2000 0x1000>;
+			interrupts = <4>;
+			clocks = <&clk_1m>, <&clk_1m>, <&clk_24m>;
+			clock-names = "timer1", "timer2", "apb_pclk";
+		};
+
+		uart0: serial@101f1000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x101f1000 0x1000>;
+			interrupts = <12>;
+			clocks = <&clk_24m>, <&clk_24m>;
+			clock-names = "uartclk", "apb_pclk";
+		};
+	};
+};
