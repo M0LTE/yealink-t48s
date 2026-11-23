@@ -8,27 +8,33 @@ board (T48S.rom, T48S.bin, T48S.rfs), checks only the 128-byte head of the .rom,
 and then boots the .bin with the .rfs as its ramdisk. It writes nothing to the
 phone's flash except one flag in its own settings (BOOTMODE, see the doc).
 
-So a shareable live image is: our kernel as T48S.bin, our root filesystem as
+So a shareable live image is: our kernel as T48S.bin, our system image inside
 T48S.rfs, and a SMALL CRAFTED T48S.rom whose header passes U-Boot's check
 WITHOUT being a copy of Yealink's firmware (which we may not redistribute).
 
-  mkliveimage.py usb DIR bin=T48S.bin cpio=rootfs.cpio
+  mkliveimage.py usb DIR bin=T48S.bin system=system.img
         the files for a USB stick, ready to copy: ROM, kernel, ramdisk and a
-        README.txt for the owner (rfs=FILE instead of cpio= takes a ready ramdisk)
+        README.txt for the owner (rfs=FILE instead of system= takes a ready ramdisk)
   mkliveimage.py checkstick STICK [DIR]
         read a stick (/dev/sdX, as root) or an image of one the way U-Boot will:
         partition table, FAT, the three files; DIR compares them with a built set
-  mkliveimage.py build OUTDIR bin=T48S.bin cpio=rootfs.cpio
+  mkliveimage.py build OUTDIR bin=T48S.bin system=system.img
         the same three files for a TFTP server, without the README
-  mkliveimage.py rfs IN OUT      make T48S.rfs from Buildroot's rootfs.cpio
+  mkliveimage.py rfs IN OUT      make T48S.rfs from Buildroot's system.img
   mkliveimage.py check ROM       emulate U-Boot's check of a .rom file
 
 The ramdisk. U-Boot loads the kernel at 0x02680000 and the ramdisk 4 MB above it
 at 0x02a80000, so the kernel file must be under 4 MB. Our kernel takes the 8 MB
 from 0x02a80000 as its initrd whatever the file's size (kernel/live.config), so
-T48S.rfs is the root filesystem as a gzip cpio followed by zeros up to exactly
-8 MB: the kernel unpacks the archive into RAM and skips the zeros. Without the
-padding it would read whatever was in memory after the file and give up.
+T48S.rfs is a cpio archive followed by zeros up to exactly 8 MB: the kernel
+unpacks the archive into RAM and skips the zeros. Without the padding it would
+read whatever was in memory after the file and give up.
+
+What is in the archive: one file, system.img, the read-only system image
+(squashfs) that Buildroot makes. The live kernel has the first stage built in
+(kernel/build.sh live); the archive is unpacked over it, so the first stage finds
+/system.img in RAM beside it exactly as on a kexec boot (docs/boot.md). The
+archive is not compressed: the system image already is.
 
 What U-Boot actually checks (reverse-engineered from the T48S U-Boot at
 0x03B15274, confirmed byte for byte against a genuine 66.82.0.31 ROM):
@@ -189,11 +195,28 @@ def check_uimage(data):
     return True, msg
 
 
+def _cpio_entry(ino, name, mode, body=b""):
+    n = name.encode() + b"\0"
+    hdr = "070701" + "".join("%08X" % v for v in
+                             (ino, mode, 0, 0, 1, 0, len(body), 0, 0, 0, 0, len(n), 0))
+    rec = hdr.encode() + n
+    rec += b"\0" * (-len(rec) % 4)
+    return rec + body + b"\0" * (-len(body) % 4)
+
+
 def make_rfs(data):
-    """T48S.rfs from Buildroot's rootfs.cpio (plain or gzip): gzip, then zeros to 8 MB.
-    An ext2 image or a ready 8 MB ramdisk goes through unchanged. (bytes, description)"""
-    if len(data) == RFS_SIZE and data[:2] == b"\x1f\x8b":
+    """T48S.rfs from Buildroot's system.img (squashfs): a cpio archive holding it as
+    system.img, then zeros to 8 MB. A cpio archive (plain or gzip) is taken as the
+    archive itself; an ext2 image or a ready 8 MB ramdisk goes through unchanged.
+    (bytes, description)"""
+    if len(data) == RFS_SIZE and (data[:2] == b"\x1f\x8b" or data[:6] == b"070701"):
         return data, "ready-made ramdisk"
+    if data[:4] == b"hsqs":
+        raw = len(data)
+        data = _cpio_entry(1, "system.img", 0o100444, data) + _cpio_entry(0, "TRAILER!!!", 0)
+        if len(data) > RFS_SIZE:
+            raise ValueError("system image is %d bytes: with its wrapping the limit is 8 MB" % raw)
+        return data + b"\0" * (RFS_SIZE - len(data)), "system image, %d bytes, as system.img in a cpio archive, zeros to 8 MB" % raw
     if len(data) > 1082 and data[1080:1082] == b"\x53\xef":
         if len(data) > RFS_SIZE:
             raise ValueError("ext2 ramdisk is %d bytes: the limit is 8 MB" % len(data))
@@ -210,7 +233,7 @@ def make_rfs(data):
             raise ValueError("gzip file does not hold a cpio archive")
         what = "gzip cpio, %d bytes" % len(data)
     else:
-        raise ValueError("not a cpio archive, a gzip cpio or an ext2 image")
+        raise ValueError("not a system image (squashfs), a cpio archive or an ext2 image")
     if len(data) > RFS_SIZE:
         raise ValueError("root filesystem is %d bytes compressed: the limit is 8 MB" % len(data))
     return data + b"\0" * (RFS_SIZE - len(data)), what + ", zeros to 8 MB"
@@ -279,7 +302,7 @@ licences. Source code: the project page above.
 """
 
 
-def write_set(outdir, bin_path, rfs_path, cpio_path, model="T48S", readme=False):
+def write_set(outdir, bin_path, rfs_path, system_path, model="T48S", readme=False):
     """Write MODEL.rom, .bin and .rfs (and README.txt) into outdir. Returns 0 or 2."""
     os.makedirs(outdir, exist_ok=True)
     rom = craft_rom(model)
@@ -287,8 +310,8 @@ def write_set(outdir, bin_path, rfs_path, cpio_path, model="T48S", readme=False)
     if not ok:
         print("refusing to write a ROM our own check rejects:", why[-1], file=sys.stderr)
         return 2
-    if not bin_path or not (rfs_path or cpio_path):
-        print("give bin=KERNEL (kernel/build.sh live) and cpio=ROOTFS.CPIO "
+    if not bin_path or not (rfs_path or system_path):
+        print("give bin=KERNEL (kernel/build.sh live) and system=SYSTEM.IMG "
               "(buildroot/build.sh) or rfs=RAMDISK", file=sys.stderr)
         return 2
     kernel = open(bin_path, "rb").read()
@@ -297,13 +320,13 @@ def write_set(outdir, bin_path, rfs_path, cpio_path, model="T48S", readme=False)
         print("%s: %s" % (bin_path, kwhy[-1]), file=sys.stderr)
         return 2
     try:
-        rfs, rwhat = make_rfs(open(cpio_path or rfs_path, "rb").read())
+        rfs, rwhat = make_rfs(open(system_path or rfs_path, "rb").read())
     except ValueError as e:
-        print("%s: %s" % (cpio_path or rfs_path, e), file=sys.stderr)
+        print("%s: %s" % (system_path or rfs_path, e), file=sys.stderr)
         return 2
     files = ((model + ".rom", rom, "the label U-Boot checks: " + why[-1]),
              (model + ".bin", kernel, kwhy[0]),
-             (model + ".rfs", rfs, "root filesystem: " + rwhat))
+             (model + ".rfs", rfs, "ramdisk: " + rwhat))
     listing = ""
     for name, data, what in files:
         with open(os.path.join(outdir, name), "wb") as f:
@@ -464,10 +487,10 @@ def check_stick(path, model="T48S", compare_dir=None):
     return ok, msg
 
 USAGE = """usage:
-  mkliveimage.py usb DIR bin=T48S.bin cpio=rootfs.cpio|rfs=T48S.rfs [model=T48S]
+  mkliveimage.py usb DIR bin=T48S.bin system=system.img|rfs=T48S.rfs [model=T48S]
   mkliveimage.py checkstick /dev/sdX|IMAGE [DIR] [model=T48S]
-  mkliveimage.py build OUTDIR bin=T48S.bin cpio=rootfs.cpio|rfs=T48S.rfs [model=T48S]
-  mkliveimage.py rfs ROOTFS.CPIO T48S.rfs
+  mkliveimage.py build OUTDIR bin=T48S.bin system=system.img|rfs=T48S.rfs [model=T48S]
+  mkliveimage.py rfs SYSTEM.IMG T48S.rfs
   mkliveimage.py check ROM [board_hwid]"""
 
 
@@ -485,7 +508,7 @@ def main(argv):
         print("PASS" if ok else "REJECTED")
         return 0 if ok else 1
     if cmd in ("build", "usb") and args:
-        r = write_set(args[0], opts.get("bin"), opts.get("rfs"), opts.get("cpio"), model, readme=cmd == "usb")
+        r = write_set(args[0], opts.get("bin"), opts.get("rfs"), opts.get("system") or opts.get("cpio"), model, readme=cmd == "usb")
         if r:
             return r
         if cmd == "usb":

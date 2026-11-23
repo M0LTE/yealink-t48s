@@ -1,0 +1,6 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Feeds the hardware watchdog: if the phone hangs for 30 seconds it resets.
+# "sv down /run/service/watchdog" turns the watchdog off again.
+exec 2>&1 </dev/null
+exec t48-watchdog

@@ -1,0 +1,52 @@
+# Call waiting, answered: the first call goes on hold, OK swaps between the two, and ending one brings the other back.
+waitstate reg ok 8000
+waitstate audio up 3000
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+hook off
+waitstate phone incall 5000
+run $FAR $BOB waitcall established 3
+run $FAR $CAROL cmd dial 1001
+waitstate other waiting 5000
+# OK answers the second call; the first is held and its far end is told
+key ok
+expectstate other held
+expectstate other.peer 1002
+expectstate peer 1003
+run $FAR $CAROL waitcall established 5
+run $FAR waitlog $BOBLOG CALL_HOLD 5
+waitstate audio.ring 0 2000
+expectstate hold 0
+expectstate route handset
+wait 1200
+shot shots/phone-two-calls.png
+# OK again swaps: 1002 is back, 1003 is held
+key ok
+expectstate peer 1002
+expectstate other.peer 1003
+run $FAR waitlog $BOBLOG CALL_RESUME 5
+run $FAR waitlog $CAROLLOG CALL_HOLD 5
+# and by touch, on Swap
+touch 600 280
+expectstate peer 1003
+expectstate other.peer 1002
+run $FAR waitlog $CAROLLOG CALL_RESUME 5
+# End (the button) ends the call in front; the one on hold comes back by itself
+touch 717 424
+run $FAR $CAROL waitcall none 5
+expectstate phone incall
+expectstate peer 1002
+expectstate other none
+expectstate hold 0
+wait 500
+shot shots/phone-back-to-held.png
+run $FAR $BOB waitcall established 3
+# both calls are in the history
+expectstate last i:1003
+# the far end hangs up the last one
+run $FAR $BOB cmd hangup
+waitstate phone ended 5000
+hook on
+waitstate phone idle 4000
+expectstate history 2
+quit

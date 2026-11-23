@@ -3,6 +3,16 @@ mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev 2>/dev/null
 mkdir -p /dev/pts && mount -t devpts devpts /dev/pts   # SSH logins need ptys
+# The system image is read-only; the first stage has put /run and /tmp in RAM
+# (docs/boot.md). root's password file changes (the Access page's password door), so a
+# copy in /run goes over it.
+if [ ! -f /run/shadow ]; then
+    cp /etc/shadow /run/shadow && chmod 600 /run/shadow && mount -o bind /run/shadow /etc/shadow
+fi
+# /data: settings, apps, keys. From flash once it has been set up (t48-data format),
+# else in RAM and lost at power off (issue 29, docs/flash.md)
+t48-data mount
+mkdir -p /data/apps /data/appdata /data/config /data/phone
 # userspace is up: disarm the SP805 watchdog the loader armed (unlock, control 0, lock)
 devmem 0x80017c00 32 0x1ACCE551; devmem 0x80017808 32 0; devmem 0x80017c00 32 0
 echo
@@ -23,9 +33,10 @@ ifconfig lo 127.0.0.1 up
 ifconfig eth0 up
 # Linux 3.6's /dev/random waits for entropy this phone never gathers, and curl (mbedTLS) reads it:
 # an HTTPS download would hang for ever. Make it the pool that does not wait, after stirring in
-# what differs between phones and between boots. Weak just after boot; a seed kept across boots
-# needs somewhere to keep it (issue 29).
+# what differs between phones and between boots. Weak just after a first boot.
 { date; cat /proc/interrupts /proc/uptime /sys/class/net/eth0/address; dmesg; } > /dev/urandom 2>/dev/null
+# and a seed kept from the last boot, when /data is in flash; a new one is saved for the next
+grep -q '^ubi0:data /data ' /proc/mounts && seedrng -d /data/seed >/dev/null 2>&1
 rm -f /dev/random && mknod -m 666 /dev/random c 1 9
 # DHCP, or the fixed address in /data/config/network (docs/settings.md)
 t48-apply network
@@ -33,5 +44,8 @@ t48-apply network
 # test builds (docs/access.md)
 t48-access boot
 # started through U-Boot's recovery mode (a USB stick or TFTP)? Then take U-Boot's
-# BOOTMODE flag out again and say on the screen that nothing is installed (issue 7)
+# BOOTMODE flag out again and leave the "nothing is installed" note for the idle
+# screen (issue 7). Before the services, so the shell's first screen has the note
 t48-live boot
+# the services runsvdir is about to start (inittab)
+t48-services

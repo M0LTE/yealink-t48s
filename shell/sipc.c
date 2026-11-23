@@ -57,29 +57,43 @@ void sipc_tick(long long now)
     if (fd < 0 && path && now >= retry_at) try_connect(now);
 }
 
+static size_t json_quote(char *out, size_t n, size_t k, const char *v)
+{
+    for (const char *p = v; *p && k < n - 8; p++) {
+        if (*p == '"' || *p == '\\') out[k++] = '\\';
+        if ((unsigned char)*p >= 32) out[k++] = *p;
+    }
+    return k;
+}
+
 /* Send a command. The token comes back with the answer: we use the command's
  * own name, which is all phone_sip_response() needs to know. */
-void sipc_cmd(const char *command, const char *params)
+void sipc_cmd_from(const char *account, const char *command, const char *params)
 {
-    char json[512], msg[540];
+    char json[700], msg[740];
     size_t k;
 
     if (fd < 0) return;
     k = (size_t)snprintf(json, sizeof json, "{\"command\":\"%s\",\"token\":\"%s\"", command, command);
     if (params) {
         k += (size_t)snprintf(json + k, sizeof json - k, ",\"params\":\"");
-        for (const char *p = params; *p && k < sizeof json - 8; p++) {
-            if (*p == '"' || *p == '\\') json[k++] = '\\';
-            if ((unsigned char)*p >= 32) json[k++] = *p;
-        }
+        k = json_quote(json, sizeof json - 200, k, params);
+        json[k++] = '"';
+    }
+    if (account && account[0]) {
+        k += (size_t)snprintf(json + k, sizeof json - k, ",\"account\":\"");
+        k = json_quote(json, sizeof json, k, account);
         json[k++] = '"';
     }
     json[k++] = '}';
     json[k] = 0;
     int n = snprintf(msg, sizeof msg, "%zu:%s,", k, json);
-    logmsg("sip: > %s%s%s", command, params ? " " : "", params ? params : "");
+    logmsg("sip: > %s%s%s%s%s", command, params ? " " : "", params ? params : "", account && account[0] ? " from " : "",
+           account && account[0] ? account : "");
     if (send(fd, msg, (size_t)n, MSG_NOSIGNAL) != n) drop("cannot send");
 }
+
+void sipc_cmd(const char *command, const char *params) { sipc_cmd_from(NULL, command, params); }
 
 static void message(char *json, size_t len)
 {

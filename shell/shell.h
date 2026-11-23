@@ -62,6 +62,7 @@ const t48_surface *shell_app_surface(void);
 /* a word about how things stand, for the simulator's checks (docs/shell.md) */
 const char *shell_state(const char *key);
 
+void shell_mkdirs(const char *path);
 void logmsg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /* ---------- drawing shared by the shell's own screens ---------- */
@@ -114,7 +115,28 @@ void shell_phone_screen(int want);           /* the phone wants the screen, or i
 void shell_phone_changed(void);              /* something a phone screen or the idle screen shows has changed */
 void shell_show_history(int on);
 
-void phone_reload_account(void);             /* the SIP settings file has changed */
+void phone_reload_account(void);             /* a SIP settings file has changed */
+void phone_prefill(const char *number, int acct);   /* the dialler with a number in it; acct 0 to 5, or -1 for the usual one */
+void phone_dial_from(int acct);              /* the dialler, set to call from that account */
+void phone_toggle_dnd(void);
+int phone_dnd(void);
+int phone_messages(void);                    /* new voice messages waiting, over all accounts */
+int phone_accounts(void);                    /* how many accounts are switched on */
+int phone_account_line(int k, char *out, size_t n, uint32_t *colour, int *is_default);
+
+/* ---------- contacts (contacts.c): a list of names and numbers ---------- */
+
+void contacts_init(void);
+const char *contacts_name(const char *number);   /* NULL if the number is not in the list */
+void contacts_open(const char *find);        /* show the list */
+void contacts_open_add(const char *number, const char *name);   /* straight to adding this number */
+void contacts_draw(void);
+void contacts_key(int code, int down);
+void contacts_touch(int state, int x, int y);
+int contacts_timeout(long long now);
+void contacts_tick(long long now);
+const char *contacts_state(const char *key);
+void shell_show_contacts(int on);
 int phone_volume(int which);                 /* T48AC_VOL_* */
 void phone_set_volume(int which, int level); /* stores it and tells the audio service; plays nothing */
 
@@ -158,6 +180,8 @@ int sipc_timeout(long long now);
 void sipc_tick(long long now);
 void sipc_readable(void);
 void sipc_cmd(const char *command, const char *params);
+/* the same, for one account ("sip:user@domain"): the call goes out from it */
+void sipc_cmd_from(const char *account, const char *command, const char *params);
 
 /* the audio service's control socket (audioc.c) */
 void audioc_init(const char *socket_path);
@@ -190,10 +214,10 @@ const char *backlight_state(const char *key);
 
 /* ---------- lamps (leds.c): a place for the driver of issue #3 ---------- */
 
-enum led { LAMP_POWER, LAMP_SPEAKER, LAMP_HEADSET, LAMP_MUTE, LAMP_MESSAGE, LAMP_COUNT };
-enum led_mode { LAMP_OFF, LAMP_ON, LAMP_BLINK };
+enum led { LAMP_MESSAGE, LAMP_SPEAKER, LAMP_HEADSET, LAMP_MUTE, LAMP_COUNT };
+enum led_mode { LAMP_OFF, LAMP_ON, LAMP_BLINK, LAMP_SLOW };
 void leds_set(enum led which, enum led_mode mode);
-const char *leds_state(const char *name);    /* "off", "on", "blink", or NULL for no such lamp */
+const char *leds_state(const char *name);    /* "off", "on", "blink", "slow", or NULL for no such lamp */
 
 /* ---------- installed apps ---------- */
 

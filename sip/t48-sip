@@ -1,13 +1,15 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Start baresip for the T48S (issue #25). Reads the owner's SIP account from
-# the settings file, writes baresip's accounts file into a run directory next
-# to a copy of the config, and runs baresip there. Meant to be run by runit.
+# Start baresip for the T48S (issue #25). Reads the owner's SIP accounts from
+# the settings files (up to six, issue #36), writes baresip's accounts file
+# into a run directory next to a copy of the config, and runs baresip there.
+# Meant to be run by runit.
 #
 # The settings file is key=value, one per line, # for comments
 # (sip/config/sip.example). Paths can be moved for testing:
-#   T48_SIP_SETTINGS  default /data/config/sip
+#   T48_SIP_SETTINGS  default /data/config/sip: account 1. Accounts 2 to 6
+#                     are the same name with the number on the end (sip2).
 #   T48_SIP_CONFIG    default /data/local/sip/config if present,
 #                     else /usr/share/t48/sip/config
 #   T48_SIP_RUN       default /run/t48-sip (holds the password: mode 0700).
@@ -25,49 +27,87 @@ BARESIP=${BARESIP:-baresip}
 
 die() { echo "t48-sip: $*" >&2; exit 1; }
 
-[ -f "$SETTINGS" ] || die "no settings file $SETTINGS (see sip.example)"
 [ -f "$CONFIG" ] || die "no config $CONFIG"
 
-user= password= domain= auth_user= display_name= transport=udp proxy= regint=600
-while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in ''|'#'*) continue ;; esac
-    key=${line%%=*}
-    val=${line#*=}
-    case "$key" in
-        user) user=$val ;;
-        password) password=$val ;;
-        domain) domain=$val ;;
-        auth_user) auth_user=$val ;;
-        display_name) display_name=$val ;;
-        transport) transport=$val ;;
-        outbound_proxy) proxy=$val ;;
-        register_seconds) regint=$val ;;
-        *) echo "t48-sip: ignoring unknown setting '$key'" >&2 ;;
-    esac
-done < "$SETTINGS"
+# One account from one settings file, as a line of baresip's accounts file in
+# $line. Returns 1 (and says why) if the file does not make an account.
+account() {
+    f=$1
+    user= password= domain= auth_user= display_name= transport=udp proxy= regint=600 enabled=on mwi=on
+    while IFS= read -r l || [ -n "$l" ]; do
+        case "$l" in ''|'#'*) continue ;; esac
+        key=${l%%=*}
+        val=${l#*=}
+        case "$key" in
+            user) user=$val ;;
+            password) password=$val ;;
+            domain) domain=$val ;;
+            auth_user) auth_user=$val ;;
+            display_name) display_name=$val ;;
+            transport) transport=$val ;;
+            outbound_proxy) proxy=$val ;;
+            register_seconds) regint=$val ;;
+            enabled) enabled=$val ;;
+            mwi) mwi=$val ;;
+            label|voicemail) ;;    # the shell's business
+            *) echo "t48-sip: $f: ignoring unknown setting '$key'" >&2 ;;
+        esac
+    done < "$f"
 
-[ -n "$user" ] || die "settings: user is missing"
-[ -n "$domain" ] || die "settings: domain is missing"
-case "$transport" in udp|tcp|tls) ;; *) die "settings: transport must be udp, tcp or tls" ;; esac
-case "$regint" in ''|*[!0-9]*) die "settings: register_seconds must be a number" ;; esac
-# baresip's accounts line has no quoting for these
-for v in "$user" "$domain" "$auth_user" "$password" "$proxy"; do
-    case "$v" in *[\;\<\>\"\ ]*) die "settings: ; < > \" and spaces are not allowed in values" ;; esac
-done
-case "$display_name" in *[\"\<\>]*) die "settings: display_name cannot hold \" < or >" ;; esac
+    case "$enabled" in off|no|false|0) echo "t48-sip: $f: switched off" >&2; return 1 ;; esac
+    [ -n "$user" ] || { echo "t48-sip: $f: user is missing" >&2; return 1; }
+    [ -n "$domain" ] || { echo "t48-sip: $f: domain is missing" >&2; return 1; }
+    case "$transport" in udp|tcp|tls) ;; *) echo "t48-sip: $f: transport must be udp, tcp or tls" >&2; return 1 ;; esac
+    case "$regint" in ''|*[!0-9]*) echo "t48-sip: $f: register_seconds must be a number" >&2; return 1 ;; esac
+    # baresip's accounts line has no quoting for these
+    for v in "$user" "$domain" "$auth_user" "$password" "$proxy"; do
+        case "$v" in *[\;\<\>\"\ ]*) echo "t48-sip: $f: ; < > \" and spaces are not allowed in values" >&2; return 1 ;; esac
+    done
+    case "$display_name" in *[\"\<\>]*) echo "t48-sip: $f: display_name cannot hold \" < or >" >&2; return 1 ;; esac
+
+    line="<sip:$user@$domain;transport=$transport>"
+    [ -n "$display_name" ] && line="\"$display_name\" $line"
+    [ -n "$auth_user" ] && line="$line;auth_user=$auth_user"
+    [ -n "$password" ] && line="$line;auth_pass=$password"
+    [ -n "$proxy" ] && line="$line;outbound=\"$proxy\""
+    case "$mwi" in off|no|false|0) mwi=no ;; *) mwi=yes ;; esac
+    line="$line;regint=$regint;answermode=manual;mwi=$mwi"
+    return 0
+}
 
 umask 077
 mkdir -p "$RUN"
 chmod 700 "$RUN"
+
+# A restart (t48-apply sip, after an account is changed) kills the old baresip
+# and starts us a second later. If the old one is still letting go of the SIP
+# port, wait for it rather than fail; after five seconds it is made to go.
+if [ -f "$RUN/pid" ]; then
+    old=$(cat "$RUN/pid")
+    i=0
+    # only ever a baresip: the number may since have gone to some other program
+    while [ -n "$old" ] && [ "$old" != $$ ] && grep -q baresip "/proc/$old/cmdline" 2>/dev/null; do
+        i=$((i + 1))
+        [ $i -gt 25 ] && { kill -9 "$old" 2>/dev/null || true; break; }
+        sleep 0.2
+    done
+fi
+echo $$ > "$RUN/pid"
+
 grep -v '^t48ctrl_socket' "$CONFIG" > "$RUN/config"
 printf 't48ctrl_socket\t\t%s\n' "$RUN/ctrl.sock" >> "$RUN/config"
 
-line="<sip:$user@$domain;transport=$transport>"
-[ -n "$display_name" ] && line="\"$display_name\" $line"
-[ -n "$auth_user" ] && line="$line;auth_user=$auth_user"
-[ -n "$password" ] && line="$line;auth_pass=$password"
-[ -n "$proxy" ] && line="$line;outbound=\"$proxy\""
-line="$line;regint=$regint;answermode=manual"
-printf '# Written by t48-sip from %s; edits here are lost\n%s\n' "$SETTINGS" "$line" > "$RUN/accounts"
+# account 1 is the settings file itself, accounts 2 to 6 the files beside it
+# with that number on the end: /data/config/sip, sip2, ... sip6
+printf '# Written by t48-sip from %s and %s2 to 6; edits here are lost\n' "$SETTINGS" "$SETTINGS" > "$RUN/accounts"
+n=0
+for i in "" 2 3 4 5 6; do
+    [ -f "$SETTINGS$i" ] || continue
+    if account "$SETTINGS$i"; then
+        printf '%s\n' "$line" >> "$RUN/accounts"
+        n=$((n + 1))
+    fi
+done
+[ $n -gt 0 ] || die "no usable account in $SETTINGS or ${SETTINGS}2 to 6 (see sip.example)"
 
 exec "$BARESIP" -f "$RUN" "$@"

@@ -1,0 +1,34 @@
+# Do not disturb: callers are told the phone is not available, nothing rings, and the call is listed as missed.
+waitstate reg ok 8000
+waitstate audio up 3000
+key right
+expectstate dnd on
+wait 200
+shot shots/phone-dnd.png
+run $FAR $BOB cmd dial 1001
+waitstate missed 1 5000
+run $FAR waitlog $BOBLOG CALL_CLOSED.*480 8
+expectstate phone idle
+expect idle
+expectstate audio.ring 0
+expectstate last m:1002
+expectstate led.message on
+# calls out still work
+key 1
+key 0
+key 0
+key 3
+key ok
+waitstate phone outgoing 2000
+run $FAR $CAROL waitcall incoming 5
+key x
+waitstate phone idle 5000
+# off again, by touch: the next call rings
+touch 554 420
+expectstate dnd off
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+waitstate audio.ring 1 2000
+key x
+waitstate phone idle 5000
+quit

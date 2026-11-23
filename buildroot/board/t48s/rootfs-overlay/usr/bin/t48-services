@@ -1,0 +1,33 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# t48-services: lay out /run/service for runsvdir (docs/boot.md). Run at boot,
+# and again by hand after adding a service.
+#
+# A service is a folder with a "run" script. The system's are in /etc/service;
+# the owner's are in /data/local/service and win when the name is the same, so
+# any of ours can be replaced, the shell included. An empty file called "down"
+# in the owner's folder keeps a service of that name from starting.
+# T48_NO_LOCAL=1 leaves the owner's out (the rescue menu's "start without
+# changes").
+S=/run/service
+mkdir -p $S
+DIRS="/etc/service/*"
+[ -n "$T48_NO_LOCAL" ] || DIRS="$DIRS /data/local/service/*"
+for d in $DIRS; do
+    [ -d "$d" ] || continue
+    n=${d##*/}
+    mkdir -p $S/$n/log /var/log/t48/$n
+    rm -f $S/$n/run $S/$n/finish $S/$n/down
+    [ -e "$d/down" ] && : > $S/$n/down
+    if [ -x "$d/run" ]; then
+        ln -s "$d/run" $S/$n/run
+        [ -x "$d/finish" ] && ln -s "$d/finish" $S/$n/finish
+    elif [ -x /etc/service/$n/run ]; then
+        # only a "down" file: our service, switched off
+        ln -s /etc/service/$n/run $S/$n/run
+    fi
+    # each service's output: /var/log/t48/NAME/current, three files of 200 KB at most
+    [ -f /var/log/t48/$n/config ] || printf 's200000\nn3\n' > /var/log/t48/$n/config
+    printf '#!/bin/sh\nexec svlogd -tt /var/log/t48/%s\n' "$n" > $S/$n/log/run
+    chmod +x $S/$n/log/run
+done

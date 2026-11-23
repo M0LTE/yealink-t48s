@@ -65,9 +65,9 @@ cat /run/t48-access/status
 | `/etc/t48-dev/authorized_keys` | only in a development build |
 | `/run/t48-access/status` | what `t48-access` last did, for the Access page: `dev`, `ssh`, `host_key`, `door`, `door_until`, `key` (one a key: kind and comment), `keys` |
 
-`/data` is in RAM today, so the host key is new at every boot and the owner's keys and the SSH setting are lost at power off. Nothing here needs to change when `/data` moves to flash (issue #29): the host key and the keys are already in the folder that will be kept.
+Once `/data` is in flash ([flash.md](flash.md)) the host key, the owner's keys and the SSH setting are kept across restarts. Until `t48-data format` has been run, `/data` is in RAM: the host key is new at every boot and the rest is lost at power off.
 
-The password door sets root's password in `/etc/shadow` and starts dropbear without `-s`; closing it puts `*` back and restarts dropbear with `-s`. Logged-in sessions carry on through both. When the system image becomes read-only, `/etc/shadow` has to be somewhere writable; `set_password` in the script is the one place that touches it.
+The password door sets root's password in `/etc/shadow` and starts dropbear without `-s`; closing it puts `*` back and restarts dropbear with `-s`. Logged-in sessions carry on through both. The system image is read-only, so `rcS` mounts a copy of `/etc/shadow` from `/run` over it, and `set_password` writes it in place.
 
 ## Testing
 

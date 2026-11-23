@@ -4,9 +4,12 @@
  * (t48-audiod, issue #24). The boundary is in t48audio_proto.h and
  * docs/audiod.md.
  *
- *  - One call stream per baresip process, shared by the source ("mic") and
- *    the player ("speaker"). Whichever is opened first opens the stream; it
- *    closes when both are gone.
+ *  - One call stream per baresip process, shared by every source ("mic")
+ *    and player ("speaker"). The first to open opens the stream; it closes
+ *    when all are gone. There is one of each per call, and the phone can
+ *    have two calls (one on hold, or one being transferred): each source
+ *    gets the microphone frame, and the players' frames are added together.
+ *    A call on hold sends and plays nothing, so in practice one is heard.
  *  - The audio service is the clock. Every 20 ms it sends one microphone
  *    frame, and this module answers at once with one loudspeaker frame.
  *    Both directions run off the codec's own sample clock, so there is no
@@ -36,6 +39,7 @@
 #include "t48audio_proto.h"
 
 enum {
+	MAX_CALLS = 4,        /* sources, and players, at once */
 	RETRY_MS = 500,       /* between attempts to reach the service */
 	STALL_MS = 500,       /* no frame from the service for this long: gone */
 };
@@ -62,8 +66,8 @@ static struct {
 	mtx_t lock;
 	thrd_t thread;
 	RE_ATOMIC bool run;
-	struct ausrc_st *src;     /* NULL when no source is open */
-	struct auplay_st *play;   /* NULL when no player is open */
+	struct ausrc_st *src[MAX_CALLS];     /* NULL where none is open */
+	struct auplay_st *play[MAX_CALLS];
 	int fd;                   /* the service, or -1; the thread's own */
 	char path[108];
 	uint64_t frames;          /* since the stream opened, for timestamps */
@@ -208,20 +212,38 @@ static void service_open(void)
 static bool stream_tick(int16_t *mic, int16_t *spk)
 {
 	struct auframe af;
+	int16_t one[T48A_FRAME], in[T48A_FRAME];
 	bool played = false;
+	size_t i, k;
 
 	mtx_lock(&cs.lock);
 
-	if (cs.src) {
-		auframe_init(&af, AUFMT_S16LE, mic, T48A_FRAME, T48A_SRATE, 1);
+	for (i = 0; i < MAX_CALLS; i++) {
+		if (!cs.src[i])
+			continue;
+		/* a source may change the frame it is given: each its own */
+		memcpy(in, mic, sizeof(in));
+		auframe_init(&af, AUFMT_S16LE, in, T48A_FRAME, T48A_SRATE, 1);
 		af.timestamp = cs.frames * T48A_FRAME_MS * 1000;
-		cs.src->rh(&af, cs.src->arg);
+		cs.src[i]->rh(&af, cs.src[i]->arg);
 	}
 
-	if (cs.play) {
-		auframe_init(&af, AUFMT_S16LE, spk, T48A_FRAME, T48A_SRATE, 1);
+	for (i = 0; i < MAX_CALLS; i++) {
+		if (!cs.play[i])
+			continue;
+		memset(one, 0, sizeof(one));
+		auframe_init(&af, AUFMT_S16LE, played ? one : spk, T48A_FRAME,
+			     T48A_SRATE, 1);
 		af.timestamp = cs.frames * T48A_FRAME_MS * 1000;
-		cs.play->wh(&af, cs.play->arg);
+		cs.play[i]->wh(&af, cs.play[i]->arg);
+		if (played) {
+			for (k = 0; k < T48A_FRAME; k++) {
+				int32_t v = spk[k] + one[k];
+
+				spk[k] = (int16_t)(v > 32767 ? 32767 :
+						   v < -32768 ? -32768 : v);
+			}
+		}
 		played = true;
 	}
 
@@ -229,6 +251,18 @@ static bool stream_tick(int16_t *mic, int16_t *spk)
 	mtx_unlock(&cs.lock);
 
 	return played;
+}
+
+
+/* with the lock held */
+static bool stream_idle(void)
+{
+	size_t i;
+
+	for (i = 0; i < MAX_CALLS; i++)
+		if (cs.src[i] || cs.play[i])
+			return false;
+	return true;
 }
 
 
@@ -349,10 +383,13 @@ static void src_destructor(void *arg)
 	struct ausrc_st *st = arg;
 	bool last;
 
+	size_t i;
+
 	mtx_lock(&cs.lock);
-	if (cs.src == st)
-		cs.src = NULL;
-	last = !cs.src && !cs.play;
+	for (i = 0; i < MAX_CALLS; i++)
+		if (cs.src[i] == st)
+			cs.src[i] = NULL;
+	last = stream_idle();
 	mtx_unlock(&cs.lock);
 
 	if (last)
@@ -365,10 +402,13 @@ static void play_destructor(void *arg)
 	struct auplay_st *st = arg;
 	bool last;
 
+	size_t i;
+
 	mtx_lock(&cs.lock);
-	if (cs.play == st)
-		cs.play = NULL;
-	last = !cs.src && !cs.play;
+	for (i = 0; i < MAX_CALLS; i++)
+		if (cs.play[i] == st)
+			cs.play[i] = NULL;
+	last = stream_idle();
 	mtx_unlock(&cs.lock);
 
 	if (last)
@@ -381,6 +421,7 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 		     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
+	size_t i;
 	int err;
 	(void)as;
 	(void)dev;
@@ -401,13 +442,15 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 	st->arg = arg;
 
 	mtx_lock(&cs.lock);
-	if (cs.src) {
+	for (i = 0; i < MAX_CALLS && cs.src[i]; i++)
+		;
+	if (i == MAX_CALLS) {
 		mtx_unlock(&cs.lock);
-		warning("t48audio: source already open\n");
+		warning("t48audio: too many sources open\n");
 		mem_deref(st);
 		return EBUSY;
 	}
-	cs.src = st;
+	cs.src[i] = st;
 	mtx_unlock(&cs.lock);
 
 	err = stream_open();
@@ -426,6 +469,7 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 		      auplay_write_h *wh, void *arg)
 {
 	struct auplay_st *st;
+	size_t i;
 	int err;
 	(void)ap;
 	(void)dev;
@@ -445,13 +489,15 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 	st->arg = arg;
 
 	mtx_lock(&cs.lock);
-	if (cs.play) {
+	for (i = 0; i < MAX_CALLS && cs.play[i]; i++)
+		;
+	if (i == MAX_CALLS) {
 		mtx_unlock(&cs.lock);
-		warning("t48audio: player already open\n");
+		warning("t48audio: too many players open\n");
 		mem_deref(st);
 		return EBUSY;
 	}
-	cs.play = st;
+	cs.play[i] = st;
 	mtx_unlock(&cs.lock);
 
 	err = stream_open();

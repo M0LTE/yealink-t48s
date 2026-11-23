@@ -1,0 +1,3 @@
+#!/bin/sh
+# an account that baresip will not take should not spin
+exec sleep 3

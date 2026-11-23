@@ -6,7 +6,7 @@ Press **Down** on the idle screen, or touch **Settings**. Arrows and OK, or touc
 
 | | |
 |---|---|
-| ![settings](img/settings.png) | ![the account](img/settings-account.png) |
+| ![settings](img/settings.png) | ![the accounts](img/settings-accounts.png) |
 | ![keyboard](img/keyboard.png) | ![typing a password](img/keyboard-password.png) |
 | ![time zone](img/settings-timezone.png) | ![sound](img/settings-sound.png) |
 
@@ -14,7 +14,7 @@ Press **Down** on the idle screen, or touch **Settings**. Arrows and OK, or touc
 
 | Page | What it sets | Takes effect |
 |---|---|---|
-| Phone account | user, password, domain, server or proxy, login name, name shown to others, transport | on leaving the page: baresip is restarted if it is running |
+| Phone accounts | up to six accounts ([phone.md](phone.md#several-accounts)), and which is the usual one for calls. For each: user, password, domain, server or proxy, login name, name shown to others, transport, a short name for this phone's screens, the voicemail number, in use or not, and Remove | on leaving an account's page: baresip is restarted if it is running. The usual account changes at once |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server | on leaving the page |
 | Date and time | time zone, from a list | at once, in the shell and in apps started afterwards |
 | Sound | ringer, handset, speakerphone and headset levels, 0 to 15 | at once, through the audio service. Nothing is played. The volume keys change the same levels |
@@ -41,7 +41,9 @@ Plain text in `/data/config`, one file per subject, `key=value` a line, `#` for 
 
 | File | Keys |
 |---|---|
-| `sip` | `user`, `password`, `domain`, `outbound_proxy`, `auth_user`, `display_name`, `transport` (udp, tcp, tls), `register_seconds`: the file `t48-sip` has always read ([sip.md](sip.md#running-it)) |
+| `sip` | account 1: `user`, `password`, `domain`, `outbound_proxy`, `auth_user`, `display_name`, `transport` (udp, tcp, tls), `register_seconds`: the file `t48-sip` has always read ([sip.md](sip.md#running-it)). Also `enabled` (on or off), `label` (the name on this phone's screens), `voicemail` (the number the Message key calls), `mwi` (off: do not ask the server about waiting messages) |
+| `sip2` to `sip6` | accounts 2 to 6, the same keys |
+| `phone` | `default_account`: 1 to 6, the account calls go out from unless another is chosen. `dnd`: on or off |
 | `network` | `mode` (dhcp or static), `address`, `netmask`, `gateway`, `dns` |
 | `system` | `timezone`: a name from the list (`Europe/London`), or any POSIX TZ string (`XYZ-3`) for a zone the list lacks |
 | `audio` | `ringer`, `handset`, `speaker`, `headset`: 0 to 15 |
@@ -60,7 +62,7 @@ t48-apply network          # make the running phone follow a file changed by han
 
 `t48-config` is the shell's own program under another name, so there is one implementation. `t48-apply` ([the script](../buildroot/board/t48s/rootfs-overlay/usr/bin/t48-apply)) is what the shell runs when a page that needs it is left.
 
-**Saving is atomic**: the new file is written beside the old one, synced, renamed over it, and the folder synced. A power cut leaves the old file or the new one. All reading and writing goes through two functions at the top of `config.c` (load a file, save a file), which is the part to replace when `/data` moves from RAM to flash (#29). Until then `/data` is in RAM and settings are lost at power off.
+**Saving is atomic**: the new file is written beside the old one, synced, renamed over it, and the folder synced. A power cut leaves the old file or the new one. All reading and writing goes through two functions at the top of `config.c` (load a file, save a file), which did not need to change when `/data` moved to flash (#29, [flash.md](flash.md)): once `t48-data format` has been run on a phone, settings survive a restart; before that `/data` is in RAM and they are lost at power off.
 
 ## An app's settings
 
@@ -75,11 +77,19 @@ From the app's manifest ([app-protocol.md](app-protocol.md#the-manifest)): each 
 
 ![an app's settings](img/settings-app.png)
 
+## Phone accounts
+
+| | |
+|---|---|
+| ![the accounts](img/settings-accounts-two.png) | ![one account](img/settings-account-2.png) |
+
+An account with no user or no domain is not used. Removing an account asks first and deletes its file.
+
 The app gets each value in a SETTING message when it starts. "Back to the app's own defaults" forgets the owner's values.
 
 ## Testing
 
-Brightness is tested in `06-backlight.script` and the Access page in `07-access.script` ([shell.md](shell.md#the-backlight), [access.md](access.md#testing)). `make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
+Brightness is tested in `06-backlight.script` and the Access page in `07-access.script` ([shell.md](shell.md#the-backlight), [access.md](access.md#testing)). `make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, the first account, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
 
 ## On the phone (2026-11-23)
 
@@ -101,4 +111,4 @@ Not tried on the phone: a fixed network address (it would cut the test connectio
 
 - The network page has no IPv6, VLAN or 802.1X, and a fixed address takes its time from pool.ntp.org.
 - The time zone list is about 55 places with their rules built in (there are no zone files in the image); other zones need a TZ string set over SSH.
-- Settings are in RAM until #29.
+- On a phone where the flash has not been set up (`t48-data format`), settings are in RAM.

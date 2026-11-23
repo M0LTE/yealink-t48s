@@ -1,0 +1,238 @@
+# Several accounts (issue 36): a second one is entered in Settings, both register, calls go out from the
+# one chosen and say which one was called, the history keeps it, and the account is removed again.
+waitstate reg ok 8000
+waitstate audio up 3000
+expectstate accounts 1
+key down
+expect settings
+key ok
+expectstate settings.page accounts
+key down
+expectstate settings.row Account_2
+expectstate settings.value not_set
+key ok
+expectstate settings.page sip
+# user 1004
+key ok
+key hash
+key hash
+key 1
+key 0
+key 0
+key 4
+key ok
+expectstate cfg.sip2.user 1004
+# password test-only-1004, typed blind on the keypad
+key down
+key ok
+key 8
+key 3
+key 3
+key 7
+key 7
+key 7
+key 7
+key 8
+key 1
+key 1
+key 1
+key 1
+key 6
+key 6
+key 6
+wait 1000
+key 6
+key 6
+key 5
+key 5
+key 5
+key 9
+key 9
+key 9
+key hash
+key hash
+key star
+key star
+key star
+key star
+key star
+key 1
+key 0
+key 0
+key 4
+key ok
+run grep -qx password=test-only-1004 phone-config/sip2
+# domain 127.0.0.1
+key down
+key ok
+key hash
+key hash
+key 1
+key 2
+key 7
+key star
+key 0
+key star
+key 0
+key star
+key 1
+expectstate kbd.text 127.0.0.1
+key ok
+# a name for it on this phone
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Name_on_this_phone_(optional)
+key ok
+key 9
+key 6
+key 6
+key 6
+key 7
+key 7
+key 7
+key 5
+key 5
+expectstate kbd.text work
+key ok
+wait 200
+shot shots/settings-account-2.png
+# leaving the page restarts the phone service with both accounts
+key x
+expectstate settings.page accounts
+wait 200
+shot shots/settings-accounts-two.png
+key x
+key x
+expect idle
+waitstate sip up 10000
+waitstate reg.2 ok 15000
+waitstate reg.1 ok 15000
+expectstate accounts 2
+expectstate acct.default 1
+wait 300
+shot shots/phone-idle-two-accounts.png
+# ---- a call out from the second account: Right in the dialler chooses it ----
+key 1
+key 0
+key 0
+key 2
+expectstate acct 1
+key right
+expectstate acct 2
+wait 200
+shot shots/phone-dial-account.png
+hook off
+waitstate phone outgoing 2000
+run $FAR waitlog $BOBLOG CALL_INCOMING.*1004@ 8
+run $FAR $BOB accept
+waitstate phone incall 5000
+expectstate acct 2
+hook on
+waitstate phone idle 5000
+expectstate last o:1002
+expectstate last.acct 2
+# Redial calls from the same account again
+run : > $BOBLOG
+key redial
+waitstate phone outgoing 2000
+expectstate acct 2
+run $FAR waitlog $BOBLOG CALL_INCOMING.*1004@ 8
+key x
+waitstate phone idle 5000
+# the usual account still is the first: a plain call goes out from 1001
+run : > $BOBLOG
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone outgoing 2000
+run $FAR waitlog $BOBLOG CALL_INCOMING.*1001@ 8
+key x
+waitstate phone idle 5000
+expectstate last.acct 1
+# ---- calls in: the screen says which account was called ----
+run $FAR $CAROL cmd dial 1004
+waitstate phone incoming 5000
+expectstate acct 2
+expectstate peer 1003
+wait 300
+shot shots/phone-incoming-account.png
+key speaker
+waitstate phone incall 5000
+run $FAR $CAROL cmd hangup
+waitstate phone ended 5000
+key x
+waitstate phone idle 3000
+expectstate last i:1003
+expectstate last.acct 2
+run $FAR $CAROL cmd dial 1001
+waitstate phone incoming 5000
+expectstate acct 1
+key x
+waitstate phone idle 5000
+expectstate last.acct 1
+# a touch on an account's line on the idle screen opens the dialler for it
+touch 560 306
+expect call
+expectstate phone dial
+expectstate acct 2
+key x
+expect idle
+key up
+expect history
+wait 200
+shot shots/phone-history-accounts.png
+key x
+# ---- the usual account can be the second ----
+key down
+key ok
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Usual_account_for_calls
+key ok
+expectstate cfg.phone.default_account 2
+expectstate acct.default 2
+key ok
+expectstate acct.default 1
+# ---- remove the second account: it asks, then the phone service restarts with one ----
+key up
+key up
+key up
+key up
+key up
+expectstate settings.row Account_2
+key ok
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Remove_this_account
+key ok
+expectstate overlay confirm
+wait 200
+shot shots/settings-account-remove.png
+key ok
+expectstate settings.page accounts
+run test ! -e phone-config/sip2
+key x
+key x
+expect idle
+waitstate sip up 10000
+waitstate reg ok 15000
+expectstate accounts 1
+quit

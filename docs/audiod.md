@@ -63,6 +63,7 @@ The contract proposed in #25 is accepted with three changes. It is written down 
 - Unix socket `/run/t48-audiod/call.sock`, root only. Messages are `u16 type, u16 len, payload`, like the app protocol.
 - 16 kHz, mono, signed 16-bit. **The service is the clock:** it sends one MIC frame every 20 ms and baresip answers each at once with one SPK frame. Both directions run off the codec's sample clock, so nothing drifts.
 - Routes, volume, mute, ringing and tones are not on this socket. baresip never knows which route is live.
+- One stream however many calls baresip has (two at most on the phone, #27): its module gives the microphone frame to each call and adds what the calls play together. A call on hold plays nothing, so the service still hears one.
 
 What changed:
 

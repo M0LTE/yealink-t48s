@@ -67,7 +67,7 @@ jobs:
           path: linux-3.6.11.tar.xz
           key: linux-3.6.11
 
-      - name: Kernel (kexec image, Buildroot root filesystem built in)
+      - name: "Kernel (kexec image: first stage and system image built in)"
         run: |
           [ -f linux-3.6.11.tar.xz ] || curl -fsSLO https://cdn.kernel.org/pub/linux/kernel/v3.x/linux-3.6.11.tar.xz
           echo "$LINUX_SHA256  linux-3.6.11.tar.xz" | sha256sum -c -
@@ -75,15 +75,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/k"
           tar -C "$RUNNER_TEMP/k" -xf linux-3.6.11.tar.xz
           cp -r kernel "$RUNNER_TEMP/k/"
-          cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" "$RUNNER_TEMP/k/"
-          docker run --rm -u "$(id -u):$(id -g)" -v "$RUNNER_TEMP/k:/w" -w /w -e ROOTFS=rootfs.cpio \
+          cp "$RUNNER_TEMP/br/output/images/firststage.cpio" "$RUNNER_TEMP/br/output/images/system.img" "$RUNNER_TEMP/k/"
+          docker run --rm -u "$(id -u):$(id -g)" -v "$RUNNER_TEMP/k:/w" -w /w -e ROOTFS=firststage.cpio -e SYSTEM=system.img \
             t48s-kbuild:trusty sh kernel/build.sh kexec
 
       - name: Collect outputs
         run: |
           mkdir out
           cp "$RUNNER_TEMP/k/Image-kexec" out/
-          cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" out/
+          cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" "$RUNNER_TEMP/br/output/images/system.img" out/
           if [ -f "$RUNNER_TEMP/t48s-sdk.tar.gz" ]; then cp "$RUNNER_TEMP/t48s-sdk.tar.gz" out/; fi
           gzip -9 out/rootfs.cpio
           (cd out && sha256sum * > SHA256SUMS)
@@ -117,4 +117,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
-            --notes "Image-kexec boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). It carries no SSH keys and no password, and SSH is off until it is turned on at the phone's screen (Settings, Access; docs/access.md). rootfs.cpio.gz is the root filesystem built into it; t48s-sdk.tar.gz is the app SDK (sdk/README.md)."
+            --notes "Image-kexec boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). It carries no SSH keys and no password, and SSH is off until it is turned on at the phone's screen (Settings, Access; docs/access.md). system.img is the system image built into it (docs/boot.md) and rootfs.cpio.gz the same files as an archive; t48s-sdk.tar.gz is the app SDK (sdk/README.md)."

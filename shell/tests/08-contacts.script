@@ -1,0 +1,139 @@
+# Contacts, do not disturb and the tidier call history (issue 27), with no services behind them.
+wait 300
+expect idle
+# ---- contacts: Left on the idle screen, or its button ----
+key left
+expect contacts
+expectstate contacts 0
+shot shots/contacts-empty.png
+# Add: the name on the keypad (2 2 is b, 6 6 6 is o), then the number
+touch 246 410
+expectstate contacts.mode name
+expectstate kbd open
+key 2
+key 2
+wait 1000
+key 6
+key 6
+key 6
+wait 1000
+key 2
+key 2
+expectstate kbd.text bob
+key ok
+expectstate contacts.mode number
+key 1
+key 0
+key 0
+key 2
+expectstate kbd.text 1002
+shot shots/contacts-number.png
+key ok
+expectstate contacts.mode list
+expectstate contacts 1
+expectstate contacts.sel bob
+# a second one, by OK on the Add button's neighbour: the list is kept in order of name
+touch 246 410
+key 2
+wait 1000
+key 6
+wait 1000
+key 9
+key 9
+key 9
+expectstate kbd.text amy
+key ok
+key 1
+key 0
+key 0
+key 3
+key ok
+expectstate contacts 2
+expectstate contacts.sel amy
+run grep -qx 'amy|1003' simdata/state/contacts
+run grep -qx 'bob|1002' simdata/state/contacts
+shot shots/contacts.png
+# Edit: change amy's number
+touch 396 410
+expectstate kbd.text amy
+key ok
+expectstate kbd.text 1003
+key x
+key 7
+key ok
+expectstate contacts.number 1007
+# Down and OK: bob's number goes to the dialler, with his name under it
+key down
+expectstate contacts.sel bob
+key ok
+expect call
+expectstate phone dial
+expectstate number 1002
+shot shots/contacts-dial.png
+# calling with nothing to call through fails at once; the history has the name
+key ok
+expectstate phone ended
+expectstate last o:1002
+expectstate last.name bob
+key x
+expect idle
+# a number typed by hand that is not in the list
+key 5
+key 5
+key ok
+key x
+expect idle
+expectstate history 2
+# ---- the history: names, Add contact, Delete, Clear all ----
+key up
+expect history
+shot shots/history-names.png
+# Add contact for 55 (the top line): the number is already filled in
+touch 300 410
+expect contacts
+expectstate contacts.mode name
+key 3
+key 3
+key ok
+expectstate kbd.text 55
+key ok
+expectstate contacts 3
+expectstate contacts.sel e
+key x
+expect idle
+key up
+expectstate last.name e
+# Delete takes one line out, Clear all asks first
+touch 500 410
+expectstate history 1
+touch 690 410
+shot shots/history-clear.png
+expectstate history 1
+touch 690 410
+expectstate history 0
+key x
+expect idle
+# ---- delete a contact: it asks ----
+key left
+touch 546 410
+expectstate contacts.mode confirm
+shot shots/contacts-delete.png
+key x
+expectstate contacts 3
+touch 546 410
+key ok
+expectstate contacts 2
+key x
+expect idle
+# ---- do not disturb: Right on the idle screen, or its button; it is remembered ----
+expectstate dnd off
+key right
+expectstate dnd on
+expectstate cfg.phone.dnd on
+shot shots/idle-dnd.png
+touch 554 420
+expectstate dnd off
+expectstate cfg.phone.dnd off
+# the message lamp is off with nothing to say
+expectstate led.message off
+quit

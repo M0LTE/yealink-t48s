@@ -14,3 +14,7 @@ rm -rf "$TARGET_DIR"/root/.ssh
 ln -s /data/access/ssh "$TARGET_DIR"/root/.ssh
 # dropbear's own start script and key folder are not used: t48-access runs it
 rm -f "$TARGET_DIR"/etc/dropbear
+# The system image is read-only (docs/boot.md). Our test builds' keys are mounted
+# on /etc/t48-dev by the first stage.
+mkdir -p "$TARGET_DIR"/etc/t48-dev
+chmod 700 "$TARGET_DIR"/etc/t48-dev

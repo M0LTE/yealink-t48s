@@ -1,0 +1,75 @@
+# How the phone starts
+
+Issue [#17](https://github.com/M0LTE/yealink-t48s/issues/17). Design: [architecture.md](architecture.md#1-userspace-base).
+
+A boot is made of two files, both from one Buildroot run:
+
+| File | What | Size |
+|---|---|---|
+| `firststage.cpio` | the first stage: busybox, dropbear and one script. Built into the kernel image | about 1 MB |
+| `system.img` | the system image: the whole root filesystem as squashfs, read-only | about 4 MB |
+
+```
+ kernel starts
+   -> first stage (/init, buildroot/board/t48s/firststage/init)
+        finds the system image, mounts it read-only, puts /run and /tmp in RAM
+        nothing usable?  -> stays up as RESCUE
+   -> the system image's own init
+        rcS: /data (flash or RAM), network, SSH
+        runit: shell, audio service, baresip, watchdog
+```
+
+## Where the system image comes from
+
+The first stage looks, in this order:
+
+1. **In RAM beside the kernel**, as the file `/system.img`. That is how a kexec boot works today (`kernel/build.sh kexec` packs it next to the first stage), and how a recovery-mode (live) boot will: U-Boot loads a second file as a ramdisk, and a cpio holding `system.img` lands in the same place.
+2. **In flash**, a system slot, once the phone is installed (issue #29). Not written yet; the script has the place for it.
+
+Either way it is the same file, mounted the same way (squashfs through a loop device), so there is one system image however the phone was started. It costs its own size in RAM, about 4 MB, against 7 MB when everything was unpacked.
+
+The system image is read-only. What changes lives elsewhere: `/run` and `/tmp` in RAM (logs are in `/tmp`), `/data` for everything the owner sets. The two files in `/etc` that change at run time are really in `/run`: `resolv.conf` is a link, and a copy of `shadow` is mounted over the read-only one (the Access page's password door sets root's password for ten minutes). Our own test builds' SSH keys ride beside the first stage and are mounted on `/etc/t48-dev`.
+
+## Rescue
+
+If there is no system image, or it does not mount, the first stage stays up by itself:
+
+- a message on the screen saying why, with the phone's address;
+- the network by DHCP, and SSH as root: with the built-in keys on one of our test builds, otherwise with a password made up at that moment and shown only on the screen;
+- a shell on the serial port.
+
+To see it: build a kernel with the first stage alone (`ROOTFS=firststage.cpio` and no `SYSTEM`) and boot it. The menu (other slot, start without the owner's changes, wipe) is issue #32.
+
+## Services
+
+`runsvdir` (busybox runit) keeps four programs running and starts any of them again if it stops:
+
+| Service | Runs | Waits for |
+|---|---|---|
+| `shell` | `t48-shell`: the screen, keys, hook | nothing. It finds the other two whenever they appear and looks again if they go |
+| `audiod` | `t48-audiod --backend alsa` | nothing |
+| `sip` | `t48-sip` (baresip) | an account in `/data/config/sip`, the audio service, an address |
+| `watchdog` | `t48-watchdog` | nothing |
+
+```
+sv status /run/service/*
+sv restart /run/service/sip
+tail -f /var/log/t48/sip/current        # each service's output; three files of 200 KB at most
+```
+
+The services are folders with a `run` script in `/etc/service`. **The owner's own go in `/data/local/service`** and win when the name is the same, so any of ours can be replaced, the shell included; an empty file called `down` there switches one of ours off. `t48-services` lays them out in `/run/service` at boot; run it again after adding one.
+
+Order: the shell is up first, so the screen works while the rest starts. baresip starts when there is an account and an address, and saving the account at the screen restarts it (`t48-apply sip`). With no account it waits quietly.
+
+## The watchdog
+
+`t48-watchdog` arms the SoC's watchdog and feeds it every 5 seconds. If nothing feeds it for 30 seconds (the kernel has hung) the phone resets. A crash of the feeder alone does nothing: runit restarts it at once. `sv down /run/service/watchdog` turns the watchdog off.
+
+While the phone is started by kexec from Yealink's firmware, a reset lands back in Yealink's firmware, because that is what the flash boots.
+
+Before that, the loader's own 90-second watchdog covers the boot: `rcS` turns it off once the system image is up, and rescue turns it off so that it can stay.
+
+## Sizes that matter
+
+- The kernel file with the first stage must stay under 4 MB for recovery-mode boots and under 2.5 MB compressed for the kernel partition.
+- A recovery-mode ramdisk has 12 to 16 MB before it reaches U-Boot.

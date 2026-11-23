@@ -86,8 +86,10 @@ start_listener() {
 }
 
 set_password() {   # $1: a crypt(3) hash, or * for none
-    awk -F: -v OFS=: -v h="$1" '$1 == "root" { $2 = h } { print }' "$SHADOW" > "$SHADOW.new" &&
-        chmod 600 "$SHADOW.new" && mv "$SHADOW.new" "$SHADOW"
+    # written in place: on the phone /etc/shadow is a file in /run mounted over the
+    # read-only one (rcS), and cannot be replaced by renaming
+    new=$(awk -F: -v OFS=: -v h="$1" '$1 == "root" { $2 = h } { print }' "$SHADOW") &&
+        [ -n "$new" ] && printf '%s\n' "$new" > "$SHADOW"
 }
 
 apply() {

@@ -55,7 +55,7 @@ import sys
 from PIL import Image
 d = sys.stdin.buffer.read()
 Image.frombuffer("RGBA", (800, 480), d[:800 * 480 * 4], "raw", "BGRA", 0, 1).convert("RGB").save(sys.argv[1])' "$2";;
-    log) p 'cat /var/log/t48-shell.log';;
+    log) p 'cat /var/log/t48/shell/current';;
     *) sed -n '3,17p' "$0" >&2; exit 2;;
     esac
 }

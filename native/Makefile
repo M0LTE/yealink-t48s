@@ -10,7 +10,7 @@ FREE = clang --target=armv6-linux-gnueabi -march=armv6 -mfloat-abi=soft -marm -O
        -ffreestanding -fno-builtin -nostdlib -fuse-ld=lld
 MUSLCC = $(CROSS_CC) -Os -Wall
 
-all: fbtest fbswap.so envexec fbinfo tap sertest usbinit membanner cpubench keytest touchtest apmcap t48rec t48play t48mix nandread
+all: fbtest fbswap.so envexec fbinfo tap sertest usbinit membanner cpubench keytest touchtest apmcap t48rec t48play t48mix nandread nandrestore t48-watchdog
 
 fbtest: fbtest.c
 	$(FREE) -static -Wl,-e,_start -o $@ $<
@@ -24,6 +24,14 @@ envexec fbinfo tap sertest usbinit keytest touchtest: %: %.c
 
 # Read-only NAND dump, runs under Yealink's kernel and ours (issue #5)
 nandread: nandread.c
+	$(MUSLCC) -static -o $@ $<
+
+# Puts a nandread -o backup back (issue #30); -n runs on any PC
+nandrestore: nandrestore.c
+	$(MUSLCC) -static -o $@ $<
+
+# Feeds the hardware watchdog (issue #17)
+t48-watchdog: t48-watchdog.c
 	$(MUSLCC) -static -o $@ $<
 
 fonts:

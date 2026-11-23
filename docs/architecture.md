@@ -42,6 +42,8 @@ Four long-running programs, each replaceable: the shell, baresip, the audio serv
 
 **Boot flow.** Issue [#17](https://github.com/M0LTE/yealink-t48s/issues/17). The kernel image carries only a small first stage. It finds the system image (in RAM beside the kernel for kexec and recovery-mode boots; in flash once installed), mounts it read-only and hands over. One system image, three ways to start it. If nothing mounts, the first stage is the rescue system. Limits that shape this: the kernel file must stay under 4 MB for recovery-mode boots (U-Boot loads the ramdisk 4 MB above the kernel) and under 2.5 MB compressed for the flash slot; the ramdisk has roughly 12 to 16 MB before it reaches U-Boot.
 
+(2026-11-23: done for kexec boots, see [boot.md](boot.md): first stage, squashfs system image, rescue, runit services, watchdog.)
+
 ## 2. The phone
 
 ### SIP stack
@@ -164,6 +166,8 @@ Issue [#29](https://github.com/M0LTE/yealink-t48s/issues/29), needs NAND access 
 - **A/B system slots.** An update is written to the unused slot and tried once. The running system marks itself healthy after a minute of normal running; if that never happens (the watchdog sees to hangs), the next boot uses the old slot.
 - **One kernel slot**, because U-Boot's boot command is fixed and we do not change it. Kernel updates are rare, written with a read-back check, and the fallback for a bad one is recovery mode.
 - **`/data`** holds settings (`/data/config`), apps (`/data/apps`), and the owner's changes (`/data/local`). A factory reset wipes it.
+
+(2026-11-23: a first step is in place, see [flash.md](flash.md). `/data` is in UBI on the 60 blocks at the end of `app` that Yealink's filesystem never used, so Yealink's firmware still works beside it; the kernel partition and the rest of `app` wait until the phone can start without Yealink. The backup and the way back are in [backup.md](backup.md).)
 
 ### Patchability
 

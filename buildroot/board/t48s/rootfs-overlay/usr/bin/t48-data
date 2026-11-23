@@ -1,0 +1,87 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# t48-data: where /data lives (issue #29, docs/flash.md).
+#   t48-data mount     at boot: /data from flash if it has been set up, else RAM
+#   t48-data format    set the flash up, once: needs our part of it still erased
+#   t48-data status    what /data is on, and how full
+#   t48-data release   stop using the flash; /data carries on in RAM
+#
+# Our part of the flash is the MTD partition "t48data"; the kernel driver can
+# write nothing else. UBI runs on it, with one volume, "data", holding UBIFS.
+# Nothing here erases: UBI takes over blocks that are already erased, and going
+# back to stock is erasing them again (tools/nandrestore.sh, docs/backup.md).
+say() { echo "data: $*"; echo "data: $*" > /dev/console 2>/dev/null; }
+mtdnum() { sed -n 's/^mtd\([0-9]*\):.*"t48data"$/\1/p' /proc/mtd; }
+# the first four bytes of a block UBI has taken are "UBI#"
+has_ubi() { [ "$(dd if=/dev/mtd$1 bs=4 count=1 2>/dev/null)" = "UBI#" ]; }
+attach() { [ -e /sys/class/ubi/ubi0 ] || ubiattach -m "$1" -d 0 /dev/ubi_ctrl >/dev/null; }
+volume() { grep -qx data /sys/class/ubi/ubi0_*/name 2>/dev/null; }
+live() { grep -qw t48boot=live "${T48_CMDLINE:-/proc/cmdline}"; }
+ram() {
+    mountpoint -q /data || mount -t tmpfs -o mode=755 tmpfs /data
+    say "in RAM, lost at power off ($1)"
+}
+
+case "$1" in
+mount)
+    mountpoint -q /data && exit 0
+    # a live boot (a USB stick or TFTP, docs/live-image.md) promises to write nothing
+    live && { ram "started without installing: nothing is written to the phone"; exit 0; }
+    M=$(mtdnum)
+    [ -n "$M" ] || { ram "this kernel has no flash of ours"; exit 0; }
+    has_ubi "$M" || { ram "the flash is not set up: t48-data format"; exit 0; }
+    attach "$M" && volume && mount -t ubifs ubi0:data /data || { ram "the flash did not mount; see dmesg"; exit 1; }
+    say "in flash" ;;
+format)
+    live && { echo "started without installing (a USB stick or the network): the flash is left alone" >&2; exit 1; }
+    M=$(mtdnum)
+    [ -n "$M" ] || { echo "this kernel has no flash of ours" >&2; exit 1; }
+    if ! has_ubi "$M"; then
+        # only ever onto erased flash: every byte of the partition must read ff
+        say "checking that our part of the flash is erased"
+        [ -z "$(tr -d '\377' < /dev/mtd$M | head -c 1 | od -An -tx1)" ] ||
+            { echo "our part of the flash is not erased and not UBI; not touching it" >&2; exit 1; }
+    fi
+    attach "$M" || exit 1
+    if ! volume; then
+        # leave four blocks spare, so one going bad does not stop UBI
+        leb=$(cat /sys/class/ubi/ubi0/eraseblock_size)
+        avail=$(cat /sys/class/ubi/ubi0/avail_eraseblocks)
+        ubimkvol /dev/ubi0 -N data -s $(( (avail - 4) * leb )) || exit 1
+    fi
+    # carry over what is in RAM now (settings, keys, apps), so nothing is entered twice
+    if ! grep -q "^ubi0:data " /proc/mounts; then
+        mkdir -p /run/t48-data-new
+        mount -t ubifs ubi0:data /run/t48-data-new || exit 1
+        cp -a /data/. /run/t48-data-new/ && sync
+        umount /run/t48-data-new
+    fi
+    say "flash set up; /data is kept there from the next start"
+    ;;
+release)
+    # let go of the flash: /data carries on in RAM with what it holds now
+    # (before going back to stock, tools/nandrestore.sh)
+    grep -q "^ubi0:data /data " /proc/mounts || { [ ! -e /sys/class/ubi/ubi0 ] || ubidetach -d 0 /dev/ubi_ctrl; exit 0; }
+    for s in /run/service/*; do [ "${s##*/}" = watchdog ] || sv -w 10 down "$s" >/dev/null; done
+    mkdir -p /run/t48-data-ram
+    mount -t tmpfs -o mode=755 tmpfs /run/t48-data-ram && cp -a /data/. /run/t48-data-ram/ && sync
+    if umount /data && ubidetach -d 0 /dev/ubi_ctrl; then
+        mount -o move /run/t48-data-ram /data
+        say "let go of the flash; /data is in RAM now"
+        rc=0
+    else
+        umount /run/t48-data-ram
+        say "could not let go of the flash: something is using /data"
+        rc=1
+    fi
+    for s in /run/service/*; do sv up "$s" >/dev/null; done
+    exit $rc ;;
+status)
+    if grep -q "^ubi0:data /data " /proc/mounts; then
+        echo "flash"; df -k /data | tail -n 1
+        echo "blocks: $(cat /sys/class/ubi/ubi0/total_eraseblocks) total, $(cat /sys/class/ubi/ubi0/avail_eraseblocks) free, $(cat /sys/class/ubi/ubi0/bad_peb_count) bad, most erases $(cat /sys/class/ubi/ubi0/max_ec)"
+    else
+        echo "RAM"
+    fi ;;
+*) echo "usage: t48-data mount | format | status | release" >&2; exit 2 ;;
+esac

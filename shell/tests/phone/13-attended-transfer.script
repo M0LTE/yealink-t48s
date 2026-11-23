@@ -1,0 +1,65 @@
+# Attended transfer: ask 1003 first with 1002 on hold; give up once and go back; then put them through.
+waitstate reg ok 8000
+waitstate audio up 3000
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+hook off
+waitstate phone incall 5000
+run $FAR $BOB waitcall established 3
+key transfer
+expectstate xfer 1
+key 1
+key 0
+key 0
+key 3
+wait 300
+shot shots/phone-transfer.png
+# OK (or "Ask first") calls them, with the caller on hold
+key ok
+expectstate phone outgoing
+expectstate consult 1
+expectstate other held
+expectstate other.peer 1002
+expectstate peer 1003
+run $FAR waitlog $BOBLOG CALL_HOLD 5
+run $FAR $CAROL waitcall incoming 5
+wait 300
+shot shots/phone-ask-first.png
+# X gives up: back to the caller, off hold
+key x
+waitstate phone incall 3000
+expectstate peer 1002
+expectstate other none
+expectstate hold 0
+run $FAR waitlog $BOBLOG CALL_RESUME 5
+run $FAR $CAROL waitcall none 5
+# again, and this time they answer
+run : > $BOBLOG
+run : > $CAROLLOG
+touch 590 424
+expectstate xfer 1
+key 1
+key 0
+key 0
+key 3
+touch 230 424
+expectstate phone outgoing
+run $FAR $CAROL accept
+waitstate phone incall 5000
+expectstate peer 1003
+expectstate other held
+wait 600
+shot shots/phone-ask-first-talking.png
+# Transfer puts the two through to each other and takes us out
+key transfer
+# 1002 calls 1003 in our place. (A phone takes such a call over by itself; the test's far end has to be told.)
+run $FAR $CAROL accept
+waitstate phone ended 10000
+expectstate ended Call_transferred
+shot shots/phone-transferred.png
+hook on
+waitstate phone idle 4000
+run $FAR $BOB waitcall established 5
+run $FAR $CAROL waitcall established 5
+run $FAR waitlog $CAROLLOG CALL_.*1002 5
+quit

@@ -2,17 +2,24 @@
 # Build the T48S kernel inside the t48s-kbuild:trusty container (gcc 4.7).
 # Run from the directory holding linux-3.6.11/ and this kernel/ directory.
 #   sh kernel/build.sh          -> T48S.bin   (U-Boot image, for recovery-mode TFTP boot)
-#   sh kernel/build.sh live     -> T48S.bin   for the live image (issue #7, docs/live-image.md):
-#                                  the same kernel, told that it was started through
-#                                  recovery mode (t48boot=live) and with a console on
-#                                  the screen. Its root filesystem is the ramdisk
-#                                  U-Boot loads beside it, T48S.rfs, which
-#                                  tools/mkliveimage.py makes from Buildroot's
-#                                  rootfs.cpio.
-#   ROOTFS=rootfs.cpio sh kernel/build.sh kexec
-#                               -> Image-kexec (raw Image for kmod/t48kexec) with
-#                                  Buildroot's root filesystem (buildroot/build.sh)
-#                                  built in as the initramfs. If AUTHORIZED_KEYS
+#   ROOTFS=firststage.cpio sh kernel/build.sh live
+#                               -> T48S.bin   for the live image (issue #7, docs/live-image.md):
+#                                  the same kernel with the first stage built in, told
+#                                  that it was started through recovery mode
+#                                  (t48boot=live) and with a console on the screen.
+#                                  The system image is not in it: it comes in the
+#                                  ramdisk U-Boot loads beside it, T48S.rfs, which
+#                                  tools/mkliveimage.py makes from system.img. Keys
+#                                  go in only if AUTHORIZED_KEYS names a file.
+#   ROOTFS=firststage.cpio SYSTEM=system.img sh kernel/build.sh kexec
+#                               -> Image-kexec (raw Image for kmod/t48kexec). Its
+#                                  initramfs is the first stage with the system
+#                                  image beside it as /system.img, both from
+#                                  buildroot/build.sh (docs/boot.md). Without
+#                                  SYSTEM the image holds the first stage alone
+#                                  and comes up in rescue; ROOTFS=rootfs.cpio
+#                                  without SYSTEM is the old way, everything
+#                                  unpacked into RAM. If AUTHORIZED_KEYS
 #                                  (default kexec-rootfs/root.authorized_keys)
 #                                  exists, it is added as /etc/t48-dev/authorized_keys,
 #                                  which makes the image a development build: SSH
@@ -20,14 +27,21 @@
 #                                  (docs/access.md). Without it SSH starts off.
 set -e
 VARIANT=${1:-tftp}
-if [ "$VARIANT" = kexec ]; then
-    [ -n "$ROOTFS" ] || { echo "kexec: set ROOTFS to Buildroot's rootfs.cpio (buildroot/build.sh)" >&2; exit 2; }
+if [ "$VARIANT" = kexec ] || [ "$VARIANT" = live ]; then
+    [ -n "$ROOTFS" ] || { echo "$VARIANT: set ROOTFS to Buildroot's firststage.cpio (buildroot/build.sh); kexec takes SYSTEM=system.img too" >&2; exit 2; }
+    KEYS=${AUTHORIZED_KEYS:-kexec-rootfs/root.authorized_keys}
+    if [ "$VARIANT" = live ]; then
+        # the live kernel is the one handed to other people: no keys unless a file is
+        # named, and no system image inside (it would not fit under U-Boot's 4 MB)
+        [ -z "$SYSTEM" ] || { echo "live: the system image goes in T48S.rfs (tools/mkliveimage.py), not in the kernel" >&2; exit 2; }
+        KEYS=${AUTHORIZED_KEYS:-}
+    fi
     # the initramfs is Buildroot's cpio with a second cpio holding the keys appended
     # (the kernel unpacks concatenated archives in turn); the keys never enter the
     # Buildroot output, so a published root filesystem carries none
-    python3 - "$ROOTFS" kexec-initramfs.cpio "${AUTHORIZED_KEYS:-kexec-rootfs/root.authorized_keys}" <<'EOP'
+    python3 - "$ROOTFS" $VARIANT-initramfs.cpio "$KEYS" "$SYSTEM" <<'EOP'
 import os, sys
-src, dst, keys = sys.argv[1:4]
+src, dst, keys, system = sys.argv[1:5]
 out = bytearray(open(src, "rb").read())
 def entry(ino, name, mode, nlink, body=b""):
     name = name.encode() + b"\0"
@@ -36,17 +50,22 @@ def entry(ino, name, mode, nlink, body=b""):
     rec = hdr.encode() + name
     rec += b"\0" * (-len(rec) % 4)
     return rec + body + b"\0" * (-len(body) % 4)
-if os.path.exists(keys):
+if system:
+    out += b"\0" * (-len(out) % 4)
+    out += entry(3, "system.img", 0o100444, 1, open(system, "rb").read())
+    out += entry(0, "TRAILER!!!", 0, 1)
+    print("initramfs: first stage with the system image %s (%d bytes)" % (system, os.path.getsize(system)))
+if keys and os.path.exists(keys):
     out += b"\0" * (-len(out) % 4)
     out += entry(1, "etc/t48-dev", 0o40700, 2)
     out += entry(2, "etc/t48-dev/authorized_keys", 0o100600, 1, open(keys, "rb").read())
     out += entry(0, "TRAILER!!!", 0, 1)
     print("initramfs: DEVELOPMENT BUILD: SSH on from boot, with the keys in %s" % keys)
 else:
-    print("initramfs: no %s: SSH is off until the owner turns it on at the screen" % keys)
+    print("initramfs: no keys (%s): SSH is off until the owner turns it on at the screen" % (keys or "none named"))
 open(dst, "wb").write(out)
 EOP
-    echo "CONFIG_INITRAMFS_SOURCE=\"$(pwd)/kexec-initramfs.cpio\"" > kexec-initramfs.config
+    echo "CONFIG_INITRAMFS_SOURCE=\"$(pwd)/$VARIANT-initramfs.cpio\"" > $VARIANT-initramfs.config
 fi
 cd linux-3.6.11
 # mainline gives bcmring machine number 2289; the phone's U-Boot passes 2342
@@ -146,7 +165,7 @@ grep -q "t48s_touch.o" drivers/input/Makefile || echo 'obj-$(CONFIG_INPUT) += t4
 cp ../kernel/drivers/t48s_audio.c sound/arm/t48s_audio.c
 grep -q "SND_T48S" sound/arm/Kconfig || printf '\nconfig SND_T48S\n\tbool "Yealink T48S audio (BCM11188 APM codecs)"\n\tdepends on SND = y\n\tselect SND_PCM\n' >> sound/arm/Kconfig
 grep -q "t48s_audio.o" sound/arm/Makefile || echo 'obj-$(CONFIG_SND_T48S) += t48s_audio.o' >> sound/arm/Makefile
-# the flash, read-only (issue #5): our driver instead of mainline's bcm_umi_nand
+# the flash (issues #5, #29): our driver instead of mainline's bcm_umi_nand
 cp ../kernel/drivers/t48s_nand.c drivers/mtd/nand/t48s_nand.c
 grep -q "t48s_nand.o" drivers/mtd/nand/Makefile || echo 'obj-$(CONFIG_MTD_NAND) += t48s_nand.o' >> drivers/mtd/nand/Makefile
 # U-Boot's BOOTMODE flag: read it, and ask the flash driver to take it out (issue #7).
@@ -179,15 +198,20 @@ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- bcmring_defconfig
 ./scripts/kconfig/merge_config.sh -m .config ../kernel/t48s.config >/dev/null
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kernel/kexec.config >/dev/null
 [ "$VARIANT" = live ] && ./scripts/kconfig/merge_config.sh -m .config ../kernel/live.config >/dev/null
-[ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kexec-initramfs.config >/dev/null
+[ "$VARIANT" != tftp ] && ./scripts/kconfig/merge_config.sh -m .config ../$VARIANT-initramfs.config >/dev/null
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig >/dev/null 2>&1 || make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- oldnoconfig >/dev/null
 for o in CONFIG_BACKLIGHT_CLASS_DEVICE= CONFIG_LEDS_CLASS= CONFIG_LEDS_TRIGGER_TIMER= CONFIG_SND_T48S CONFIG_SND_PCM= CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
-# the flash must stay read-only (issue #5): stop if the configuration holds anything
-# that could write it, or lacks our driver's layer
+# The flash is written only through drivers/t48s_nand.c, which lets UBI reach our own
+# ranges and nothing else (issues #5 and #29). Stop if the configuration holds
+# mainline's driver, which can write anywhere, or any other way to the flash: block
+# devices, other flash filesystems, partitions from the command line, test modules.
 for o in MTD_NAND_BCM_UMI MTD_NAND_VERIFY_WRITE MTD_BLOCK MTD_BLOCK_RO MTD_CMDLINE_PARTS \
-         MTD_CONCAT MTD_CFI MTD_UBI MTD_OOPS MTD_SWAP MTD_TESTS FTL NFTL INFTL RFD_FTL SSFDC SM_FTL \
-         JFFS2_FS UBIFS_FS YAFFS_FS MTD_NAND_NANDSIM; do
-    if grep -q "^CONFIG_$o=" .config; then echo "CONFIG_$o is set: the flash must stay read-only" >&2; exit 1; fi
+         MTD_CONCAT MTD_CFI MTD_UBI_GLUEBI MTD_OOPS MTD_SWAP MTD_TESTS FTL NFTL INFTL RFD_FTL SSFDC SM_FTL \
+         JFFS2_FS YAFFS_FS MTD_NAND_NANDSIM; do
+    if grep -q "^CONFIG_$o=" .config; then echo "CONFIG_$o is set: not a way to the flash we allow" >&2; exit 1; fi
+done
+for o in MTD_UBI UBIFS_FS SQUASHFS SQUASHFS_XZ BLK_DEV_LOOP; do
+    grep -q "^CONFIG_$o=y" .config || { echo "CONFIG_$o is missing" >&2; exit 1; }
 done
 grep -q "^CONFIG_MTD_NAND=y" .config
 if [ "$VARIANT" = kexec ]; then

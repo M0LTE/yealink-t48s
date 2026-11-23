@@ -1,0 +1,9 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# baresip (docs/sip.md). Waits, quietly, for three things: an account (the owner
+# enters it under Settings, Phone account), the audio service, and an address.
+exec 2>&1 </dev/null
+[ -s /data/config/sip ] || { sleep 5; exit 0; }
+[ -S /run/t48-audiod/call.sock ] || { sleep 1; exit 0; }
+ifconfig eth0 2>/dev/null | grep -q 'inet addr' || { sleep 2; exit 0; }
+exec t48-sip

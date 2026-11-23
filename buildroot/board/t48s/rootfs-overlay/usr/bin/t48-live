@@ -42,12 +42,12 @@ result=$(cat "$BM/status" 2>/dev/null)
 case "$was" in
 usbmode)
     from=usb
-    l1="Running from the USB stick. Nothing is installed on this phone."
+    l1="Running from USB. Nothing is installed."
     # true whether or not the flag went: with no stick in, Yealink's start-up has nothing to reflash from
     l2="To go back to Yealink: unplug the power, take the stick out, plug the power in." ;;
 resumemode)
     from=network
-    l1="Started over the network. Nothing is installed on this phone."
+    l1="Started over the network. Nothing is installed."
     if [ "$now" = none ]; then
         l2="To go back to Yealink: unplug the power and plug it in again."
     else
@@ -55,7 +55,7 @@ resumemode)
     fi ;;
 *)
     from=recovery
-    l1="Started in recovery mode. Nothing is installed on this phone."
+    l1="Started in recovery mode. Nothing is installed."
     l2="To go back to Yealink: unplug the power and plug it in again." ;;
 esac
 

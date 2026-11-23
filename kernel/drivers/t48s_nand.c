@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Yealink T48S: read-only access to the NAND flash (issue #5).
+ * Yealink T48S: the NAND flash (issues #5, #29, #30).
  *
  * The SoC's UMI block drives a Winbond 128 MB chip (ID ef f1, 2048-byte pages, 64
  * spare bytes, 128 KB blocks) and has a hardware BCH engine. This is mainline 3.6's
- * bcm_umi_nand cut down to reading, with the error correction set the way the phone's
+ * bcm_umi_nand cut down, with the error correction set the way the phone's
  * U-Boot and Yealink's kernel use it, which is not mainline's default:
  *
  *   4 correctable bits per 512 data bytes, 7 ECC bytes each (mainline: 8 bits, 13 bytes)
@@ -13,26 +13,40 @@
  *     bytes 1-8   free (Yealink's yaffs2 keeps its tags here), not covered by the ECC
  *     bytes 9-15  ECC
  *
- * THIS DRIVER CANNOT CHANGE THE FLASH. Three independent layers, any one is enough:
+ * READING works everywhere. WRITING AND ERASING work only inside the ranges listed
+ * in t48s_nand_ours[] below, which is compiled in and cannot be changed at run
+ * time. Everything else, and above all the loader, U-Boot, its two environments,
+ * the logo and the safe-mode kernel and root filesystem, cannot be changed by this
+ * driver. Three independent layers, each checking the address itself:
  *
- *  1. Chip commands pass through one function, t48s_nand_cmd_ctrl(), which sends only
- *     the commands in t48s_nand_cmd_ok(): read page, random data output, read ID,
- *     read parameter page, read status. Program (80h/10h/85h/15h), erase (60h/D0h),
- *     lock (2Ah/2Ch/23h), reset (FFh) and anything else are dropped and counted
- *     (/sys/module/t48s_nand/parameters/blocked), together with the address bytes
- *     that follow them.
- *  2. Every write hook of the NAND layer (write_buf, write_page, the ECC write
- *     methods, erase_cmd, block_markbad) is a stub here that sends nothing and
- *     returns -EROFS where it can. There is no bad block table in flash, so the
- *     scan at boot only reads.
- *  3. MTD_WRITEABLE is cleared on the whole device before it is registered and
- *     masked on every partition, so the MTD core answers -EROFS to write, erase
- *     and mark-bad, and /dev/mtdN cannot be opened for writing. The write and erase
- *     entry points of the device are removed as well.
+ *  1. Chip commands pass through one function, t48s_nand_cmd_ctrl(). Reads go
+ *     straight through. Program (80h) and erase (60h) are held back until all
+ *     their address bytes have arrived; they are sent only if that address is in
+ *     t48s_nand_ours[] and is the page the write code below announced. The
+ *     confirm commands (10h, D0h) and the data bytes are sent only after that.
+ *     Lock, reset, random data input and anything unknown are never sent.
+ *     Refusals are counted in /sys/module/t48s_nand/parameters/blocked.
+ *  2. The write hooks of the NAND layer (page write, bad block marker, erase)
+ *     check the page against t48s_nand_ours[] before sending anything. Raw writes
+ *     and writes of spare bytes alone (other than a bad block marker) do not exist.
+ *  3. The MTD layer: every partition is registered read-only except those that
+ *     are one of the ranges, and the device's write, erase and mark-bad entry
+ *     points refuse any address outside them with -EROFS.
+ *
+ * How a page is written:
+ *   - the page must read as erased (all ff, spare bytes too) or it is refused;
+ *   - the ECC is computed here in software (the code tools/nandcheck.py checks
+ *     dumps with, proven against every written page of the stock flash), so what
+ *     goes to the chip is fully known before it is sent;
+ *   - after programming, the page is read back raw, all 2112 bytes, and compared.
+ *     Any difference is an error (-EIO) and is logged; the caller (UBI) then moves
+ *     the data and has the block tested and, if it fails, marked bad.
+ * Bad blocks: a marker in spare byte 0 of the block's first page, as U-Boot and
+ * Yealink expect. There is no bad block table in flash and none is ever created.
+ * No sub-page writes: a page is programmed once.
  *
  * The controller's own registers are left as U-Boot and Yealink set them (timing,
- * chip select, write protect pin); only the BCH engine is driven, and its three
- * parameters are put back if they are not what the flash contents need.
+ * chip select, write protect pin); only the BCH engine is driven, for reading.
  *
  * Derived from drivers/mtd/nand/bcm_umi_nand.c, bcm_umi_bch.c and nand_bcm_umi.[ch],
  * Copyright 2004 - 2009 Broadcom Corporation, licensed under the GPL version 2.
@@ -84,8 +98,70 @@ static struct mtd_info *t48s_mtd;
 
 static unsigned int blocked;	/* chip commands refused by layer 1 */
 module_param(blocked, uint, 0444);
-static unsigned int refused;	/* calls into the write stubs of layer 2 */
+static unsigned int refused;	/* write requests refused by layers 2 and 3 */
 module_param(refused, uint, 0444);
+static unsigned int pages_written;
+module_param(pages_written, uint, 0444);
+static unsigned int blocks_erased;
+module_param(blocks_erased, uint, 0444);
+static unsigned int write_errors;	/* program or erase failed, or the read-back differed */
+module_param(write_errors, uint, 0444);
+
+/* ---- what may be written: compiled in, nothing else ever ---- */
+
+#define T48S_PAGE_SHIFT		11
+#define T48S_PAGES_PER_BLOCK	64
+
+/*
+ * The last 60 blocks of Yealink's "app" partition. Its filesystem there fills
+ * blocks 0 to 538 and has never touched these (they are erased in the stock
+ * flash), and it is mounted read-only, so Yealink's firmware keeps working beside
+ * what we keep here: UBI, with the phone's /data. Going back to stock is erasing
+ * them. See docs/flash.md.
+ */
+static const struct mtd_partition t48s_nand_ours[] = {
+	{ .name = "t48data", .offset = 0x06a80000, .size = 0x00780000 },
+};
+
+/* The only partitions a range may lie in. Never ubl, uboot, env, userenv, logo,
+ * smkern, smrfs; and rfs, cfg and data stay Yealink's. Checked at start-up. */
+static const struct { loff_t offset, size; } t48s_nand_reusable[] = {
+	{ 0x015a0000, 0x00280000 },	/* kernel */
+	{ 0x02720000, 0x04ae0000 },	/* app */
+};
+
+static bool t48s_nand_range_ok(loff_t ofs, loff_t len)
+{
+	int i;
+
+	if (len <= 0)
+		return false;
+	for (i = 0; i < ARRAY_SIZE(t48s_nand_ours); i++)
+		if (ofs >= t48s_nand_ours[i].offset &&
+		    ofs + len <= t48s_nand_ours[i].offset + t48s_nand_ours[i].size)
+			return true;
+	return false;
+}
+
+static bool t48s_nand_page_ok(int page)
+{
+	return page >= 0 &&
+	       t48s_nand_range_ok((loff_t)page << T48S_PAGE_SHIFT, 1 << T48S_PAGE_SHIFT);
+}
+
+static bool t48s_nand_block_ok(int page)
+{
+	return page >= 0 && !(page % T48S_PAGES_PER_BLOCK) &&
+	       t48s_nand_range_ok((loff_t)page << T48S_PAGE_SHIFT,
+				  T48S_PAGES_PER_BLOCK << T48S_PAGE_SHIFT);
+}
+
+static void t48s_nand_refuse(const char *what, long long where)
+{
+	refused++;
+	if (refused <= 16)
+		pr_warn("t48s_nand: %s at 0x%llx refused: not ours to write\n", what, where);
+}
 
 /* ---- layer 1: the only path from the kernel to the chip's command latch ---- */
 
@@ -104,93 +180,400 @@ static bool t48s_nand_cmd_ok(int cmd)
 	return false;
 }
 
+enum { GATE_PASS, GATE_DROP, GATE_PROG_ADDR, GATE_ERASE_ADDR, GATE_PROG_OPEN, GATE_ERASE_OPEN };
+static int gate = GATE_PASS;
+static u8 gate_addr[4];
+static int gate_n;
+static int announced_page = -1;	/* the page layer 2 is about to program or erase */
+
+static void t48s_nand_block_cmd(int cmd)
+{
+	blocked++;
+	if (blocked <= 16)
+		pr_info("t48s_nand: chip command %02xh not sent\n", cmd & 0xff);
+	gate = GATE_DROP;
+}
+
 static void t48s_nand_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl)
 {
-	static bool dropping;
+	int page, i;
 
 	if (cmd == NAND_CMD_NONE)
 		return;
+	cmd &= 0xff;
 	if (ctrl & NAND_CLE) {
-		dropping = !t48s_nand_cmd_ok(cmd & 0xff);
-		if (dropping) {
-			blocked++;
-			if (blocked <= 8)
-				pr_info("t48s_nand: read-only, chip command %02xh not sent\n",
-					cmd & 0xff);
+		switch (cmd) {
+		case NAND_CMD_SEQIN:	/* 80h: held until its four address bytes are in */
+			gate = GATE_PROG_ADDR;
+			gate_n = 0;
 			return;
+		case NAND_CMD_ERASE1:	/* 60h: held until its two address bytes are in */
+			gate = GATE_ERASE_ADDR;
+			gate_n = 0;
+			return;
+		case NAND_CMD_PAGEPROG:	/* 10h */
+			if (gate != GATE_PROG_OPEN) {
+				t48s_nand_block_cmd(cmd);
+				return;
+			}
+			break;
+		case NAND_CMD_ERASE2:	/* D0h */
+			if (gate != GATE_ERASE_OPEN) {
+				t48s_nand_block_cmd(cmd);
+				return;
+			}
+			break;
+		default:
+			if (!t48s_nand_cmd_ok(cmd)) {
+				t48s_nand_block_cmd(cmd);
+				return;
+			}
 		}
+		gate = GATE_PASS;
 		writeb(cmd, umi + NAND_REG_CMD);
-	} else if (ctrl & NAND_ALE) {
-		if (!dropping)
-			writeb(cmd, umi + NAND_REG_ADDR);
+		return;
 	}
-	/* neither latch: a data byte for the chip. Nothing is ever sent that way. */
+	if (!(ctrl & NAND_ALE))
+		return;		/* neither latch: data bytes go through write_buf only */
+	switch (gate) {
+	case GATE_PASS:
+		writeb(cmd, umi + NAND_REG_ADDR);
+		break;
+	case GATE_PROG_ADDR:
+		gate_addr[gate_n++] = cmd;
+		if (gate_n < 4)
+			break;
+		/* column (0: a page; 2048: its spare bytes alone), then the page */
+		page = gate_addr[2] | gate_addr[3] << 8;
+		i = gate_addr[0] | gate_addr[1] << 8;
+		if (!t48s_nand_page_ok(page) || page != announced_page || (i != 0 && i != 2048)) {
+			t48s_nand_block_cmd(NAND_CMD_SEQIN);
+			break;
+		}
+		writeb(NAND_CMD_SEQIN, umi + NAND_REG_CMD);
+		for (i = 0; i < 4; i++)
+			writeb(gate_addr[i], umi + NAND_REG_ADDR);
+		gate = GATE_PROG_OPEN;
+		break;
+	case GATE_ERASE_ADDR:
+		gate_addr[gate_n++] = cmd;
+		if (gate_n < 2)
+			break;
+		page = gate_addr[0] | gate_addr[1] << 8;
+		if (!t48s_nand_block_ok(page) || page != announced_page) {
+			t48s_nand_block_cmd(NAND_CMD_ERASE1);
+			break;
+		}
+		writeb(NAND_CMD_ERASE1, umi + NAND_REG_CMD);
+		for (i = 0; i < 2; i++)
+			writeb(gate_addr[i], umi + NAND_REG_ADDR);
+		gate = GATE_ERASE_OPEN;
+		break;
+	default:
+		/* dropped command, or address bytes where none belong: not sent */
+		break;
+	}
 }
 
-/* ---- layer 2: every write hook is a stub ---- */
-
-static void t48s_nand_refuse(const char *what)
-{
-	refused++;
-	if (refused <= 8)
-		pr_warn("t48s_nand: read-only, %s refused\n", what);
-}
-
+/* data bytes for the chip: only into a page program that layer 1 let through */
 static void t48s_nand_write_buf(struct mtd_info *mtd, const uint8_t *buf, int len)
 {
-	t48s_nand_refuse("write_buf");
+	int i;
+
+	if (gate != GATE_PROG_OPEN) {
+		t48s_nand_refuse("data bytes", -1);
+		return;
+	}
+	for (i = 0; i < len; i++)
+		writeb(buf[i], umi + NAND_REG_DATA);
 }
 
-static void t48s_nand_ecc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
-				     const uint8_t *buf, int oob_required)
+/* ---- the ECC, in software: the code tools/nandcheck.py checks dumps with ----
+ * Binary BCH over GF(2^13), primitive polynomial 0x201b, t = 4: 52 parity bits.
+ * The 512 data bytes go in most significant bit first, then four zero bits; the
+ * parity is stored big-endian in the low 52 bits of the 7 ECC bytes. */
+
+#define T48S_BCH_BITS	52
+#define T48S_BCH_MASK	((1ULL << T48S_BCH_BITS) - 1)
+static u64 t48s_bch_table[256];
+static u64 t48s_bch_low;	/* the generator polynomial without its top bit */
+
+static u16 t48s_gf_mul(u16 a, u16 b)
 {
-	t48s_nand_refuse("ecc.write_page");
+	u16 r = 0;
+
+	while (b) {
+		if (b & 1)
+			r ^= a;
+		a <<= 1;
+		if (a & 0x2000)
+			a ^= 0x201b;
+		b >>= 1;
+	}
+	return r;
 }
 
-static int t48s_nand_ecc_write_oob(struct mtd_info *mtd, struct nand_chip *chip, int page)
+static void t48s_bch_init(void)
 {
-	t48s_nand_refuse("ecc.write_oob");
-	return -EROFS;
+	/* g(x) = product of the minimal polynomials of a^1, a^3, a^5, a^7, each of
+	 * degree 13: product over the conjugates a^(i * 2^k) of (x - conjugate) */
+	static const int roots[] = { 1, 3, 5, 7 };
+	u64 g = 1;
+	u16 alpha[4], c;
+	int i, j, k, b;
+
+	for (i = 0; i < 4; i++) {
+		u16 poly[14] = { 1 };	/* poly[d]: coefficient of x^d, in GF(2^13) */
+		u64 mp = 0, ng = 0;
+		int deg = 0;
+
+		alpha[i] = 1;
+		for (j = 0; j < roots[i]; j++)
+			alpha[i] = t48s_gf_mul(alpha[i], 2);
+		c = alpha[i];
+		for (k = 0; k < 13; k++) {
+			/* poly *= (x + c) */
+			for (j = deg + 1; j > 0; j--)
+				poly[j] = poly[j - 1] ^ t48s_gf_mul(poly[j], c);
+			poly[0] = t48s_gf_mul(poly[0], c);
+			deg++;
+			c = t48s_gf_mul(c, c);
+		}
+		for (j = 0; j <= 13; j++)
+			if (poly[j] & 1)
+				mp |= 1ULL << j;
+		/* g *= mp, over GF(2) */
+		for (j = 0; j <= 13; j++)
+			if (mp >> j & 1)
+				ng ^= g << j;
+		g = ng;
+	}
+	t48s_bch_low = g & T48S_BCH_MASK;
+	for (b = 0; b < 256; b++) {
+		u64 r = (u64)b << (T48S_BCH_BITS - 8);
+
+		for (j = 0; j < 8; j++)
+			r = (r >> (T48S_BCH_BITS - 1) & 1) ?
+				((r << 1) ^ t48s_bch_low) & T48S_BCH_MASK :
+				(r << 1) & T48S_BCH_MASK;
+		t48s_bch_table[b] = r;
+	}
+}
+
+static void t48s_bch_ecc(const u8 *data, u8 *ecc)
+{
+	u64 r = 0;
+	int i;
+
+	for (i = 0; i < T48S_ECC_SIZE; i++)
+		r = ((r << 8) & T48S_BCH_MASK) ^
+		    t48s_bch_table[(r >> (T48S_BCH_BITS - 8)) ^ data[i]];
+	for (i = 0; i < 4; i++)
+		r = (r >> (T48S_BCH_BITS - 1) & 1) ?
+			((r << 1) ^ t48s_bch_low) & T48S_BCH_MASK :
+			(r << 1) & T48S_BCH_MASK;
+	for (i = 0; i < T48S_ECC_BYTES; i++)
+		ecc[i] = r >> (8 * (T48S_ECC_BYTES - 1 - i));
+}
+
+/* Known answers, so a mistake in the tables can never reach the flash: the ECC of
+ * zeros, of a fixed pattern (worked out with tools/nandcheck.py), and the generator. */
+static bool t48s_bch_selftest(void)
+{
+	static u8 d[T48S_ECC_SIZE];
+	u8 e[T48S_ECC_BYTES];
+	static const u8 zeros[T48S_ECC_BYTES] = { 0, 0, 0, 0, 0, 0, 0 };
+	static const u8 ramp[T48S_ECC_BYTES] = { 0x01, 0x00, 0xfe, 0x27, 0x4b, 0x73, 0x07 };	/* from tools/nandcheck.py */
+	int i;
+
+	memset(d, 0, sizeof(d));
+	t48s_bch_ecc(d, e);
+	if (memcmp(e, zeros, sizeof(e)))
+		return false;
+	for (i = 0; i < T48S_ECC_SIZE; i++)
+		d[i] = i * 7 + (i >> 8) * 13 + 1;
+	t48s_bch_ecc(d, e);
+	return !memcmp(e, ramp, sizeof(e)) && t48s_bch_low == 0x4523043ab86abULL;
+}
+
+/* ---- layer 2: writing, erasing and marking, each checking the page itself ---- */
+
+static u8 t48s_nand_verify[2048 + 64];
+
+/* raw read of a whole page with its spare bytes, the BCH engine left out of it */
+static void t48s_nand_read_raw(struct mtd_info *mtd, struct nand_chip *chip, int page)
+{
+	writel(BCH_RD_ECC_VALID, umi + UMI_BCH_CTRL);
+	chip->cmdfunc(mtd, NAND_CMD_READ0, 0, page);
+	chip->read_buf(mtd, t48s_nand_verify, sizeof(t48s_nand_verify));
+}
+
+static int t48s_nand_bits(const u8 *a, const u8 *b, int n)
+{
+	int i, bits = 0;
+
+	for (i = 0; i < n; i++)
+		bits += hweight8(a[i] ^ (b ? b[i] : 0xff));
+	return bits;
 }
 
 static int t48s_nand_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 				const uint8_t *buf, int oob_required, int page,
 				int cached, int raw)
 {
-	t48s_nand_refuse("write_page");
+	u8 *oob = chip->oob_poi;
+	int step, status, bits;
+
+	if (!t48s_nand_page_ok(page) || raw) {
+		t48s_nand_refuse(raw ? "raw page write" : "page write",
+				 (long long)page << T48S_PAGE_SHIFT);
+		return -EROFS;
+	}
+	/* never program a page that holds anything */
+	t48s_nand_read_raw(mtd, chip, page);
+	bits = t48s_nand_bits(t48s_nand_verify, NULL, sizeof(t48s_nand_verify));
+	if (bits) {
+		write_errors++;
+		pr_err("t48s_nand: page %d is not erased (%d bits are 0); not written\n",
+		       page, bits);
+		return -EIO;
+	}
+	for (step = 0; step < 4; step++)
+		t48s_bch_ecc(buf + step * T48S_ECC_SIZE,
+			     oob + step * T48S_OOB_PER_STEP + T48S_OOB_PER_STEP - T48S_ECC_BYTES);
+
+	announced_page = page;
+	chip->cmdfunc(mtd, NAND_CMD_SEQIN, 0, page);
+	t48s_nand_write_buf(mtd, buf, mtd->writesize);
+	t48s_nand_write_buf(mtd, oob, mtd->oobsize);
+	chip->cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
+	announced_page = -1;
+	status = chip->waitfunc(mtd, chip);
+	if (status & NAND_STATUS_FAIL) {
+		write_errors++;
+		pr_err("t48s_nand: the chip reports that programming page %d failed (status %02x)\n",
+		       page, status);
+		return -EIO;
+	}
+	pages_written++;
+
+	/* read back raw and compare everything, ECC bytes included */
+	t48s_nand_read_raw(mtd, chip, page);
+	bits = t48s_nand_bits(t48s_nand_verify, buf, mtd->writesize) +
+	       t48s_nand_bits(t48s_nand_verify + mtd->writesize, oob, mtd->oobsize);
+	if (bits) {
+		write_errors++;
+		pr_err("t48s_nand: page %d reads back with %d wrong bits after writing\n",
+		       page, bits);
+		return -EIO;
+	}
+	return 0;
+}
+
+/* Spare bytes alone: only ever a bad block marker (byte 0 zero, the rest untouched)
+ * on the first page of one of our blocks. */
+static int t48s_nand_ecc_write_oob(struct mtd_info *mtd, struct nand_chip *chip, int page)
+{
+	int i, status;
+
+	if (!t48s_nand_block_ok(page)) {
+		t48s_nand_refuse("spare byte write", (long long)page << T48S_PAGE_SHIFT);
+		return -EROFS;
+	}
+	if (chip->oob_poi[0] != 0x00) {
+		t48s_nand_refuse("spare byte write that is not a bad block marker",
+				 (long long)page << T48S_PAGE_SHIFT);
+		return -EROFS;
+	}
+	for (i = 1; i < mtd->oobsize; i++)
+		if (chip->oob_poi[i] != 0xff) {
+			t48s_nand_refuse("spare byte write that is not a bad block marker",
+					 (long long)page << T48S_PAGE_SHIFT);
+			return -EROFS;
+		}
+	pr_err("t48s_nand: MARKING BLOCK AT 0x%llx BAD\n", (long long)page << T48S_PAGE_SHIFT);
+	announced_page = page;
+	chip->cmdfunc(mtd, NAND_CMD_SEQIN, mtd->writesize, page);
+	t48s_nand_write_buf(mtd, chip->oob_poi, mtd->oobsize);
+	chip->cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
+	announced_page = -1;
+	status = chip->waitfunc(mtd, chip);
+	return status & NAND_STATUS_FAIL ? -EIO : 0;
+}
+
+static int t48s_nand_refuse_oob(struct mtd_info *mtd, struct nand_chip *chip, int page)
+{
+	t48s_nand_refuse("raw spare byte write", (long long)page << T48S_PAGE_SHIFT);
 	return -EROFS;
+}
+
+/* never reached: t48s_nand_write_page does the whole job and does not call these */
+static void t48s_nand_ecc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
+				     const uint8_t *buf, int oob_required)
+{
+	t48s_nand_refuse("ecc.write_page", -1);
 }
 
 static void t48s_nand_erase_cmd(struct mtd_info *mtd, int page)
 {
-	t48s_nand_refuse("erase_cmd");
+	struct nand_chip *chip = mtd->priv;
+
+	if (!t48s_nand_block_ok(page)) {
+		t48s_nand_refuse("erase", (long long)page << T48S_PAGE_SHIFT);
+		return;
+	}
+	announced_page = page;
+	chip->cmdfunc(mtd, NAND_CMD_ERASE1, -1, page);
+	chip->cmdfunc(mtd, NAND_CMD_ERASE2, -1, -1);
+	announced_page = -1;
+	blocks_erased++;
 }
 
-static int t48s_nand_block_markbad(struct mtd_info *mtd, loff_t ofs)
+/* ---- layer 3: the MTD entry points refuse any address outside our ranges ---- */
+
+static int (*t48s_nand_core_write)(struct mtd_info *, loff_t, size_t, size_t *, const u_char *);
+static int (*t48s_nand_core_write_oob)(struct mtd_info *, loff_t, struct mtd_oob_ops *);
+static int (*t48s_nand_core_erase)(struct mtd_info *, struct erase_info *);
+static int (*t48s_nand_core_markbad)(struct mtd_info *, loff_t);
+
+static int t48s_mtd_write(struct mtd_info *mtd, loff_t to, size_t len, size_t *retlen,
+			  const u_char *buf)
 {
-	t48s_nand_refuse("block_markbad");
-	return -EROFS;
+	if (!t48s_nand_range_ok(to, len)) {
+		t48s_nand_refuse("mtd write", to);
+		return -EROFS;
+	}
+	return t48s_nand_core_write(mtd, to, len, retlen, buf);
 }
 
-/* layer 3 leftovers: the MTD core never calls these on a read-only device */
-static int t48s_mtd_erase(struct mtd_info *mtd, struct erase_info *instr)
-{
-	t48s_nand_refuse("mtd erase");
-	return -EROFS;
-}
-
-/* kept as a stub, not NULL: without it the MTD core says the device has no spare
- * area at all and refuses raw reads */
 static int t48s_mtd_write_oob(struct mtd_info *mtd, loff_t to, struct mtd_oob_ops *ops)
 {
-	t48s_nand_refuse("mtd write_oob");
-	return -EROFS;
+	/* whole pages with their free spare bytes (a restore of Yealink's pages puts
+	 * its filesystem's tags back this way); never raw, never spare bytes alone */
+	if (!ops->datbuf || ops->mode == MTD_OPS_RAW || !t48s_nand_range_ok(to, ops->len)) {
+		t48s_nand_refuse("mtd write with spare bytes", to);
+		return -EROFS;
+	}
+	return t48s_nand_core_write_oob(mtd, to, ops);
+}
+
+static int t48s_mtd_erase(struct mtd_info *mtd, struct erase_info *instr)
+{
+	if (!t48s_nand_range_ok(instr->addr, instr->len)) {
+		t48s_nand_refuse("mtd erase", instr->addr);
+		return -EROFS;
+	}
+	return t48s_nand_core_erase(mtd, instr);
 }
 
 static int t48s_mtd_block_markbad(struct mtd_info *mtd, loff_t ofs)
 {
-	t48s_nand_refuse("mtd block_markbad");
-	return -EROFS;
+	if (!t48s_nand_range_ok(ofs & ~(loff_t)(mtd->erasesize - 1), mtd->erasesize)) {
+		t48s_nand_refuse("mtd mark bad", ofs);
+		return -EROFS;
+	}
+	write_errors++;
+	return t48s_nand_core_markbad(mtd, ofs);
 }
 
 /* ---- reading ---- */
@@ -306,14 +689,38 @@ static const struct mtd_partition t48s_nand_parts[] = {
 	T48S_PART("app",     0x02720000, 0x04ae0000),
 	T48S_PART("cfg",     0x07200000, 0x00400000),
 	T48S_PART("data",    0x07600000, 0x00a00000),
+	/* ours, and the only writeable ones: t48s_nand_ours[] is added after these */
 };
 
 static int __devinit t48s_nand_probe(struct platform_device *pdev)
 {
+	struct mtd_partition parts[ARRAY_SIZE(t48s_nand_parts) + ARRAY_SIZE(t48s_nand_ours)];
 	struct nand_chip *chip;
 	struct mtd_info *mtd;
 	loff_t ofs;
-	int err, bad = 0;
+	int err, bad = 0, i, j;
+
+	t48s_bch_init();
+	if (!t48s_bch_selftest()) {
+		pr_err("t48s_nand: the software ECC fails its self-test; no flash\n");
+		return -EINVAL;
+	}
+	/* every range we may write must lie whole blocks inside kernel or app */
+	for (i = 0; i < ARRAY_SIZE(t48s_nand_ours); i++) {
+		const struct mtd_partition *o = &t48s_nand_ours[i];
+
+		for (j = 0; j < ARRAY_SIZE(t48s_nand_reusable); j++)
+			if (o->offset >= t48s_nand_reusable[j].offset &&
+			    o->offset + o->size <= t48s_nand_reusable[j].offset +
+						   t48s_nand_reusable[j].size)
+				break;
+		if (j == ARRAY_SIZE(t48s_nand_reusable) || o->mask_flags ||
+		    (o->offset & 0x1ffff) || (o->size & 0x1ffff) || !o->size) {
+			pr_err("t48s_nand: writeable range %s is not inside kernel or app; no flash\n",
+			       o->name);
+			return -EINVAL;
+		}
+	}
 
 	mtd = kzalloc(sizeof(*mtd) + sizeof(*chip), GFP_KERNEL);
 	if (!mtd)
@@ -328,7 +735,7 @@ static int __devinit t48s_nand_probe(struct platform_device *pdev)
 		err = -ENOMEM;
 		goto out_free;
 	}
-	pr_info("t48s_nand: read-only. controller as found: timing %08x, control %08x (write protect pin %s), status %08x, BCH n=%u k=%u t=%u\n",
+	pr_info("t48s_nand: controller as found: timing %08x, control %08x (write protect pin %s), status %08x, BCH n=%u k=%u t=%u\n",
 		readl(umi + UMI_NAND_TCR), readl(umi + UMI_MMD_ICR),
 		(readl(umi + UMI_MMD_ICR) & 0x8000) ? "released" : "held",
 		readl(umi + UMI_NAND_RCSR), readl(umi + UMI_BCH_N),
@@ -344,14 +751,13 @@ static int __devinit t48s_nand_probe(struct platform_device *pdev)
 	}
 
 	chip->IO_ADDR_R = umi + NAND_REG_DATA;
-	chip->IO_ADDR_W = umi + NAND_REG_DATA;	/* never used: write_buf is a stub */
+	chip->IO_ADDR_W = umi + NAND_REG_DATA;	/* not used: t48s_nand_write_buf */
 	chip->cmd_ctrl = t48s_nand_cmd_ctrl;
 	chip->dev_ready = t48s_nand_dev_ready;
 	chip->chip_delay = 0;
-	chip->options = 0;
-	chip->bbt_options = 0;			/* bad block table in RAM only */
+	chip->options = NAND_NO_SUBPAGE_WRITE;	/* a page is programmed once */
+	chip->bbt_options = 0;			/* bad block table in RAM only, never in flash */
 	chip->write_buf = t48s_nand_write_buf;
-	chip->block_markbad = t48s_nand_block_markbad;
 	chip->write_page = t48s_nand_write_page;
 	chip->ecc.mode = NAND_ECC_HW;
 	chip->ecc.size = T48S_ECC_SIZE;
@@ -362,7 +768,7 @@ static int __devinit t48s_nand_probe(struct platform_device *pdev)
 	chip->ecc.write_page = t48s_nand_ecc_write_page;
 	chip->ecc.write_page_raw = t48s_nand_ecc_write_page;
 	chip->ecc.write_oob = t48s_nand_ecc_write_oob;
-	chip->ecc.write_oob_raw = t48s_nand_ecc_write_oob;
+	chip->ecc.write_oob_raw = t48s_nand_refuse_oob;
 	chip->badblock_pattern = &t48s_nand_badblock;
 
 	err = nand_scan_ident(mtd, 1, NULL);
@@ -378,7 +784,7 @@ static int __devinit t48s_nand_probe(struct platform_device *pdev)
 		err = -ENODEV;
 		goto out_unmap;
 	}
-	chip->erase_cmd = t48s_nand_erase_cmd;	/* nand_scan_ident set the real one */
+	chip->erase_cmd = t48s_nand_erase_cmd;	/* nand_scan_ident set the plain one */
 
 	err = nand_scan_tail(mtd);
 	if (err) {
@@ -386,9 +792,12 @@ static int __devinit t48s_nand_probe(struct platform_device *pdev)
 		goto out_unmap;
 	}
 
-	/* layer 3: nothing above this driver may write, whatever the layers below do */
-	mtd->flags &= ~MTD_WRITEABLE;
-	mtd->_write = NULL;
+	/* layer 3: the entry points check the address before the NAND layer sees it */
+	t48s_nand_core_write = mtd->_write;
+	t48s_nand_core_write_oob = mtd->_write_oob;
+	t48s_nand_core_erase = mtd->_erase;
+	t48s_nand_core_markbad = mtd->_block_markbad;
+	mtd->_write = t48s_mtd_write;
 	mtd->_write_oob = t48s_mtd_write_oob;
 	mtd->_panic_write = NULL;
 	mtd->_erase = t48s_mtd_erase;
@@ -396,21 +805,28 @@ static int __devinit t48s_nand_probe(struct platform_device *pdev)
 	if (chip->erase_cmd != t48s_nand_erase_cmd ||
 	    chip->write_buf != t48s_nand_write_buf ||
 	    chip->write_page != t48s_nand_write_page ||
-	    chip->block_markbad != t48s_nand_block_markbad ||
 	    chip->ecc.write_page != t48s_nand_ecc_write_page ||
 	    chip->ecc.write_page_raw != t48s_nand_ecc_write_page ||
 	    chip->ecc.write_oob != t48s_nand_ecc_write_oob ||
-	    chip->ecc.write_oob_raw != t48s_nand_ecc_write_oob ||
-	    (chip->bbt_options & NAND_BBT_USE_FLASH) ||
-	    (mtd->flags & MTD_WRITEABLE)) {
-		pr_err("t48s_nand: a write hook is not a stub; not registering the flash\n");
+	    chip->ecc.write_oob_raw != t48s_nand_refuse_oob ||
+	    (chip->bbt_options & NAND_BBT_USE_FLASH) || mtd->subpage_sft) {
+		pr_err("t48s_nand: a write hook is not ours; not registering the flash\n");
 		nand_release(mtd);
 		err = -EPERM;
 		goto out_unmap;
 	}
 
+	/* Yealink's partitions, all read-only, then ours */
+	memcpy(parts, t48s_nand_parts, sizeof(t48s_nand_parts));
+	memcpy(parts + ARRAY_SIZE(t48s_nand_parts), t48s_nand_ours, sizeof(t48s_nand_ours));
+	for (i = 0; i < ARRAY_SIZE(t48s_nand_parts); i++)
+		if (!(parts[i].mask_flags & MTD_WRITEABLE)) {
+			nand_release(mtd);
+			err = -EPERM;
+			goto out_unmap;
+		}
 	mtd->name = "t48s-nand";
-	err = mtd_device_register(mtd, t48s_nand_parts, ARRAY_SIZE(t48s_nand_parts));
+	err = mtd_device_register(mtd, parts, ARRAY_SIZE(parts));
 	if (err) {
 		nand_release(mtd);
 		goto out_unmap;
@@ -421,6 +837,10 @@ static int __devinit t48s_nand_probe(struct platform_device *pdev)
 			bad++;
 	pr_info("t48s_nand: %d bad blocks, %u chip commands blocked while scanning\n",
 		bad, blocked);
+	for (i = 0; i < ARRAY_SIZE(t48s_nand_ours); i++)
+		pr_info("t48s_nand: writeable: %s, 0x%08llx to 0x%08llx; everything else is read-only\n",
+			t48s_nand_ours[i].name, (unsigned long long)t48s_nand_ours[i].offset,
+			(unsigned long long)(t48s_nand_ours[i].offset + t48s_nand_ours[i].size));
 	return 0;
 
 out_unmap:
@@ -439,5 +859,5 @@ static struct platform_driver t48s_nand_driver = {
 };
 module_platform_driver(t48s_nand_driver);
 
-MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("Yealink T48S NAND flash, read-only");
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Yealink T48S NAND flash: read everywhere, write only our own ranges");
