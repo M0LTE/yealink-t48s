@@ -1,10 +1,11 @@
 From: Yealink T48S open firmware <noreply@example.invalid>
-Subject: [PATCH] watchdog: sp805: lock register at 0x400 on the BCM11107 family
+Subject: [PATCH] watchdog: sp805: the BCM11107 family's variant
 
 Broadcom's BCM11107 family (BCM11188 in the Yealink T48S) has an SP805
 whose block decodes only 11 address bits, so the lock register is at
-offset 0x400, not 0xC00. Select that with the compatible string
-"brcm,bcm11107-wdt".
+offset 0x400, not 0xC00. And a load value of 0 does not fire at once
+there: it counts 2^32 cycles, which made a restart take nearly three
+minutes. Select both with the compatible string "brcm,bcm11107-wdt".
 
 ---
 --- a/drivers/watchdog/sp805_wdt.c
@@ -33,14 +34,21 @@ offset 0x400, not 0xC00. Select that with the compatible string
  	struct clk			*clk;
  	u64				rate;
  	struct amba_device		*adev;
-@@ -138,13 +141,13 @@
+@@ -138,13 +141,19 @@
  {
  	struct sp805_wdt *wdt = watchdog_get_drvdata(wdd);
  
 -	writel_relaxed(UNLOCK, wdt->base + WDTLOCK);
 +	writel_relaxed(UNLOCK, wdt->base + wdt->lock_reg);
  	writel_relaxed(0, wdt->base + WDTCONTROL);
- 	writel_relaxed(0, wdt->base + WDTLOAD);
+-	writel_relaxed(0, wdt->base + WDTLOAD);
++	/*
++	 * A load of 0 fires at once on a standard SP805. On the BCM11107
++	 * family it counts 2^32 cycles first (nearly three minutes at
++	 * 25 MHz): use the smallest count there.
++	 */
++	writel_relaxed(wdt->lock_reg == WDTLOCK ? 0 : LOAD_MIN,
++		       wdt->base + WDTLOAD);
  	writel_relaxed(INT_ENABLE | RESET_ENABLE, wdt->base + WDTCONTROL);
  
  	/* Flush posted writes. */
@@ -49,7 +57,7 @@ offset 0x400, not 0xC00. Select that with the compatible string
  
  	return 0;
  }
-@@ -165,7 +168,7 @@
+@@ -165,7 +174,7 @@
  
  	spin_lock(&wdt->lock);
  
@@ -58,7 +66,7 @@ offset 0x400, not 0xC00. Select that with the compatible string
  	writel_relaxed(wdt->load_val, wdt->base + WDTLOAD);
  	writel_relaxed(INT_MASK, wdt->base + WDTINTCLR);
  
-@@ -173,10 +176,10 @@
+@@ -173,10 +182,10 @@
  		writel_relaxed(INT_ENABLE | RESET_ENABLE, wdt->base +
  				WDTCONTROL);
  
@@ -71,7 +79,7 @@ offset 0x400, not 0xC00. Select that with the compatible string
  	spin_unlock(&wdt->lock);
  
  	return 0;
-@@ -200,12 +203,12 @@
+@@ -200,12 +209,12 @@
  
  	spin_lock(&wdt->lock);
  
@@ -87,7 +95,7 @@ offset 0x400, not 0xC00. Select that with the compatible string
  	spin_unlock(&wdt->lock);
  
  	clk_disable_unprepare(wdt->clk);
-@@ -247,6 +250,14 @@
+@@ -247,6 +256,14 @@
  		return PTR_ERR(wdt->base);
  
  	/*
