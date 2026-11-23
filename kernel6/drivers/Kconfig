@@ -22,4 +22,9 @@ config T48S_ETH
 	bool "T48S Ethernet (CPU port of the on-chip switch)"
 	depends on NETDEVICES && ETHERNET
 
+config T48S_AUDIO
+	bool "T48S audio (BCM11188 APM codecs, ALSA)"
+	depends on SND = y
+	select SND_PCM
+
 endmenu

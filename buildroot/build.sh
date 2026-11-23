@@ -23,6 +23,15 @@ if [ ! -d "$BR" ]; then
 fi
 OUT="$WORK/output"
 make -C "$BR" O="$OUT" BR2_EXTERNAL="$EXT" t48s_defconfig >/dev/null
+# T48S_BR_FRAGMENT: a file of options laid over the defconfig (configs/kernel6.fragment)
+if [ -n "$T48S_BR_FRAGMENT" ]; then
+    FRAG=$(cd "$(dirname "$T48S_BR_FRAGMENT")" && pwd)/$(basename "$T48S_BR_FRAGMENT")
+    (cd "$OUT" && "$BR/support/kconfig/merge_config.sh" -m .config "$FRAG" >/dev/null)
+    make -C "$OUT" olddefconfig >/dev/null
+    grep -v '^#' "$FRAG" | grep . | while read -r o; do
+        grep -qxF "$o" "$OUT/.config" || { echo "fragment option not taken: $o" >&2; exit 1; }
+    done
+fi
 [ $# -gt 0 ] || set -- all
 make -C "$OUT" "$@"
 ls -l "$OUT/images"

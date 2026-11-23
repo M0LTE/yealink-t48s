@@ -91,3 +91,7 @@
 &ethernet {
 	status = "okay";
 };
+
+&audio {
+	status = "okay";
+};

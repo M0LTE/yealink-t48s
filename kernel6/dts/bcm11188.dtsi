@@ -140,6 +140,19 @@
 			status = "disabled";
 		};
 
+		/*
+		 * The two audio codecs of the APM block. Samples move through
+		 * channels 2 to 5 of DMA controller 0 (0x30200000), which the
+		 * driver programs itself. Interrupts: the APM block, then
+		 * those four channels (A out, A in, B out, B in).
+		 */
+		audio: audio@30600000 {
+			compatible = "brcm,bcm11107-apm";
+			reg = <0x30600000 0x100000>;
+			interrupts = <28>, <2>, <3>, <4>, <5>;
+			status = "disabled";
+		};
+
 		uarta: serial@80012000 {
 			compatible = "arm,pl011", "arm,primecell";
 			reg = <0x80012000 0x1000>;

@@ -1,0 +1,7 @@
+# Laid over t48s_defconfig for the modern kernel (kernel6/, issue 38): the same
+# root filesystem built against Linux 6.18 headers instead of 3.6.
+#   T48S_BR_FRAGMENT=buildroot/configs/kernel6.fragment buildroot/build.sh WORKDIR
+BR2_KERNEL_HEADERS_VERSION=y
+BR2_DEFAULT_KERNEL_VERSION="6.18.65"
+# BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_3_6 is not set
+BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_6_18=y
