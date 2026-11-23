@@ -274,7 +274,7 @@ static void start_dialler(int route)
 static void place_call(const char *number, int route)
 {
     char n[64];
-    snprintf(n, sizeof n, "%s", number);   /* number may be P.number, which clear_call leaves alone but be safe */
+    snprintf(n, sizeof n, "%s", number);   /* number may be P.number, which is about to be emptied */
     clear_call();
     P.outgoing = 1;
     snprintf(P.peer, sizeof P.peer, "%s", n);
@@ -495,6 +495,8 @@ void phone_audio_link(int up)
     changed();
 }
 
+/* the service's state changed. Nothing on the screen is drawn from it: the
+ * screens show what we asked for, and the simulator's checks read it direct. */
 void phone_audio_state(void) {}
 
 /* ---------- keys ---------- */
@@ -546,8 +548,11 @@ static void redial(void)
 static void route_key(int r)
 {
     switch (P.st) {
-    case PH_IDLE:
     case PH_ENDED:
+        /* a failed call's tone is still playing there: pressing the key again gives up */
+        if (P.route == r && !P.hook_off) { go_idle(); break; }
+        /* fall through */
+    case PH_IDLE:
         start_dialler(r);
         break;
     case PH_DIAL:
@@ -853,7 +858,8 @@ static void draw_incoming(void)
     t48_text_centre(&ui, SW / 2, 78, &t48_font_head, C_ACCENT, "Incoming call");
     big_text(SW / 2, 126, 720, who(), C_TEXT);
     if (P.peer_name[0]) t48_text_centre(&ui, SW / 2, 192, &t48_font_head, C_DIM, P.peer);
-    t48_text_centre(&ui, SW / 2, 268, &t48_font_normal, C_DIM, "Lift the handset, or press Speaker or Headset, to answer");
+    t48_text_centre(&ui, SW / 2, 268, &t48_font_normal, C_DIM,
+                    P.route != T48AC_ROUTE_NONE ? "Press OK to answer" : "Lift the handset, or press Speaker or Headset, to answer");
     if (!P.ring) t48_text_centre(&ui, SW / 2, 304, &t48_font_normal, C_FAINT, "Ringer silenced");
     ui_button(120, 372, 260, 76, "Answer", C_GOOD);
     ui_button(420, 372, 260, 76, "Decline", C_BAD);
@@ -897,8 +903,8 @@ static void draw_incall(void)
         t48_text_centre(&ui, cx, 142, &t48_font_huge, P.held ? C_ACCENT : C_TEXT, t);
     }
     if (side) keypad_draw();
-    if (P.note[0]) t48_text_centre(&ui, cx, side ? 268 : 268, &t48_font_normal, C_ACCENT, P.note);
-    chips(cx, 0, side ? 318 : 318);
+    if (P.note[0]) t48_text_centre(&ui, cx, 274, &t48_font_normal, C_ACCENT, P.note);
+    chips(cx, 0, 318);
 
     if (P.xfer) {
         ui_button(24, ROW_Y, 216, ROW_H, "Transfer", P.number[0] ? C_GOOD : C_PANEL);

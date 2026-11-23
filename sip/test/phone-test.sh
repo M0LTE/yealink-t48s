@@ -13,17 +13,30 @@
 #   sip/test/phone-test.sh [SCRIPT...]   in the sip/Dockerfile container, after
 #                                        TARGET=host sip/build.sh, make -C audiod
 #                                        and make -C shell all build/apps
+#   ARM=1 sip/test/phone-test.sh         the phone's side (shell, baresip, audio
+#                                        service) is the ARM build under qemu-arm;
+#                                        needs sip/build.sh and the two makes with
+#                                        CC=$T/bin/armcc O=build-arm as well
 set -e
 SIP=$(cd "$(dirname "$0")/.." && pwd)
 ROOT=$SIP/..
 T=${T:-$HOME/src-build/t48s}
 BARESIP=${HOST_BARESIP:-$T/sip-host/bin/baresip}
+ARM_BARESIP=${ARM_BARESIP:-$T/sip-arm/bin/baresip}
+AUDIOD=$ROOT/audiod/build/t48-audiod
+SIM=$ROOT/shell/build/t48-sim
+PHONE_BARESIP=$BARESIP
+if [ "$ARM" = 1 ]; then
+    AUDIOD="qemu-arm $ROOT/audiod/build-arm/t48-audiod"
+    SIM="qemu-arm $ROOT/shell/build-arm/t48-sim"
+    PHONE_BARESIP="qemu-arm $ARM_BARESIP"
+fi
 W=${W:-/tmp/t48-phone-test}
 rm -rf $W && mkdir -p $W/shots $W/phone-config
 FAILS=0
 
 PIDS=
-cleanup() { kill $PIDS $KAM 2>/dev/null || true; }
+cleanup() { kill $PIDS $KAM 2>/dev/null || true; wait 2>/dev/null || true; }
 trap cleanup EXIT
 
 echo "== registrar"
@@ -47,7 +60,11 @@ side() {
         -e "s|^audio_player.*|audio_player\t\taufile,$d/heard.wav|" $d/config.in
     printf 'user=%s\npassword=test-only-%s\ndomain=127.0.0.1\ntransport=%s\ndisplay_name=%s\nregister_seconds=60\n' \
         "$2" "$2" "$4" "$5" > "$6"
-    T48_SIP_SETTINGS=$6 T48_SIP_CONFIG=$d/config.in T48_SIP_RUN=$d/run BARESIP=$BARESIP \
+    # t48-sip runs "$BARESIP -f DIR", so a wrapper carries the qemu prefix
+    if [ "$7" = far ]; then bin=$BARESIP; else bin=$PHONE_BARESIP; fi
+    printf '#!/bin/sh\nexec %s "$@"\n' "$bin" > $d/baresip
+    chmod +x $d/baresip
+    T48_SIP_SETTINGS=$6 T48_SIP_CONFIG=$d/config.in T48_SIP_RUN=$d/run BARESIP=$d/baresip \
         "$SIP/t48-sip" -c >$d/log 2>&1 &
     PIDS="$PIDS $!"
 }
@@ -55,7 +72,7 @@ side() {
 # the phone: its audio service (null backend: no sound device is touched), then baresip.
 # The settings file is the one the shell reads too, as /data/config/sip is on the phone.
 mkdir -p $W/phone
-"$ROOT/audiod/build/t48-audiod" --run-dir $W/phone/audio 2>$W/audiod.log &
+$AUDIOD --run-dir $W/phone/audio 2>$W/audiod.log &
 PIDS="$PIDS $!"
 side phone 1001 5071 udp "Desk phone" $W/phone-config/sip
 side bob 1002 5072 tcp "Bob Example" $W/bob.sip far
@@ -80,7 +97,7 @@ for s in $SCRIPTS; do
     # each scenario starts with nothing remembered, unless it says it follows on from the one before
     grep -q '^# keep-state' $s || rm -rf $W/phone-state $W/phone-config/audio
     : > $BOBLOG; : > $CAROLLOG
-    if "$ROOT/shell/build/t48-sim" --apps "$ROOT/shell/build/apps" --data $W/appdata --config $W/phone-config \
+    if $SIM --sim --apps "$ROOT/shell/build/apps" --data $W/appdata --config $W/phone-config \
             --state $W/phone-state --sip $PHONE --audio $W/phone/audio/ctl.sock --script $s >$W/$name.log 2>&1; then
         echo "PASS $name"
     else
