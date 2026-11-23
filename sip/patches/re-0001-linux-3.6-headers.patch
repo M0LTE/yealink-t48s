@@ -1,0 +1,20 @@
+--- a/src/net/linux/addrs.c
++++ b/src/net/linux/addrs.c
+@@ -126,11 +126,17 @@
+ 		if (!iff_up)
+ 			continue;
+ 
++/* IFA_FLAGS arrived in Linux 3.14 (with IFA_F_MANAGETEMPADDR); the T48S
++ * runs 3.6, whose kernel never sends it */
++#ifdef IFA_F_MANAGETEMPADDR
+ 		if (rta_tb[IFA_FLAGS] && ifa->ifa_family == AF_INET6) {
+ 			flags = *(uint32_t *)RTA_DATA(rta_tb[IFA_FLAGS]);
+ 			if (is_ipv6_deprecated(flags))
+ 				continue;
+ 		}
++#else
++		(void)flags;
++#endif
+ 
+ 		if (rta_tb[IFA_LOCAL])
+ 			/* looks like point-to-point network, use local

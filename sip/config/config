@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# baresip config for the T48S (issue #25, docs/sip.md). t48-sip copies this
+# into its run directory and writes the accounts file next to it from
+# /data/config/sip. Replace it with /data/local/sip/config to change it.
+
+poll_method		epoll
+
+# SIP: UDP and TCP on the usual port. The tls transport needs the TLS build.
+sip_listen		0.0.0.0:5060
+sip_transports		udp,tcp
+sip_trans_def		udp
+sip_tos			160
+
+# Calls: the shell decides when to answer
+call_local_timeout	120
+call_max_calls		4
+call_hold_other_calls	yes
+call_accept		no
+
+# Audio: the audio service's call stream, always 16 kHz mono s16; auresamp
+# converts for 8 kHz codecs. Until t48-audiod exists t48audio is a null
+# device (silence in, audio thrown away). Ringing and tones are played by the
+# audio service at the shell's request, so menu's ring tones are switched off.
+audio_player		t48audio,call
+audio_source		t48audio,call
+audio_alert		t48audio,call
+ausrc_srate		16000
+auplay_srate		16000
+ausrc_channels		1
+auplay_channels		1
+audio_level		no
+ausrc_format		s16
+auplay_format		s16
+auenc_format		s16
+audec_format		s16
+audio_buffer		20-160
+audio_jitter_buffer_type	adaptive
+audio_jitter_buffer_ms		50-300
+audio_jitter_buffer_size	50
+
+# RTP
+rtp_tos			184
+rtp_ports		10000-10999
+rtp_timeout		60
+
+# Codecs, in order of preference: G.722 (wideband), then G.711
+module			libg722.so
+module			g711.so
+
+# Resampling between the 16 kHz device and 8 kHz G.711
+module			auresamp.so
+
+# Audio devices
+module			t48audio.so
+module			aufile.so
+module			ausine.so
+
+# Apps. menu provides the call commands (dial, accept, hangup, ...) that
+# ctrl_tcp runs. ctrl_tcp listens on loopback only, and any local program can
+# reach it: our own control module on a root-only Unix socket replaces it
+# (docs/sip.md).
+module_app		account.so
+module_app		menu.so
+module_app		ctrl_tcp.so
+ctrl_tcp_listen		127.0.0.1:4444
+# No tone files on the phone: the audio service plays them (see Audio above)
+ringback_disabled	yes
+ring_aufile		none
+ringback_aufile		none
+callwaiting_aufile	none

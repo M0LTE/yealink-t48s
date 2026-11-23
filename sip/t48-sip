@@ -1,0 +1,71 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Start baresip for the T48S (issue #25). Reads the owner's SIP account from
+# the settings file, writes baresip's accounts file into a run directory next
+# to a copy of the config, and runs baresip there. Meant to be run by runit.
+#
+# The settings file is key=value, one per line, # for comments
+# (sip/config/sip.example). Paths can be moved for testing:
+#   T48_SIP_SETTINGS  default /data/config/sip
+#   T48_SIP_CONFIG    default /data/local/sip/config if present,
+#                     else /usr/share/t48/sip/config
+#   T48_SIP_RUN       default /run/t48-sip (holds the password: mode 0700)
+#   BARESIP           default baresip
+set -e
+SETTINGS=${T48_SIP_SETTINGS:-/data/config/sip}
+CONFIG=${T48_SIP_CONFIG:-}
+if [ -z "$CONFIG" ]; then
+    CONFIG=/usr/share/t48/sip/config
+    [ -f /data/local/sip/config ] && CONFIG=/data/local/sip/config
+fi
+RUN=${T48_SIP_RUN:-/run/t48-sip}
+BARESIP=${BARESIP:-baresip}
+
+die() { echo "t48-sip: $*" >&2; exit 1; }
+
+[ -f "$SETTINGS" ] || die "no settings file $SETTINGS (see sip.example)"
+[ -f "$CONFIG" ] || die "no config $CONFIG"
+
+user= password= domain= auth_user= display_name= transport=udp proxy= regint=600
+while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    key=${line%%=*}
+    val=${line#*=}
+    case "$key" in
+        user) user=$val ;;
+        password) password=$val ;;
+        domain) domain=$val ;;
+        auth_user) auth_user=$val ;;
+        display_name) display_name=$val ;;
+        transport) transport=$val ;;
+        outbound_proxy) proxy=$val ;;
+        register_seconds) regint=$val ;;
+        *) echo "t48-sip: ignoring unknown setting '$key'" >&2 ;;
+    esac
+done < "$SETTINGS"
+
+[ -n "$user" ] || die "settings: user is missing"
+[ -n "$domain" ] || die "settings: domain is missing"
+case "$transport" in udp|tcp|tls) ;; *) die "settings: transport must be udp, tcp or tls" ;; esac
+case "$regint" in ''|*[!0-9]*) die "settings: register_seconds must be a number" ;; esac
+# baresip's accounts line has no quoting for these
+for v in "$user" "$domain" "$auth_user" "$password" "$proxy"; do
+    case "$v" in *[\;\<\>\"\ ]*) die "settings: ; < > \" and spaces are not allowed in values" ;; esac
+done
+case "$display_name" in *[\"\<\>]*) die "settings: display_name cannot hold \" < or >" ;; esac
+
+umask 077
+mkdir -p "$RUN"
+chmod 700 "$RUN"
+cp "$CONFIG" "$RUN/config"
+
+line="<sip:$user@$domain;transport=$transport>"
+[ -n "$display_name" ] && line="\"$display_name\" $line"
+[ -n "$auth_user" ] && line="$line;auth_user=$auth_user"
+[ -n "$password" ] && line="$line;auth_pass=$password"
+[ -n "$proxy" ] && line="$line;outbound=\"$proxy\""
+line="$line;regint=$regint;answermode=manual"
+printf '# Written by t48-sip from %s; edits here are lost\n%s\n' "$SETTINGS" "$line" > "$RUN/accounts"
+
+exec "$BARESIP" -f "$RUN" "$@"
