@@ -2,14 +2,17 @@
 wait 200
 expect idle
 # Down, or the Settings button, from the idle screen
-touch 590 420
+touch 700 420
 expect settings
 expectstate settings.page root
-expectstate settings.row Phone_account
+expectstate settings.row Phone_accounts
 expectstate settings.value not_set
 shot shots/settings.png
 
 # ---- the SIP account: keypad typing ----
+key ok
+expectstate settings.page accounts
+expectstate settings.row Account_1
 key ok
 expectstate settings.page sip
 key ok
@@ -141,6 +144,10 @@ key left
 expectstate cfg.sip.transport udp
 shot shots/settings-sip.png
 # leaving the page applies it: the idle screen's account follows
+key x
+expectstate settings.page accounts
+expectstate settings.value 1001@sip.lan
+shot shots/settings-accounts.png
 key x
 expectstate settings.page root
 expectstate settings.value 1001@sip.lan
@@ -338,6 +345,7 @@ expect idle
 key down
 key ok
 key ok
+key ok
 expectstate kbd open
 hook off
 expect call
@@ -345,6 +353,7 @@ hook on
 expect settings
 expectstate kbd open
 key ok
+key x
 key x
 key x
 expect idle

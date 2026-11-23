@@ -13,7 +13,7 @@ expectstate ended Missed_call
 waitstate phone idle 4000
 expect idle
 expectstate missed 1
-expectstate led.power on
+expectstate led.message on
 expectstate last m:1002
 wait 300
 shot shots/phone-idle-missed.png
@@ -34,10 +34,10 @@ hook on
 expect idle
 waitstate audio.tone 0 2000
 # the history, by touch on Calls; looking at it clears the count
-touch 400 420
+touch 246 420
 expect history
 expectstate missed 0
-expectstate led.power off
+expectstate led.message off
 expectstate history 2
 shot shots/phone-history.png
 # Down and OK: the missed caller's number goes into the dialler

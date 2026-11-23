@@ -1,0 +1,73 @@
+# Contacts: a number in the list shows its name for calls in and out, and in the history.
+waitstate reg ok 8000
+waitstate audio up 3000
+# add "boss", 1002, on the phone
+key left
+expect contacts
+touch 246 410
+key 2
+key 2
+wait 1000
+key 6
+key 6
+key 6
+wait 1000
+key 7
+key 7
+key 7
+key 7
+wait 1000
+key 7
+key 7
+key 7
+key 7
+expectstate kbd.text boss
+key ok
+key 1
+key 0
+key 0
+key 2
+key ok
+expectstate contacts 1
+key x
+expect idle
+# 1002 calls: the name from the list, not the one the caller sends ("Bob Example")
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+expectstate name boss
+expectstate peer 1002
+wait 300
+shot shots/phone-incoming-contact.png
+hook off
+waitstate phone incall 5000
+wait 300
+shot shots/phone-in-call-contact.png
+hook on
+waitstate phone idle 5000
+expectstate last i:1002
+expectstate last.name boss
+# someone not in the list keeps the name they send
+run $FAR $CAROL cmd dial 1001
+waitstate phone incoming 5000
+expectstate name Carol_Example
+key x
+waitstate phone idle 5000
+# dial from the list
+key left
+key ok
+expect call
+expectstate number 1002
+key ok
+waitstate phone outgoing 2000
+expectstate name boss
+run $FAR $BOB waitcall incoming 5
+wait 300
+shot shots/phone-outgoing-contact.png
+key x
+waitstate phone idle 5000
+key up
+expect history
+wait 200
+shot shots/phone-history-names.png
+key x
+quit

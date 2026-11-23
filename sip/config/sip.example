@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # The phone's SIP account, as /data/config/sip (read by t48-sip at start).
+# More accounts, up to six, are files of the same kind beside it: sip2 to sip6.
 # key=value, one per line. Only user and domain are required.
 # Values may not contain ; < > " or spaces (display_name may hold spaces).
 
@@ -11,3 +12,7 @@ domain=sip.example.com
 # transport=udp
 # outbound_proxy=sip:proxy.example.com
 # register_seconds=600
+# enabled=off             keep the account but do not use it
+# label=Work              what the phone calls this account on its screen
+# voicemail=1571          the number the Message key calls
+# mwi=off                 do not ask the server about waiting messages

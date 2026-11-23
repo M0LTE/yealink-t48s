@@ -96,7 +96,7 @@ The key table is in the driver, all confirmed by pressing every key (2026-11-22)
 
 For tests without anyone at the phone, `echo "CODE VALUE" > /sys/module/t48s_keypad/parameters/inject` reports a Linux key code as pressed (1) or released (0) through the real device: `KEY_PHONE` (169) on the hook switch, any key in the table on the keypad. `tools/phone-input.sh` wraps it with key names (`key ok`, `hook off`). Unlike writing to `/dev/input/event0`, this reaches a program that has grabbed the device.
 
-`drivers/t48s_holtek.c` (copied into `drivers/misc/`) bit-bangs the Holtek chip on GPIO36/11/10. At boot it reads the version block and, if the chip answers as a protocol 2.0 one, turns its watchdog off; the kexec loader has already done that, so this is for boot paths that have not. `echo N > /sys/module/t48s_holtek/parameters/watchdog` arms it for N seconds (nothing feeds it: the phone resets, which is a handy way to prove it works), 0 turns it off. The chip also drives the power lamp (next section).
+`drivers/t48s_holtek.c` (copied into `drivers/misc/`) bit-bangs the Holtek chip on GPIO36/11/10. At boot it reads the version block and, if the chip answers as a protocol 2.0 one, turns its watchdog off; the kexec loader has already done that, so this is for boot paths that have not. `echo N > /sys/module/t48s_holtek/parameters/watchdog` arms it for N seconds (nothing feeds it: the phone resets, which is a handy way to prove it works), 0 turns it off. The chip also drives the message lamp (next section).
 
 Not tested yet: an actual key press. To test:
 
@@ -112,7 +112,7 @@ then press each key once. Every press and release prints a line on the screen an
 
 | LED | Lamp | Wiring |
 |---|---|---|
-| `t48s:red:power` | top right of the case | the Holtek chip, command 4 |
+| `t48s:red:message` | top right of the case: the message and ringing lamp (called `t48s:red:power` until 2026-11-23; Yealink's files call it "power") | the Holtek chip, command 4 |
 | `t48s:green:headset` | in the Headset key | GPIO3, low = lit |
 | `t48s:red:mute` | in the Mute key | GPIO4, low = lit |
 | `t48s:green:speaker` | in the Speakerphone key | GPIO5, low = lit |
@@ -127,7 +127,7 @@ echo none > trigger                 # stop blinking
 cat brightness                      # for the three key lamps this reads the pin itself
 ```
 
-The colours in the names are what we expect (the Headset and Speakerphone keys light green on these phones, Mute and the power lamp red), not yet checked by eye; nor is the power lamp, which the chip gives no way to read back. `t48-shell` drives the lamps while it runs, so stop it before playing with them by hand, or it will put them back.
+The colours in the names are what we expect (the Headset and Speakerphone keys light green on these phones, Mute and the message lamp red), not yet checked by eye; nor is the message lamp, which the chip gives no way to read back. `t48-shell` drives the lamps while it runs, so stop it before playing with them by hand, or it will put them back.
 
 ## Touchscreen (2026-11-22, issue #4)
 

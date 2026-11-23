@@ -86,7 +86,7 @@ static char *trim(char *s)
  *   [handset]              one of: alert handset speaker headset
  *   capture 0              ALSA device to record from
  *   playback 0             ALSA device to play to
- *   echo none              or: switch
+ *   echo none              or: switch (voice switching), aec (echo canceller, docs/aec.md)
  *   coupling 256           echo level against loudspeaker level, 256 = equal
  *   confirmed 1
  *   set Codec A Capture Source = 0
@@ -157,6 +157,8 @@ int routes_load(const char *path)
 			r->echo = ECHO_NONE;
 		else if (!strcmp(s, "echo") && !strcmp(v, "switch"))
 			r->echo = ECHO_SWITCH;
+		else if (!strcmp(s, "echo") && !strcmp(v, "aec"))
+			r->echo = ECHO_AEC;
 		else
 			goto bad;
 	}
@@ -175,7 +177,7 @@ void routes_print(void)
 		const struct route *r = &routes[i];
 		printf("[%s]\ncapture %d\nplayback %d\necho %s\ncoupling %d\nconfirmed %d\n",
 		       r->name, r->cap_dev, r->play_dev,
-		       r->echo == ECHO_SWITCH ? "switch" : "none", r->coupling_q8, r->confirmed);
+		       r->echo == ECHO_AEC ? "aec" : r->echo == ECHO_SWITCH ? "switch" : "none", r->coupling_q8, r->confirmed);
 		for (j = 0; j < r->nctl; j++)
 			printf("set %s = %d\n", r->ctl[j].name, r->ctl[j].value);
 		printf("\n");
