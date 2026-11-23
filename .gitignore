@@ -19,10 +19,7 @@ __pycache__/
 dumps/
 # Vendor GPL source downloads
 gpl-src/
-# Built binaries copied in for the kexec initramfs
-kernel/kexec-rootfs/bin/busybox
-kernel/kexec-rootfs/usr/bin/
-kernel/kexec-rootfs/usr/share/t48/
+# SSH keys for our own test images (kernel/build.sh adds them); never published
 kernel/kexec-rootfs/root.authorized_keys
 .claude/worktrees/
 

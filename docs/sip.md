@@ -47,7 +47,7 @@ docker run --rm -u $(id -u):$(id -g) -e HOME=/work -e T=/work/t48s \
 - `sip/build.sh` downloads pinned, checksummed sources and builds into `$T/sip-arm/bin/baresip`. `TARGET=host` builds the same thing for the PC; `TLS=1` the TLS variant. Licence texts of everything linked in are copied to `$T/sip-*/share/licences/`; they ship with the binary.
 - A build takes a minute or two on 8 cores. The container image is about 2 GB.
 
-These are plain scripts because Buildroot (#16) had not landed when this was written. They map directly onto Buildroot packages: one each for libre (cmake-package, depends on mbedtls or openssl, which Buildroot already has), libg722 and baresip (with `APP_MODULES_DIR` pointing at `sip/modules`), plus the libre patch.
+The phone's image builds the same thing with Buildroot (#16): packages `libre`, `libg722` and `baresip` in `buildroot/package`, with the same versions and checksums, the libre patch from `sip/patches`, Buildroot's mbedTLS, and the module list read from `sip/build.sh`. They install `baresip`, `t48-sip`, the config and `sip.example` in `/usr/share/t48/sip`, and the licence texts; nothing starts baresip at boot. The scripts stay for the PC build and the call test.
 
 ## Running it
 
@@ -123,7 +123,7 @@ Result on 2026-11-23, all passing:
 2. Measure CPU for a G.722 call on the 500 MHz ARM11 (expected small; G.711 is trivial).
 3. Done off the phone: our control module on a Unix socket (`t48ctrl`), and the shell's client for it ([phone.md](phone.md)).
 4. Done off the phone: the real `t48audio` and the audio service, tested with calls between two of each (`sip/test/audiod-test.sh`, results in [audiod.md](audiod.md#tests-and-results)). On the phone it waits for playback in the kernel driver.
-5. A runit service for `t48-sip`; Buildroot packages once #16 lands.
+5. A runit service for `t48-sip`. (Buildroot packages: done, #16.)
 6. Decide on TLS (2.4 MB) and SRTP later.
 
 ## Licences

@@ -2,17 +2,16 @@
 # Build the T48S kernel inside the t48s-kbuild:trusty container (gcc 4.7).
 # Run from the directory holding linux-3.6.11/ and this kernel/ directory.
 #   sh kernel/build.sh          -> T48S.bin   (U-Boot image, for recovery-mode TFTP boot)
-#   sh kernel/build.sh kexec    -> Image-kexec (raw Image with built-in initramfs,
-#                                  for kmod/t48kexec; needs kexec-rootfs.list)
 #   ROOTFS=rootfs.cpio sh kernel/build.sh kexec
-#                               -> Image-kexec with Buildroot's root filesystem
-#                                  (buildroot/build.sh) instead of the hand list.
-#                                  If AUTHORIZED_KEYS (default
-#                                  kexec-rootfs/root.authorized_keys) exists, it
-#                                  is added as /root/.ssh/authorized_keys.
+#                               -> Image-kexec (raw Image for kmod/t48kexec) with
+#                                  Buildroot's root filesystem (buildroot/build.sh)
+#                                  built in as the initramfs. If AUTHORIZED_KEYS
+#                                  (default kexec-rootfs/root.authorized_keys)
+#                                  exists, it is added as /root/.ssh/authorized_keys.
 set -e
 VARIANT=${1:-tftp}
-if [ "$VARIANT" = kexec ] && [ -n "$ROOTFS" ]; then
+if [ "$VARIANT" = kexec ]; then
+    [ -n "$ROOTFS" ] || { echo "kexec: set ROOTFS to Buildroot's rootfs.cpio (buildroot/build.sh)" >&2; exit 2; }
     # the initramfs is Buildroot's cpio with a second cpio holding the keys appended
     # (the kernel unpacks concatenated archives in turn); the keys never enter the
     # Buildroot output, so a published root filesystem carries none
@@ -154,7 +153,7 @@ EOD
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- bcmring_defconfig
 ./scripts/kconfig/merge_config.sh -m .config ../kernel/t48s.config >/dev/null
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kernel/kexec.config >/dev/null
-[ "$VARIANT" = kexec ] && [ -n "$ROOTFS" ] && ./scripts/kconfig/merge_config.sh -m .config ../kexec-initramfs.config >/dev/null
+[ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kexec-initramfs.config >/dev/null
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig >/dev/null 2>&1 || make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- oldnoconfig >/dev/null
 for o in CONFIG_SND_T48S CONFIG_SND_PCM= CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
 if [ "$VARIANT" = kexec ]; then

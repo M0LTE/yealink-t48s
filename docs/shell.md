@@ -58,17 +58,11 @@ With `--sip SOCKET` and `--audio SOCKET` the simulator talks to a real baresip a
 
 ## Running it on the phone
 
-The kexec image starts `t48-shell` on the screen at boot (`kernel/kexec-rootfs/etc/inittab`), with the clock app in `/usr/share/t48/apps`. Its log is `/var/log/t48-shell.log` on the phone: the input devices it found, each screen change, each app start and stop. If it is killed, `init` starts it again.
+The kexec image starts `t48-shell` on the screen at boot (`buildroot/board/t48s/rootfs-overlay/etc/inittab`), with the clock app in `/usr/share/t48/apps`. Its log is `/var/log/t48-shell.log` on the phone: the input devices it found, each screen change, each app start and stop. If it is killed, `init` starts it again.
 
 ![the idle screen, read back from the phone's framebuffer](img/shell-on-phone.png)
 
-To put a new build into the image, copy the programs into the kernel build folder before building (the paths are the ones `kernel/kexec-rootfs.list` names):
-
-```
-make -C shell CC=$HOME/src-build/t48s/bin/armcc O=build-arm all build-arm/apps
-cp shell/build-arm/t48-shell                 BUILD/kexec-rootfs/usr/bin/
-cp -r shell/build-arm/apps/clock             BUILD/kexec-rootfs/usr/share/t48/apps/
-```
+The image gets the shell, libt48 and the clock from their Buildroot packages (`buildroot/package/t48-shell`, `buildroot/package/libt48`), built from this repo's `shell/` and `libt48/`, so a new image build picks up the current code.
 
 To try a build without a new image, copy it over and restart the shell; extra apps can go in `/data/apps` (in RAM for now, so gone at the next boot):
 

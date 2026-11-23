@@ -213,6 +213,6 @@ The older `sip/test/call-test.sh` still passes; its `t48audio` call now proves t
 ## Not done
 
 - The playback stream for apps (silenced during calls) that the architecture mentions. Message types are free for it on both sockets.
-- A runit service and Buildroot package; they wait for #16.
+- A runit service. The Buildroot package is done (#16): `t48-audiod` and `t48-audioctl` are in the image, not started at boot.
 - (Done since, in #26: the shell's client, `shell/audioc.c`. See [phone.md](phone.md).)
 - Tone plans for other countries, and a choice of ring melodies.

@@ -32,13 +32,13 @@ Board changes:
 
 Pitfalls found on the way, in boot order: RAM must end on a 1 MB boundary or 3.6 hangs in `paging_init`; overlapping static mappings hit `BUG()` in `vm_area_add_early`; a UART clock gated off during `amba_device_add` leaves the early console spinning on a full FIFO (a silent hang).
 
-Root filesystem from Buildroot (issue #16): `buildroot/` is a Buildroot external tree (pinned release, musl, ARM1176 soft-float, 3.6 headers, everything static) that builds the same userspace as the hand list: busybox with DHCP and NTP, dropbear (key login only), getty on the screen, our programs from `native/`, plus curl with mbedTLS, CA certificates and mtd-utils. `buildroot/build.sh WORKDIR` leaves `WORKDIR/output/images/rootfs.cpio`; add `sdk` for the SDK tarball. To build it into the kexec kernel, put `rootfs.cpio` beside `linux-3.6.11/` and run
+Root filesystem (issue #16): Buildroot, from the external tree in `buildroot/` ([its README](../buildroot/README.md)). It is the only root filesystem for the kexec image; the hand-made list it replaced is gone. `buildroot/build.sh WORKDIR` leaves `WORKDIR/output/images/rootfs.cpio`. To build it into the kexec kernel, put `rootfs.cpio` beside `linux-3.6.11/` and run
 
 ```
 docker run --rm -u $(id -u):$(id -g) -v $PWD:/w -w /w -e ROOTFS=rootfs.cpio t48s-kbuild:trusty sh kernel/build.sh kexec
 ```
 
-`kexec-rootfs/root.authorized_keys` is added as root's SSH keys if it exists (it is gitignored, never published); without it there is no SSH, only the serial console. `build.sh` patches a fresh `linux-3.6.11/` each time. CI (`.github/workflows/build.yml`) builds the root filesystem, SDK and kernel image on pushes to main and publishes them on a `v*` tag. The container's recipe is `kernel/Dockerfile`.
+`kexec-rootfs/root.authorized_keys` (in the build folder, beside `kernel/`) is added as root's SSH keys if it exists; it is gitignored and never published. Without it there is no SSH, only the serial console. `build.sh` patches a fresh `linux-3.6.11/` each time. CI (`.github/workflows/build.yml`) builds the root filesystem and kernel image on pushes to main and publishes them, with the SDK, on a `v*` tag. The container's recipe is `kernel/Dockerfile`.
 
 Userspace for testing: `tools/mkrfs-bb.sh` builds `T48S.rfs` with a static busybox (musl), a shell on the serial console and `native/membanner` drawing on the screen. Boot it with U-Boot's recovery mode, option 1 (TFTP), served by `tools/tftpd.py DIR 69 --rom-once`.
 
@@ -82,7 +82,7 @@ then press each key once. Every press and release prints a line on the screen an
 
 `drivers/t48s_touch.c` (copied into `drivers/input/`) gives the input device "T48S touchscreen" (`/dev/input/event2`): `BTN_TOUCH`, `ABS_X`, `ABS_Y`, `ABS_PRESSURE`, all raw 12-bit values (0 to 4095), the same as Yealink's own driver reports. The chip is a TI TSC2046 on the SoC's SPI host (an ARM PL022). The driver talks to the PL022 directly and polls: about 50 times a second (it asks for 10 ms, the 100 Hz tick makes that 20) it reads the pen-down pin (GPIO26), and only while that is low does it clock the chip (X ten times, Y ten times, pressure, in one quarter-millisecond transfer). No SPI core, no GPIO interrupts, nothing to configure.
 
-Raw values become pixels in userspace, with a tslib-style `/etc/pointercal`. The kexec root filesystem carries the phone's factory calibration (from U-Boot's `calparam`): `14798 13 -4134128 53 10207 -5441552 65536`, meaning x = (14798 * rawx + 13 * rawy - 4134128) / 65536 and y = (53 * rawx + 10207 * rawy - 5441552) / 65536. To recalibrate later, replace those seven numbers.
+Raw values become pixels in userspace, with a tslib-style `/etc/pointercal`. The root filesystem carries the phone's factory calibration (from U-Boot's `calparam`): `14798 13 -4134128 53 10207 -5441552 65536`, meaning x = (14798 * rawx + 13 * rawy - 4134128) / 65536 and y = (53 * rawx + 10207 * rawy - 5441552) / 65536. To recalibrate later, replace those seven numbers.
 
 To touch the screen from a PC, `echo "X Y" > /sys/module/t48s_touch/parameters/inject` reports a touch at a raw position and `echo up` lifts it; `tools/phone-input.sh touch 400 240` works in screen pixels.
 
