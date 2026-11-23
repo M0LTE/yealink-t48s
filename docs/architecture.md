@@ -86,6 +86,8 @@ Until #6 reports, a null backend and a file backend let SIP and the phone UI go 
 - The call state lives in baresip, the audio state in the audio service; the shell is the glue and the face. That is why a separate "phone daemon" is not needed.
 - Settings are plain text files in `/data/config`, edited on the screen (with an on-screen keyboard) or over SSH. No web interface for now.
 
+(2026-11-23: the phone UI exists and is tested in the simulator against baresip and the audio service, see [phone.md](phone.md). baresip's control is our own module on a root-only socket, see [sip.md](sip.md#control-interface).)
+
 ## 3. Apps
 
 ### What an app is

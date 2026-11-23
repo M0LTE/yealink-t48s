@@ -51,7 +51,6 @@ side() {
     $AUDIOD_BIN --run-dir $d/audio --spk $d/spk.wav "$@" 2>$d/audiod.log &
     PIDS="$PIDS $!"
     sed -e "s|^sip_listen.*|sip_listen\t\t127.0.0.1:$port|" \
-        -e "s|^ctrl_tcp_listen.*|ctrl_tcp_listen\t\t127.0.0.1:$(( port - 5071 + 4441 ))|" \
         -e "s|^rtp_ports.*|rtp_ports\t\t$(( (port - 5070) * 1000 + 20000 ))-$(( (port - 5070) * 1000 + 20099 ))|" \
         "$SIP/config/config" > $d/config.in
     # baresip skips loopback addresses unless named here

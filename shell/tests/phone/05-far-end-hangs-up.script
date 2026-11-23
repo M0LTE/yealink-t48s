@@ -1,0 +1,32 @@
+# On-hook dialling: type, press OK, the call goes out on the loudspeaker;
+# the far end answers and later hangs up; the phone goes back to idle by itself.
+waitstate reg ok 8000
+waitstate audio up 3000
+key 1
+key 0
+key 0
+key 2
+key ok
+expectstate phone outgoing
+expectstate route speaker
+run $FAR $BOB accept
+waitstate phone incall 5000
+waitstate audio.route speaker 2000
+wait 1200
+run $FAR $BOB cmd hangup
+waitstate phone ended 5000
+expectstate ended Call_ended
+waitstate phone idle 4000
+expect idle
+waitstate audio.route none 2000
+expectstate last o:1002
+# Redial calls the same number again
+key redial
+expectstate phone outgoing
+expectstate peer 1002
+run $FAR $BOB waitcall incoming 5
+key x
+expectstate phone ended
+run $FAR $BOB waitcall none 5
+waitstate phone idle 4000
+quit

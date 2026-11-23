@@ -7,9 +7,11 @@
 CC ?= cc
 O ?= build
 CFLAGS ?= -O2
-CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections -I../libt48/include
+# the audio service's control protocol header
+AUDIOD_INCLUDE ?= ../audiod/include
+CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections -I../libt48/include -I$(AUDIOD_INCLUDE)
 LIB ?= ../libt48/$(O)/libt48.a
-SRC = main.c app.c manifest.c be_fb.c be_sim.c
+SRC = main.c app.c manifest.c phone.c sipc.c audioc.c leds.c be_fb.c be_sim.c
 
 all: $(O)/t48-shell $(O)/t48-sim
 
@@ -35,7 +37,8 @@ $(O)/apps: $(LIB) tests/crasher.c tests/crasher.json
 
 check: all $(O)/apps
 	@mkdir -p $(O)/shots
-	cd $(O) && for t in ../tests/*.script; do echo "== $$t"; ./t48-sim --apps apps --script $$t || exit 1; done
+	cd $(O) && for t in ../tests/*.script; do echo "== $$t"; rm -rf simdata; \
+		./t48-sim --apps apps --data simdata --config simdata --state simdata --script $$t || exit 1; done
 	@echo "all simulator tests passed"
 
 clean:

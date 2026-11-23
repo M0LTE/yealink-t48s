@@ -1,0 +1,42 @@
+# In a call: the tone keypad on the touch screen, and volume for the route in use.
+waitstate reg ok 8000
+waitstate audio up 3000
+hook off
+expectstate phone dial
+# dial tone (tone 1) on the handset
+waitstate audio.tone 1 2000
+shot shots/phone-dial-tone.png
+key 1
+waitstate audio.tone 0 2000
+key 0
+key 0
+key 2
+key ok
+expectstate phone outgoing
+run $FAR $BOB accept
+waitstate phone incall 5000
+# the Keypad button, then 4 and * by touch
+touch 336 424
+expectstate keypad 1
+touch 540 175
+touch 540 337
+expectstate dtmf 4*
+run $FAR waitlog $BOBLOG CALL_DTMF_START.*4 5
+run $FAR waitlog $BOBLOG 'CALL_DTMF_START.*[*]' 5
+wait 500
+shot shots/phone-in-call-keypad.png
+# volume up twice: the handset's volume, not the ringer's
+expectstate vol.handset 10
+key volup
+key volup
+expectstate vol.handset 12
+waitstate audio.vol.handset 12 2000
+expectstate vol.ringer 10
+shot shots/phone-in-call-volume.png
+# the End button
+touch 720 424
+expectstate phone ended
+run $FAR $BOB waitcall none 5
+waitstate phone idle 4000
+hook on
+quit

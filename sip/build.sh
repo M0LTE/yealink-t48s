@@ -35,13 +35,14 @@ OPENSSL=openssl-3.5.9
 MBEDTLS=mbedtls-3.6.8
 
 # Modules compiled into the binary. account: the accounts file; menu: the call
-# commands (dial, accept, hangup) that ctrl_tcp runs; g711, libg722:
+# commands (dial, accept, hangup) that t48ctrl runs; g711, libg722:
 # codecs; auresamp: 16 kHz device audio to and from 8 kHz G.711; aufile,
-# ausine: file and tone audio until the audio service exists;
-# ctrl_tcp: JSON control (the shell's interface until our own module takes
-# over); stdio: a console for testing by hand; t48audio: ours, sip/modules.
-MODULES="account;menu;g711;libg722;auresamp;aufile;ausine;ctrl_tcp;stdio"
-APP_MODULES="t48audio"
+# ausine: file and tone audio for tests; stdio: a console for testing by
+# hand. Ours, from sip/modules: t48audio (the call's audio, to t48-audiod)
+# and t48ctrl (JSON control for the shell on a root-only Unix socket; it
+# replaces baresip's ctrl_tcp, which any local program could reach).
+MODULES="account;menu;g711;libg722;auresamp;aufile;ausine;stdio"
+APP_MODULES="t48audio;t48ctrl"
 
 LLVM_AR=$(command -v llvm-ar || command -v llvm-ar-21)
 LLVM_RANLIB=$(command -v llvm-ranlib || command -v llvm-ranlib-21)

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /*
  * t48-shell: the program that owns the phone's screen and input devices.
- * First version (issue #19): idle screen, launcher, one app at a time over the
- * app protocol, Home on a long press of X, a placeholder call screen when the
- * handset is lifted, and a message when an app dies.
+ * Idle screen, launcher, one app at a time over the app protocol, Home on a
+ * long press of X, and a message when an app dies (issue #19). The phone
+ * itself (dialler, call screens, history, the phone keys) is in phone.c
+ * (issue #26); a call takes the screen from anything, and gives it back.
  *
  * The same program is the PC simulator: started as t48-sim (or with --sim) it
  * keeps the screen in memory, takes its input from a script and writes
@@ -26,30 +27,22 @@
 
 #define HOME_PRESS_MS 800   /* X held this long is Home */
 
-#define C_BG T48_RGB(8, 10, 16)
-#define C_BAR T48_RGB(18, 24, 36)
-#define C_PANEL T48_RGB(22, 29, 43)
-#define C_LINE T48_RGB(40, 52, 72)
-#define C_TEXT T48_RGB(226, 232, 240)
-#define C_DIM T48_RGB(128, 142, 162)
-#define C_FAINT T48_RGB(78, 90, 110)
-#define C_ACCENT T48_RGB(255, 176, 60)
-#define C_GOOD T48_RGB(110, 214, 130)
-#define C_BAD T48_RGB(240, 96, 86)
-
 struct options opt = {
     .fb = "/dev/fb0",
     .apps = "/data/apps:/usr/share/t48/apps",
     .data = "/data/appdata",
     .config = "/data/config",
+    .state = "/data/phone",
+    .sip = "/run/t48-sip/ctrl.sock",
+    .audio = T48AC_SOCKET,
 };
 
-enum screen { SCR_IDLE, SCR_LAUNCHER, SCR_APP, SCR_CALL, SCR_MESSAGE };
-static const char *const screen_names[] = {"idle", "launcher", "app", "call", "message"};
+enum screen { SCR_IDLE, SCR_LAUNCHER, SCR_APP, SCR_CALL, SCR_MESSAGE, SCR_HISTORY };
+static const char *const screen_names[] = {"idle", "launcher", "app", "call", "message", "history"};
 
 static const struct backend *be;
 static uint32_t ui_px[SW * SH];
-static t48_surface ui = {ui_px, SW, SH, SW};
+t48_surface ui = {ui_px, SW, SH, SW};
 static t48_surface app_surface = {NULL, SW, SH, SW};
 
 static enum screen scr = SCR_IDLE;
@@ -60,7 +53,7 @@ static int sel;                      /* launcher: selected app */
 static char pending_id[64];          /* app to start once the old one has gone */
 static char msg_title[96], msg_text[200];
 static long long x_deadline;         /* in an app: when a held X becomes Home; 0 if X is up */
-static char idle_shown[160];         /* time, date and network as last drawn, to redraw only on a change */
+static char idle_shown[320];         /* time, date, network and account as last drawn, to redraw only on a change */
 static volatile sig_atomic_t stopping;
 static int exit_status;
 static int chld_pipe[2];
@@ -102,9 +95,10 @@ static void network_status(char *out, size_t n, int *up)
     freeifaddrs(list);
 }
 
-static void status_bar(const char *title)
+void ui_status_bar(const char *title)
 {
-    char net[80], hm[8];
+    char net[80], hm[8], acc[120];
+    uint32_t acc_colour;
     int up;
     time_t t = time(NULL);
     struct tm tm;
@@ -120,32 +114,39 @@ static void status_bar(const char *title)
         network_status(net, sizeof net, &up);
         t48_round_fill(&ui, 18, 17, 10, 10, 5, up ? C_GOOD : C_BAD);
         t48_text(&ui, 36, 11, &t48_font_normal, C_TEXT, net);
-        /* placeholder until there is a SIP stack (issue #25) */
-        t48_text_right(&ui, SW - 18, 11, &t48_font_normal, C_DIM, "No SIP account");
+        phone_account_text(acc, sizeof acc, &acc_colour);
+        int w = t48_text_width(&t48_font_normal, acc);
+        t48_text_right(&ui, SW - 18, 11, &t48_font_normal, C_TEXT, acc);
+        t48_round_fill(&ui, SW - 18 - w - 20, 17, 10, 10, 5, acc_colour);
     }
 }
 
-static void button(int x, int y, int w, int h, const char *label, int strong)
+void ui_button(int x, int y, int w, int h, const char *label, uint32_t fill)
 {
-    t48_round_fill(&ui, x, y, w, h, 10, strong ? C_ACCENT : C_PANEL);
-    t48_text_centre(&ui, x + w / 2, y + (h - t48_font_bold.height) / 2, &t48_font_bold, strong ? C_BG : C_TEXT, label);
+    /* dark lettering on the bright fills, light on the dark ones */
+    int bright = ((fill >> 16 & 255) * 3 + (fill >> 8 & 255) * 6 + (fill & 255)) / 10 > 120;
+    t48_round_fill(&ui, x, y, w, h, 10, fill);
+    t48_text_centre(&ui, x + w / 2, y + (h - t48_font_bold.height) / 2, &t48_font_bold, bright ? C_BG : C_TEXT, label);
 }
 
-#define IDLE_BTN_X 310
+#define IDLE_BTN_X 214
 #define IDLE_BTN_Y 392
 #define IDLE_BTN_W 180
 #define IDLE_BTN_H 56
+#define IDLE_CALLS_X 406
 
 static void idle_text(char *out, size_t n)
 {
-    char net[80];
+    char net[80], acc[120];
+    uint32_t c;
     int up;
     time_t t = time(NULL);
     struct tm tm;
     localtime_r(&t, &tm);
     network_status(net, sizeof net, &up);
+    phone_account_text(acc, sizeof acc, &c);
     size_t k = strftime(out, n, "%H:%M|%A %e %B %Y|", &tm);
-    snprintf(out + k, n - k, "%s", net);
+    snprintf(out + k, n - k, "%s|%s|%d", net, acc, phone_missed());
 }
 
 static void draw_idle(void)
@@ -158,11 +159,19 @@ static void draw_idle(void)
     strftime(hm, sizeof hm, "%H:%M", &tm);
     strftime(date, sizeof date, "%A %e %B %Y", &tm);
     t48_fill(&ui, 0, 0, SW, SH, C_BG);
-    status_bar(NULL);
-    t48_text_centre(&ui, SW / 2, 120, &t48_font_huge, C_TEXT, hm);
-    t48_text_centre(&ui, SW / 2, 262, &t48_font_head, C_DIM, date);
-    button(IDLE_BTN_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, "Apps", 0);
-    t48_text_centre(&ui, SW / 2, 456, &t48_font_small, C_FAINT, "or press OK");
+    ui_status_bar(NULL);
+    t48_text_centre(&ui, SW / 2, 106, &t48_font_huge, C_TEXT, hm);
+    t48_text_centre(&ui, SW / 2, 248, &t48_font_head, C_DIM, date);
+    if (phone_missed()) {
+        char b[40];
+        snprintf(b, sizeof b, "%d missed call%s", phone_missed(), phone_missed() == 1 ? "" : "s");
+        int w = t48_text_width(&t48_font_bold, b) + 44;
+        t48_round_fill(&ui, (SW - w) / 2, 312, w, 42, 21, C_BAD);
+        t48_text_centre(&ui, SW / 2, 312 + (42 - t48_font_bold.height) / 2, &t48_font_bold, C_BG, b);
+    }
+    ui_button(IDLE_BTN_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, "Apps", C_PANEL);
+    ui_button(IDLE_CALLS_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, "Calls", C_PANEL);
+    t48_text_centre(&ui, SW / 2, 456, &t48_font_small, C_FAINT, "OK for apps, Up for calls, or just dial");
 }
 
 /* launcher grid: 4 across, 2 down, a page at a time */
@@ -185,7 +194,7 @@ static void tile_box(int slot, int *x, int *y)
 static void draw_launcher(void)
 {
     t48_fill(&ui, 0, 0, SW, SH, C_BG);
-    status_bar("Apps");
+    ui_status_bar("Apps");
     if (!napps) {
         t48_text_centre(&ui, SW / 2, 200, &t48_font_head, C_DIM, "No apps installed");
         t48_text_centre(&ui, SW / 2, 244, &t48_font_normal, C_FAINT, "Press X to go back");
@@ -226,17 +235,6 @@ static void draw_launcher(void)
     }
 }
 
-static void draw_call(void)
-{
-    t48_fill(&ui, 0, 0, SW, SH, C_BG);
-    status_bar("Call");
-    /* placeholder until the phone UI exists (issue #26) */
-    t48_round_fill(&ui, 100, 110, 600, 250, 16, C_PANEL);
-    t48_text_centre(&ui, SW / 2, 140, &t48_font_big, C_TEXT, "Handset lifted");
-    t48_text_centre(&ui, SW / 2, 220, &t48_font_normal, C_DIM, "Calls are not working yet: there is no SIP account.");
-    t48_text_centre(&ui, SW / 2, 290, &t48_font_normal, C_ACCENT, "Put the handset down to go back.");
-}
-
 #define MSG_BTN_X 320
 #define MSG_BTN_Y 300
 #define MSG_BTN_W 160
@@ -245,14 +243,14 @@ static void draw_call(void)
 static void draw_message(void)
 {
     t48_fill(&ui, 0, 0, SW, SH, C_BG);
-    status_bar("Apps");
+    ui_status_bar("Apps");
     t48_round_fill(&ui, 80, 96, 640, 290, 16, C_PANEL);
     t48_fill(&ui, 80, 112, 6, 258, C_BAD);
     t48_text_centre(&ui, SW / 2, 126, &t48_font_head, C_TEXT, msg_title);
     int w = t48_text_width(&t48_font_normal, msg_text);
     if (w > 600) t48_text_fit(&ui, 100, 196, 600, &t48_font_normal, C_DIM, msg_text);
     else t48_text_centre(&ui, SW / 2, 196, &t48_font_normal, C_DIM, msg_text);
-    button(MSG_BTN_X, MSG_BTN_Y, MSG_BTN_W, MSG_BTN_H, "OK", 1);
+    ui_button(MSG_BTN_X, MSG_BTN_Y, MSG_BTN_W, MSG_BTN_H, "OK", C_ACCENT);
 }
 
 static void draw_starting(void)
@@ -273,10 +271,12 @@ static void redraw(void)
     switch (scr) {
     case SCR_IDLE: draw_idle(); break;
     case SCR_LAUNCHER: draw_launcher(); break;
-    case SCR_CALL: draw_call(); break;
+    case SCR_CALL: phone_draw(); break;
+    case SCR_HISTORY: phone_draw_history(); break;
     case SCR_MESSAGE: draw_message(); break;
     case SCR_APP: draw_starting(); break;
     }
+    phone_draw_overlay();
     be->flush(ui_px, SW, 0, 0, SW, SH);
 }
 
@@ -410,9 +410,8 @@ static void launcher_key(int code)
 void shell_key(int code, int down)
 {
     if (code >= SK_VOLDOWN) {
-        /* phone keys stay with the shell, whatever is on the screen. Nothing
-         * uses them until there is audio and SIP (issues #24, #26). */
-        if (down) logmsg("phone key 0x%x (no use yet)", code);
+        /* phone keys stay with the shell, whatever is on the screen */
+        phone_key(code, down);
         return;
     }
     switch (scr) {
@@ -434,6 +433,8 @@ void shell_key(int code, int down)
         if (down && code == T48_KEY_OK) {
             if (app_state() == APP_NONE) manifests_scan(opt.apps);
             show(SCR_LAUNCHER);
+        } else if (down) {
+            phone_idle_key(code);   /* a digit starts the dialler */
         }
         break;
     case SCR_LAUNCHER:
@@ -443,11 +444,15 @@ void shell_key(int code, int down)
         if (down && (code == T48_KEY_OK || code == T48_KEY_BACK)) show(SCR_LAUNCHER);
         break;
     case SCR_CALL:
+        phone_key(code, down);
+        break;
+    case SCR_HISTORY:
+        if (down) phone_history_key(code);
         break;
     }
 }
 
-static int inside(int x, int y, int bx, int by, int bw, int bh)
+int ui_inside(int x, int y, int bx, int by, int bw, int bh)
 {
     return x >= bx && x < bx + bw && y >= by && y < by + bh;
 }
@@ -456,16 +461,22 @@ void shell_touch(int state, int x, int y)
 {
     if (scr == SCR_APP) { app_touch(state, x, y); return; }
     if (state != T48_TOUCH_DOWN) return;
-    if (scr == SCR_IDLE && inside(x, y, IDLE_BTN_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
+    if (scr == SCR_CALL) {
+        phone_touch(x, y);
+    } else if (scr == SCR_HISTORY) {
+        phone_history_touch(x, y);
+    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
         shell_key(T48_KEY_OK, 1);
-    } else if (scr == SCR_MESSAGE && inside(x, y, MSG_BTN_X, MSG_BTN_Y, MSG_BTN_W, MSG_BTN_H)) {
+    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_CALLS_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
+        phone_open_history();
+    } else if (scr == SCR_MESSAGE && ui_inside(x, y, MSG_BTN_X, MSG_BTN_Y, MSG_BTN_W, MSG_BTN_H)) {
         show(SCR_LAUNCHER);
     } else if (scr == SCR_LAUNCHER) {
         int per = COLS * ROWS, page = sel / per;
         for (int slot = 0; slot < per && page * per + slot < napps; slot++) {
             int tx, ty;
             tile_box(slot, &tx, &ty);
-            if (inside(x, y, tx, ty, TILE_W, TILE_H)) {
+            if (ui_inside(x, y, tx, ty, TILE_W, TILE_H)) {
                 sel = page * per + slot;
                 redraw();
                 open_app(&apps[sel]);
@@ -475,23 +486,48 @@ void shell_touch(int state, int x, int y)
     }
 }
 
-void shell_hook(int off_hook)
+void shell_hook(int off_hook) { phone_hook(off_hook); }
+
+/* ---------- the phone takes the screen, and gives it back ---------- */
+
+void shell_phone_screen(int want)
 {
-    if (off_hook && scr != SCR_CALL) {
+    if (want && scr != SCR_CALL) {
         /* calls come first: whatever is showing gives way at once */
-        under_call = scr;
+        under_call = scr == SCR_HISTORY ? SCR_IDLE : scr;
         if (scr == SCR_APP) {
             if (app_state() == APP_RUNNING) app_pause();
             else { app_quit(); under_call = SCR_LAUNCHER; }
         }
         show(SCR_CALL);
-    } else if (!off_hook && scr == SCR_CALL) {
+    } else if (!want && scr == SCR_CALL) {
         if (under_call == SCR_APP) {
             if (app_state() == APP_PAUSING || app_state() == APP_STOPPED) app_resume();
             else under_call = SCR_LAUNCHER;
         }
         show(under_call);
+    } else if (scr == SCR_CALL) {
+        redraw();
     }
+}
+
+void shell_phone_changed(void)
+{
+    if (scr == SCR_CALL || scr == SCR_HISTORY || scr == SCR_IDLE || scr == SCR_LAUNCHER || scr == SCR_MESSAGE) redraw();
+}
+
+void shell_show_history(int on)
+{
+    if (on && scr != SCR_CALL && scr != SCR_APP) show(SCR_HISTORY);
+    else if (!on && scr == SCR_HISTORY) show(SCR_IDLE);
+}
+
+const char *shell_state(const char *key)
+{
+    static const char *const app_states[] = {"none", "starting", "running", "pausing", "stopped", "quitting"};
+    if (!strcmp(key, "screen")) return screen_names[scr];
+    if (!strcmp(key, "app")) return app_states[app_state()];
+    return phone_state(key);
 }
 
 /* ---------- main loop ---------- */
@@ -515,12 +551,15 @@ static void usage(void)
         "  --apps DIRS      folders of installed apps, colon separated (%s)\n"
         "  --data DIR       where each app's own folder is made (%s)\n"
         "  --config DIR     settings files (%s)\n"
+        "  --state DIR      what the phone remembers, such as call history (%s)\n"
+        "  --sip SOCKET     baresip's control socket (%s; none in the simulator unless given)\n"
+        "  --audio SOCKET   the audio service's control socket (%s; the same)\n"
         "  --fb DEVICE      framebuffer (%s)\n"
         "  --app ID         start this app straight away\n"
         "simulator only:\n"
         "  --script FILE    input script, - for standard input (see docs/shell.md)\n"
         "  --shot FILE      write one picture (.png or .ppm) of the first screen and stop\n",
-        opt.apps, opt.data, opt.config, opt.fb);
+        opt.apps, opt.data, opt.config, opt.state, opt.sip ? opt.sip : "none", opt.audio ? opt.audio : "none", opt.fb);
 }
 
 int main(int argc, char **argv)
@@ -529,12 +568,17 @@ int main(int argc, char **argv)
     int sim = !strcmp(me ? me + 1 : argv[0], "t48-sim");
     static char sim_data[64];
 
+    for (int i = 1; i < argc; i++) sim |= !strcmp(argv[i], "--sim");
+    if (sim) opt.sip = opt.audio = NULL;   /* a PC's own services stay out of it unless asked */
     for (int i = 1; i < argc; i++) {
         const char **dst = NULL;
-        if (!strcmp(argv[i], "--sim")) { sim = 1; continue; }
+        if (!strcmp(argv[i], "--sim")) continue;
         else if (!strcmp(argv[i], "--apps")) dst = &opt.apps;
         else if (!strcmp(argv[i], "--data")) dst = &opt.data;
         else if (!strcmp(argv[i], "--config")) dst = &opt.config;
+        else if (!strcmp(argv[i], "--state")) dst = &opt.state;
+        else if (!strcmp(argv[i], "--sip")) dst = &opt.sip;
+        else if (!strcmp(argv[i], "--audio")) dst = &opt.audio;
         else if (!strcmp(argv[i], "--fb")) dst = &opt.fb;
         else if (!strcmp(argv[i], "--app")) dst = &opt.start;
         else if (!strcmp(argv[i], "--script")) dst = &opt.script;
@@ -544,15 +588,17 @@ int main(int argc, char **argv)
     }
     if (sim) {
         /* keep a PC's /data out of it unless asked */
-        int data_set = 0, apps_set = 0, config_set = 0;
+        int data_set = 0, apps_set = 0, config_set = 0, state_set = 0;
         for (int i = 1; i < argc; i++) {
             data_set |= !strcmp(argv[i], "--data");
             apps_set |= !strcmp(argv[i], "--apps");
             config_set |= !strcmp(argv[i], "--config");
+            state_set |= !strcmp(argv[i], "--state");
         }
         snprintf(sim_data, sizeof sim_data, "/tmp/t48-sim-%d", (int)getuid());
         if (!data_set) opt.data = sim_data;
         if (!config_set) opt.config = sim_data;
+        if (!state_set) opt.state = sim_data;
         if (!apps_set) opt.apps = "apps";
     }
     be = sim ? &be_sim : &be_fb;
@@ -571,6 +617,7 @@ int main(int argc, char **argv)
     fcntl(chld_pipe[0], F_SETFD, FD_CLOEXEC);
     fcntl(chld_pipe[1], F_SETFD, FD_CLOEXEC);
 
+    phone_init();
     if (be->init() < 0) return 1;
     logmsg("t48-shell on the %s, API level %d", be->name, T48_API_LEVEL);
     manifests_scan(opt.apps);
@@ -589,17 +636,29 @@ int main(int argc, char **argv)
 
         if ((t = app_timeout(now)) >= 0 && t < wait) wait = t;
         if ((t = be->timeout(now)) >= 0 && t < wait) wait = t;
+        if ((t = phone_timeout(now)) >= 0 && t < wait) wait = t;
+        if ((t = sipc_timeout(now)) >= 0 && t < wait) wait = t;
+        if ((t = audioc_timeout(now)) >= 0 && t < wait) wait = t;
         if (x_deadline && x_deadline - now < wait) wait = (int)(x_deadline > now ? x_deadline - now : 0);
 
         pf[n].fd = chld_pipe[0]; pf[n++].events = POLLIN;
         int app_at = -1;
         if (app_fd() >= 0) { app_at = n; pf[n].fd = app_fd(); pf[n++].events = POLLIN; }
+        int sip_at = -1, audio_at = -1;
+        if (sipc_fd() >= 0) { sip_at = n; pf[n].fd = sipc_fd(); pf[n++].events = POLLIN; }
+        if (audioc_fd() >= 0) { audio_at = n; pf[n].fd = audioc_fd(); pf[n++].events = POLLIN; }
         int be_at = n;
         n += be->fds(pf + n, 16 - n);
-        if (poll(pf, (nfds_t)n, wait) < 0 && errno != EINTR) { perror("poll"); break; }
+        for (int i = 0; i < n; i++) pf[i].revents = 0;
+        if (poll(pf, (nfds_t)n, wait) < 0) {
+            if (errno != EINTR) { perror("poll"); break; }
+            continue;
+        }
 
         /* input first: a key must beat a busy app */
         if (n > be_at) be->handle(pf + be_at, n - be_at);
+        if (sip_at >= 0 && pf[sip_at].revents && pf[sip_at].fd == sipc_fd()) sipc_readable();
+        if (audio_at >= 0 && pf[audio_at].revents && pf[audio_at].fd == audioc_fd()) audioc_readable();
         if (app_at >= 0 && pf[app_at].revents && pf[app_at].fd == app_fd()) app_readable();
         if (pf[0].revents) {
             char junk[32];
@@ -611,6 +670,9 @@ int main(int argc, char **argv)
 
         now = t48_now_ms();
         app_tick(now);
+        sipc_tick(now);
+        audioc_tick(now);
+        phone_tick(now);
         be->tick(now);
         if (x_deadline && now >= x_deadline && scr == SCR_APP) go_home();
         if (now >= next_clock) {

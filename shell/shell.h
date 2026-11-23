@@ -6,6 +6,7 @@
 #include <poll.h>
 #include <sys/types.h>
 #include "t48.h"
+#include "t48_audio_ctl.h"
 
 #define SW 800
 #define SH 480
@@ -37,6 +38,9 @@ struct options {
     const char *script;  /* simulator: input script */
     const char *shot;    /* simulator: write one picture here and stop */
     const char *start;   /* id of an app to start straight away */
+    const char *state;   /* things the shell remembers: call history */
+    const char *sip;     /* baresip's control socket (t48ctrl), NULL: no SIP */
+    const char *audio;   /* the audio service's control socket, NULL: no audio */
 };
 extern struct options opt;
 
@@ -51,7 +55,90 @@ const char *shell_screen_name(void);
 unsigned shell_app_frames(void);
 const t48_surface *shell_app_surface(void);
 
+/* a word about how things stand, for the simulator's checks (docs/shell.md) */
+const char *shell_state(const char *key);
+
 void logmsg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+/* ---------- drawing shared by the shell's own screens ---------- */
+
+#define C_BG T48_RGB(8, 10, 16)
+#define C_BAR T48_RGB(18, 24, 36)
+#define C_PANEL T48_RGB(22, 29, 43)
+#define C_KEY T48_RGB(34, 44, 64)
+#define C_LINE T48_RGB(40, 52, 72)
+#define C_TEXT T48_RGB(226, 232, 240)
+#define C_DIM T48_RGB(128, 142, 162)
+#define C_FAINT T48_RGB(78, 90, 110)
+#define C_ACCENT T48_RGB(255, 176, 60)
+#define C_GOOD T48_RGB(110, 214, 130)
+#define C_BAD T48_RGB(240, 96, 86)
+
+extern t48_surface ui;                       /* the shell's own picture of the screen */
+void ui_status_bar(const char *title);
+/* a rounded button; fill is its colour, and the label is dark on bright fills */
+void ui_button(int x, int y, int w, int h, const char *label, uint32_t fill);
+int ui_inside(int x, int y, int bx, int by, int bw, int bh);
+
+/* ---------- the phone (phone.c): calls, the dialler, history ---------- */
+
+void phone_init(void);
+void phone_key(int code, int down);          /* any key while a phone screen shows, and phone keys always */
+int phone_idle_key(int code);                /* a key on the idle screen: 1 if the phone took it */
+void phone_touch(int x, int y);              /* a tap on a phone screen */
+void phone_hook(int off_hook);
+int phone_timeout(long long now);
+void phone_tick(long long now);
+void phone_draw(void);                       /* the call screen, whichever it is now */
+void phone_draw_history(void);
+void phone_history_key(int code);
+void phone_history_touch(int x, int y);
+void phone_open_history(void);
+void phone_draw_overlay(void);               /* the volume bar, over any of the shell's screens */
+void phone_account_text(char *out, size_t n, uint32_t *colour);
+int phone_missed(void);
+const char *phone_state(const char *key);    /* NULL if the key is not the phone's */
+/* from the two clients */
+void phone_sip_link(int up);
+void phone_sip_event(const char *type, const char *json, const char *end);
+void phone_sip_response(const char *token, int ok, const char *data);
+void phone_audio_link(int up);
+void phone_audio_state(void);
+/* from phone.c back to the shell */
+void shell_phone_screen(int want);           /* the phone wants the screen, or is done with it */
+void shell_phone_changed(void);              /* something a phone screen or the idle screen shows has changed */
+void shell_show_history(int on);
+
+/* baresip's control socket (sipc.c) */
+void sipc_init(const char *socket_path);
+int sipc_fd(void);
+int sipc_connected(void);
+int sipc_timeout(long long now);
+void sipc_tick(long long now);
+void sipc_readable(void);
+void sipc_cmd(const char *command, const char *params);
+
+/* the audio service's control socket (audioc.c) */
+void audioc_init(const char *socket_path);
+int audioc_fd(void);
+int audioc_connected(void);
+int audioc_timeout(long long now);
+void audioc_tick(long long now);
+void audioc_readable(void);
+const struct t48ac_state *audioc_state(void);   /* NULL until the service has said */
+void audioc_route(int route);
+void audioc_volume(int which, int level);
+void audioc_mute(int on);
+void audioc_tone(int tone);
+void audioc_ring(int on);
+void audioc_key(int ch);
+
+/* ---------- lamps (leds.c): a place for the driver of issue #3 ---------- */
+
+enum led { LAMP_POWER, LAMP_SPEAKER, LAMP_HEADSET, LAMP_MUTE, LAMP_MESSAGE, LAMP_COUNT };
+enum led_mode { LAMP_OFF, LAMP_ON, LAMP_BLINK };
+void leds_set(enum led which, enum led_mode mode);
+const char *leds_state(const char *name);    /* "off", "on", "blink", or NULL for no such lamp */
 
 /* ---------- installed apps ---------- */
 

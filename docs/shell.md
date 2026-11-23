@@ -1,21 +1,21 @@
 # The shell and the simulator
 
-`t48-shell` owns the screen and every input device, shows the idle screen and the launcher, and runs one app at a time over the [app protocol](app-protocol.md). The same program, started as `t48-sim`, is the PC simulator. Source in [`shell/`](../shell), library in [`libt48/`](../libt48). Design: [architecture.md](architecture.md#the-shell).
+`t48-shell` owns the screen and every input device, shows the idle screen and the launcher, runs one app at a time over the [app protocol](app-protocol.md), and is the phone ([phone.md](phone.md): dialler, call screens, history, the phone keys). The same program, started as `t48-sim`, is the PC simulator. Source in [`shell/`](../shell), library in [`libt48/`](../libt48). Design: [architecture.md](architecture.md#the-shell).
 
-![idle](img/shell-idle.png)
+![idle](img/phone-idle.png)
 ![launcher](img/shell-launcher-open.png)
 ![the clock example app](img/app-clock.png)
 
-## What this first version does
+## What it does
 
-- Idle screen: time, date, network address, and a placeholder where the SIP account status will go.
+- Idle screen: time, date, network address, the SIP account and whether it is registered, missed calls.
 - Launcher: a tile for each installed app (see [the manifest](app-protocol.md#the-manifest)). Arrows and OK, or touch. X goes back to idle.
 - In an app: a short press on X goes to the app as "back"; holding X for 0.8 s is Home. The app is paused and frozen, and its tile says "open"; picking it again brings it back where it was. Picking a different app closes it.
-- Lifting the handset takes the screen at once, from anything, and shows a placeholder call screen. Putting it down returns to what was there.
+- A call, or lifting the handset, takes the screen at once, from anything. When the call is over, what was there comes back. The phone side is described in [phone.md](phone.md).
 - An app that crashes, exits with an error, never starts or stops reading its events is cleaned up and the owner is told. Phone keys are never passed to apps.
 - Apps run as their own unprivileged user when the shell runs as root (user number 20000 to 29999, worked out from the app id), with their own data folder under `/data/appdata`.
 
-Not yet: dialler and real call screens (#26), settings screens (#23), installing apps (#22), backlight (#18), LEDs.
+Not yet: settings screens (#23), installing apps (#22), backlight (#18), LEDs (#3; the shell already says what each lamp should do).
 
 ## Build
 
@@ -44,12 +44,17 @@ The screen is kept in memory; there is no window yet. Apps are the real programs
 | `hook off`, `hook on` | lift and replace the handset |
 | `wait MS` | |
 | `waitframe [MS]` | until the app has drawn since the last input (fails after MS, default 3000) |
-| `waitscreen NAME [MS]` | until the shell shows `idle`, `launcher`, `app`, `call` or `message` |
+| `waitscreen NAME [MS]` | until the shell shows `idle`, `launcher`, `app`, `call`, `message` or `history` |
 | `expect NAME` | fail unless that screen is showing now |
+| `expectstate KEY VALUE` | fail unless that is so now. Keys: `phone` (`idle`, `dial`, `outgoing`, `incoming`, `incall`, `ended`), `route` (`none`, `handset`, `speaker`, `headset`), `mute`, `hold`, `number`, `peer`, `dtmf`, `ended`, `reg`, `missed`, `history`, `last`, `vol.ringer` (and the others), `led.speaker` (and the others), `app`, `sip`, `audio`; and what the audio service itself reports: `audio.route`, `audio.mute`, `audio.tone`, `audio.ring`, `audio.call`, `audio.vol.handset` |
+| `waitstate KEY VALUE [MS]` | until that is so (fails after MS, default 3000) |
+| `run COMMAND` | run a command on the PC and fail if it does; used to make the far end of a test call do things |
 | `shot FILE` | save the screen as `.png` or `.ppm` |
 | `quit` | |
 
-`shell/tests/` has two scripts, run by `make check`: a tour, and apps that crash and hang.
+`shell/tests/` has three scripts, run by `make check`: a tour, apps that crash and hang, and the phone screens with no services behind them. The call scenarios in `shell/tests/phone/` need baresip and the audio service and are run by `sip/test/phone-test.sh` ([phone.md](phone.md#testing)).
+
+With `--sip SOCKET` and `--audio SOCKET` the simulator talks to a real baresip and audio service; without them it has neither, so nothing on a PC is touched by accident.
 
 ## Running it on the phone
 

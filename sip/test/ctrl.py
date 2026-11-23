@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Drive two baresip instances over ctrl_tcp (netstring-framed JSON) for
+"""Drive two baresip instances over t48ctrl (netstring-framed JSON on a Unix
+socket in each one's run directory) for
 sip/test/call-test.sh: check both registered, alice dials bob, bob answers,
 both hear the other's tone, alice hangs up. Exit 0 when every check passed."""
 import json, math, re, socket, struct, sys, time, wave
 
 
 class Ctrl:
-    def __init__(self, name, port):
+    def __init__(self, name, path):
         self.name = name
-        self.s = socket.create_connection(("127.0.0.1", port), timeout=1)
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.s.settimeout(1)
+        self.s.connect(path)
         self.buf = b""
         self.tok = 0
 
@@ -31,7 +34,7 @@ class Ctrl:
             except socket.timeout:
                 return None
             if not d:
-                raise SystemExit(f"{self.name}: ctrl_tcp closed")
+                raise SystemExit(f"{self.name}: control socket closed")
             self.buf += d
 
     def cmd(self, command, params=None, timeout=5):
@@ -95,7 +98,7 @@ def main():
     expect_alice_hears = sys.argv[2] if len(sys.argv) > 2 else "1000"
     wavdir = sys.argv[3] if len(sys.argv) > 3 else "."
     ok = True
-    alice, bob = Ctrl("alice", 4441), Ctrl("bob", 4442)
+    alice, bob = Ctrl("alice", f"{wavdir}/alice/run/ctrl.sock"), Ctrl("bob", f"{wavdir}/bob/run/ctrl.sock")
     alice.events, bob.events = [], []
 
     for c in (alice, bob):
