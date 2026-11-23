@@ -8,6 +8,8 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # documentation-only changes do not rebuild
+    paths-ignore: ['docs/**', '**.md']
   workflow_dispatch:
 
 permissions:
