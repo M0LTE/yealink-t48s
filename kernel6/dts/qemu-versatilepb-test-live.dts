@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Not a phone: the QEMU test machine with the live start's ramdisk and command
+ * line (kernel6/qemu-live-test.sh).
+ */
+#include "qemu-versatilepb-test.dts"
+#include "t48s-live.dtsi"

@@ -89,7 +89,7 @@ jobs:
           path: k6-src
           key: linux6-${{ hashFiles('kernel6/build.sh') }}
 
-      - name: "Kernel 6.18 (kexec image, and the fit in the 2.5 MB kernel slot)"
+      - name: "Kernel 6.18 (kexec image, the fit in the 2.5 MB kernel slot, and the live kernel)"
         run: |
           docker build -q --build-arg QEMU= -t t48s-kbuild6:trixie kernel6/
           mkdir -p "$RUNNER_TEMP/k6" k6-src
@@ -100,6 +100,10 @@ jobs:
           k6 -e SLOT=1 -e OUT=zImage6-slot
           # what kexec starts: the same with the system image beside the first stage
           k6 -e SYSTEM=/w/system.img -e OUT=Image6-kexec
+          # what U-Boot's recovery mode starts (docs/live-image.md): build only. The
+          # build checks the file's addresses; the generator then makes the set from it
+          k6 -e LIVE=1 -e OUT=T48S6.bin
+          python3 tools/mkliveimage.py build "$RUNNER_TEMP/live6" bin="$RUNNER_TEMP/k6/T48S6.bin" system="$RUNNER_TEMP/br/output/images/system.img" kernel=6.18
           ls k6-src/linux-*.tar.xz >/dev/null 2>&1 || cp "$RUNNER_TEMP"/k6/linux-*.tar.xz k6-src/
 
       - name: Collect outputs

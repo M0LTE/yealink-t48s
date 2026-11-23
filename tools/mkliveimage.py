@@ -22,6 +22,13 @@ WITHOUT being a copy of Yealink's firmware (which we may not redistribute).
         the same three files for a TFTP server, without the README
   mkliveimage.py rfs IN OUT      make T48S.rfs from Buildroot's system.img
   mkliveimage.py check ROM       emulate U-Boot's check of a .rom file
+  mkliveimage.py checkbin T48S.bin [kernel=3.6|6.18]
+        check a kernel file as U-Boot and the kernel's unpacker will treat it
+
+Either kernel can be the .bin: Linux 3.6 (kernel/build.sh live, the default) or
+Linux 6.18 (kernel6/build.sh with LIVE=1; say kernel=6.18). The ROM and the
+ramdisk are the same for both. What is checked in a 6.18 file is under
+check_kernel6 below.
 
 The ramdisk. U-Boot loads the kernel at 0x02680000 and the ramdisk 4 MB above it
 at 0x02a80000, so the kernel file must be under 4 MB. Our kernel takes the 8 MB
@@ -195,6 +202,187 @@ def check_uimage(data):
     return True, msg
 
 
+# ---- which kernel a .bin holds, and the addresses of a 6.18 one ----
+# U-Boot (bootm, from the disassembly at 0x03B20448 and the serial logs) reads the
+# file to 0x02680000, copies the payload to the header's load address, and enters
+# it with r0 = 0, r1 = 2342, r2 = a tag list: ATAG_CORE, one ATAG_MEM, ATAG_CMDLINE
+# (Yealink's bootargs), ATAG_NONE. No ramdisk tag and no device tree.
+#
+# Linux 3.6 has its memory, command line and ramdisk address compiled in
+# (kernel/live.config). Linux 6.18 takes all three from the device tree appended
+# to the zImage (kernel6/dts/t48s-live.dtsi) and never reads the tags. So for 6.18
+# the things that must agree are all inside the one file, and are checked here.
+BIN_ADDR = 0x02680000          # where U-Boot reads the .bin
+RFS_ADDR = 0x02a80000          # where U-Boot reads the .rfs
+UBOOT_ADDR = 0x03B00000        # U-Boot itself
+DEFAULT_KERNEL = "3.6"         # until issue 55 makes 6.18 the phone's kernel
+KERNELS = ("3.6", "6.18")
+ZIMAGE_MAGIC = 0x016F2818
+FDT_MAGIC = 0xD00DFEED
+
+
+def parse_fdt(blob):
+    """A flattened device tree as {"/path": {property: bytes}}."""
+    magic, total, off_struct, off_strings = struct.unpack_from(">4I", blob, 0)
+    if magic != FDT_MAGIC or total > len(blob):
+        raise ValueError("not a device tree")
+    nodes, path, p = {}, [], off_struct
+    while True:
+        tok = struct.unpack_from(">I", blob, p)[0]
+        p += 4
+        if tok == 1:                                    # begin node
+            end = blob.index(b"\0", p)
+            path.append(blob[p:end].decode())
+            p = (end + 4) & ~3
+            nodes["/" + "/".join(path[1:])] = {}
+        elif tok == 2:                                  # end node
+            path.pop()
+        elif tok == 3:                                  # property
+            ln, nameoff = struct.unpack_from(">2I", blob, p)
+            s = off_strings + nameoff
+            name = blob[s:blob.index(b"\0", s)].decode()
+            nodes["/" + "/".join(path[1:])][name] = blob[p + 8:p + 8 + ln]
+            p = (p + 8 + ln + 3) & ~3
+        elif tok == 9:                                  # end
+            return nodes
+        elif tok != 4:                                  # nop
+            raise ValueError("damaged device tree")
+
+
+def zimage_info(z):
+    """What an ARM zImage says about itself, or None if it is not one. The device
+    tree, if one is appended, starts at "end"."""
+    if len(z) < 0x40 or struct.unpack_from("<I", z, 0x24)[0] != ZIMAGE_MAGIC:
+        return None
+    start, end = struct.unpack_from("<2I", z, 0x28)
+    info = {"end": end - start}
+    if struct.unpack_from("<I", z, 0x34)[0] == 0x45454545:      # the table newer kernels carry
+        t = struct.unpack_from("<I", z, 0x38)[0]
+        while t + 8 <= len(z):
+            words, tag = struct.unpack_from("<2I", z, t)
+            if words == 0:
+                break
+            if tag == 0x5A534C4B and words >= 6:
+                size_at, bss, text_offset, malloc = struct.unpack_from("<4I", z, t + 8)
+                info.update(image=struct.unpack_from("<I", z, size_at)[0], bss=bss,
+                            text_offset=text_offset, malloc=malloc)
+            t += 4 * words
+    dtb = z[info["end"]:]
+    if len(dtb) >= 8 and struct.unpack_from(">I", dtb, 0)[0] == FDT_MAGIC:
+        info["dtb"] = dtb[:struct.unpack_from(">I", dtb, 4)[0]]
+    return info
+
+
+def bin_kernel(data):
+    """Which kernel a .bin (already through check_uimage) holds: "6.18" (a device
+    tree on its end), "3.6" (ours, by its name), or "other" (Yealink's own, as in
+    the first stick test). None if it is not a Linux zImage."""
+    info = zimage_info(data[64:])
+    if info is None:
+        return None
+    if "dtb" in info:
+        return "6.18"
+    return "3.6" if data[32:64].startswith(b"Linux-3.6.") else "other"
+
+
+def check_kernel6(data):
+    """A Linux 6.18 T48S.bin, from the file alone: will U-Boot's handover and the
+    kernel's unpacker put everything where the kernel then looks, with nothing on
+    top of anything else? (ok, [messages])
+
+    - the payload is a zImage with a device tree on its end, and nothing after it;
+    - the device tree names the ramdisk as exactly the 8 MB U-Boot loads T48S.rfs
+      into, inside the RAM it declares and clear of the frame buffers, and its
+      command line says t48boot=live;
+    - U-Boot's copy of the kernel to the load address lands in declared RAM (so the
+      kernel can keep hold of its device tree), below the ramdisk and U-Boot;
+    - the unpacked kernel with its zeroed data, and above it the unpacker with the
+      device tree, its stack and its heap after it has moved itself out of the
+      way, all end below the ramdisk.
+    """
+    load, entry = struct.unpack_from(">2I", data, 16)
+    comp = data[31]
+    z = data[64:64 + struct.unpack_from(">I", data, 12)[0]]
+    info = zimage_info(z)
+    msg = []
+    if info is None or "dtb" not in info or "image" not in info:
+        return False, ["not a 6.18 kernel with a device tree on its end (kernel6/build.sh with LIVE=1)"]
+    if comp != 0 or load != entry:
+        return False, ["the image must be uncompressed for U-Boot, entered at its load address"]
+    if info["end"] + len(info["dtb"]) != len(z):
+        return False, ["%d bytes follow the device tree" % (len(z) - info["end"] - len(info["dtb"]))]
+    try:
+        dt = parse_fdt(info["dtb"])
+    except (ValueError, struct.error, IndexError):
+        return False, ["the device tree on the kernel's end is damaged"]
+    chosen = dt.get("/chosen", {})
+    mem = [v for k, v in dt.items() if v.get("device_type") == b"memory\0"]
+    if len(mem) != 1 or len(mem[0].get("reg", b"")) != 8:
+        return False, ["the device tree must declare one block of RAM"]
+    ram, ramsize = struct.unpack(">2I", mem[0]["reg"])
+    ramend = ram + ramsize
+    args = chosen.get("bootargs", b"").rstrip(b"\0").decode("ascii", "replace")
+    if "t48boot=live" not in args.split():
+        return False, ["the command line does not say t48boot=live: \"%s\"" % args]
+    if "initrd=" in args or "mem=" in args:
+        return False, ["the command line must not name memory or a ramdisk: the device tree does"]
+    try:
+        rd0, = struct.unpack(">I", chosen["linux,initrd-start"])
+        rd1, = struct.unpack(">I", chosen["linux,initrd-end"])
+    except (KeyError, struct.error):
+        return False, ["the device tree names no ramdisk (linux,initrd-start and -end)"]
+    if rd0 != RFS_ADDR or rd1 != RFS_ADDR + RFS_SIZE:
+        return False, ["ramdisk at 0x%08x to 0x%08x: U-Boot loads the 8 MB of T48S.rfs at 0x%08x" % (rd0, rd1, RFS_ADDR)]
+    if not (ram <= rd0 and rd1 <= ramend):
+        return False, ["the ramdisk is outside the RAM the device tree declares"]
+    msg.append("ramdisk 0x%08x to 0x%08x, as U-Boot loads it; command line \"%s\"" % (rd0, rd1, args))
+    for name, node in dt.items():
+        if name.startswith("/reserved-memory/") and len(node.get("reg", b"")) == 8:
+            a, n = struct.unpack(">2I", node["reg"])
+            if a < rd1 and rd0 < a + n:
+                return False, ["the ramdisk overlaps reserved memory %s" % name]
+    # U-Boot's copy to the load address
+    zend = load + len(z)
+    if not (ram + info["text_offset"] <= load and zend <= ramend):
+        return False, ["load address 0x%08x is not in the RAM the device tree declares (0x%08x to 0x%08x): "
+                       "the kernel would lose its device tree" % (load, ram, ramend)]
+    work = 0x1000 + info["malloc"]                      # the unpacker's stack and heap, after the device tree
+    if zend + work > RFS_ADDR:
+        return False, ["loaded at 0x%08x the kernel file reaches 0x%08x: into the ramdisk" % (load, zend + work)]
+    # the kernel proper, and the unpacker once it has moved clear of it
+    k0 = ram + info["text_offset"]
+    k1 = k0 + info["image"] + info["bss"]
+    top = max(zend + work, k1 + len(z) + work + 0x10000) if load < k1 else zend + work
+    msg.append("kernel 0x%08x to 0x%08x (%d bytes unpacked, %d zeroed); entered at 0x%08x; "
+               "the unpacker works below 0x%08x" % (k0, k1, info["image"], info["bss"], load, top))
+    if k1 > RFS_ADDR or top > RFS_ADDR:
+        return False, msg + ["the unpacked kernel or its unpacker would reach the ramdisk at 0x%08x" % RFS_ADDR]
+    msg.append("%.1f MB clear below the ramdisk at 0x%08x; device tree %d bytes on the kernel's end"
+               % ((RFS_ADDR - top) / 1048576.0, RFS_ADDR, len(info["dtb"])))
+    return True, msg
+
+
+def check_bin(data, want=None):
+    """A .bin in full: U-Boot's checks, which kernel it is, and for 6.18 the
+    addresses. want names the kernel it must be. (ok, [messages], kernel)"""
+    ok, msg = check_uimage(data)
+    if not ok:
+        return False, msg, None
+    kern = bin_kernel(data)
+    if kern is None:
+        return False, msg + ["the image does not hold a Linux zImage"], None
+    msg.append("Linux %s" % kern if kern != "other" else "not a kernel of ours")
+    # a 6.18 file is only taken when asked for, and asking for one takes nothing else
+    if want and want != kern and "6.18" in (want, kern):
+        return False, msg + ["this is %s, and kernel=%s was asked for (the default is %s)"
+                             % ("a Linux %s kernel" % kern if kern != "other" else "not a kernel of ours",
+                                want, DEFAULT_KERNEL)], kern
+    if kern == "6.18":
+        ok, more = check_kernel6(data)
+        return ok, msg + more, kern
+    return True, msg, kern
+
+
 def _cpio_entry(ino, name, mode, body=b""):
     n = name.encode() + b"\0"
     hdr = "070701" + "".join("%08X" % v for v in
@@ -302,7 +490,7 @@ licences. Source code: the project page above.
 """
 
 
-def write_set(outdir, bin_path, rfs_path, system_path, model="T48S", readme=False):
+def write_set(outdir, bin_path, rfs_path, system_path, model="T48S", readme=False, kern=DEFAULT_KERNEL):
     """Write MODEL.rom, .bin and .rfs (and README.txt) into outdir. Returns 0 or 2."""
     os.makedirs(outdir, exist_ok=True)
     rom = craft_rom(model)
@@ -311,14 +499,16 @@ def write_set(outdir, bin_path, rfs_path, system_path, model="T48S", readme=Fals
         print("refusing to write a ROM our own check rejects:", why[-1], file=sys.stderr)
         return 2
     if not bin_path or not (rfs_path or system_path):
-        print("give bin=KERNEL (kernel/build.sh live) and system=SYSTEM.IMG "
-              "(buildroot/build.sh) or rfs=RAMDISK", file=sys.stderr)
+        print("give bin=KERNEL (kernel/build.sh live, or kernel6/build.sh with LIVE=1 and "
+              "kernel=6.18 here) and system=SYSTEM.IMG (buildroot/build.sh) or rfs=RAMDISK", file=sys.stderr)
         return 2
     kernel = open(bin_path, "rb").read()
-    ok, kwhy = check_uimage(kernel)
+    ok, kwhy, _ = check_bin(kernel, kern)
     if not ok:
         print("%s: %s" % (bin_path, kwhy[-1]), file=sys.stderr)
         return 2
+    for m in kwhy[1:]:
+        print("  " + m)
     try:
         rfs, rwhat = make_rfs(open(system_path or rfs_path, "rb").read())
     except ValueError as e:
@@ -478,8 +668,8 @@ def check_stick(path, model="T48S", compare_dir=None):
         msg.append("%s.rom: %s" % (model, why[-1]))
         ok = ok and rok
     if "bin" in contents:
-        kok, why = check_uimage(contents["bin"])
-        msg.append("%s.bin: %s" % (model, why[-1]))
+        kok, why, _ = check_bin(contents["bin"])      # either kernel
+        msg.append("%s.bin: %s" % (model, why[-1] if not kok else "; ".join(why[:2])))
         ok = ok and kok
     if "rfs" in contents and len(contents["rfs"]) > RFS_SIZE:
         msg.append("%s.rfs is over 8 MB" % model)
@@ -487,9 +677,10 @@ def check_stick(path, model="T48S", compare_dir=None):
     return ok, msg
 
 USAGE = """usage:
-  mkliveimage.py usb DIR bin=T48S.bin system=system.img|rfs=T48S.rfs [model=T48S]
+  mkliveimage.py usb DIR bin=T48S.bin system=system.img|rfs=T48S.rfs [model=T48S] [kernel=3.6|6.18]
   mkliveimage.py checkstick /dev/sdX|IMAGE [DIR] [model=T48S]
-  mkliveimage.py build OUTDIR bin=T48S.bin system=system.img|rfs=T48S.rfs [model=T48S]
+  mkliveimage.py build OUTDIR bin=T48S.bin system=system.img|rfs=T48S.rfs [model=T48S] [kernel=3.6|6.18]
+  mkliveimage.py checkbin T48S.bin [kernel=3.6|6.18]
   mkliveimage.py rfs SYSTEM.IMG T48S.rfs
   mkliveimage.py check ROM [board_hwid]"""
 
@@ -499,6 +690,18 @@ def main(argv):
     args = [a for a in argv[2:] if "=" not in a]
     cmd = argv[1] if len(argv) > 1 else ""
     model = opts.get("model", "T48S")
+    kern = opts.get("kernel")
+    if kern is not None and kern not in KERNELS:
+        print("kernel= takes %s" % " or ".join(KERNELS), file=sys.stderr)
+        return 2
+    if cmd == "checkbin" and args:
+        ok, why, _ = check_bin(open(args[0], "rb").read(), kern)
+        for m in why[:-1] if not ok else why:
+            print("  " + m)
+        if not ok:
+            print("FAIL: " + why[-1])
+        print("PASS" if ok else "REJECTED")
+        return 0 if ok else 1
     if cmd == "check" and args:
         data = open(args[0], "rb").read()
         hwid = int(args[1]) if len(args) > 1 else 65
@@ -508,7 +711,7 @@ def main(argv):
         print("PASS" if ok else "REJECTED")
         return 0 if ok else 1
     if cmd in ("build", "usb") and args:
-        r = write_set(args[0], opts.get("bin"), opts.get("rfs"), opts.get("system") or opts.get("cpio"), model, readme=cmd == "usb")
+        r = write_set(args[0], opts.get("bin"), opts.get("rfs"), opts.get("system") or opts.get("cpio"), model, readme=cmd == "usb", kern=kern or DEFAULT_KERNEL)
         if r:
             return r
         if cmd == "usb":
