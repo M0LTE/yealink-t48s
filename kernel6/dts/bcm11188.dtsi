@@ -42,6 +42,13 @@
 			clock-frequency = <100000000>;
 		};
 
+		/* SPI clock, as the boot loader and Yealink's kernel set it */
+		clk_spi: clk-spi {
+			compatible = "fixed-clock";
+			#clock-cells = <0>;
+			clock-frequency = <100000000>;
+		};
+
 		/* bus clock (APB peripherals): 166.67 MHz */
 		clk_bus: clk-bus {
 			compatible = "fixed-clock";
@@ -88,24 +95,32 @@
 
 		/*
 		 * Two GPIO banks, pins 0 to 31 and 32 to 61: a data register
-		 * and a direction register each, no set or clear registers.
-		 * Their interrupts are not described yet. Which function a
-		 * pin has is set in the chip control block (0x80000118 on,
-		 * 4 bits per pin); the boot loader does it.
+		 * and a direction register each, no set or clear registers,
+		 * and one interrupt line per bank. Which function a pin has
+		 * is set in the chip control block (0x80000118 on, 4 bits per
+		 * pin); the boot loader does it.
 		 */
 		gpio0: gpio@80004000 {
 			compatible = "brcm,bcm11107-gpio";
 			reg = <0x80004000 0x800>;
+			interrupt-parent = <&intc1>;
+			interrupts = <0>;
 			gpio-controller;
 			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
 			ngpios = <32>;
 		};
 
 		gpio1: gpio@80004800 {
 			compatible = "brcm,bcm11107-gpio";
 			reg = <0x80004800 0x800>;
+			interrupt-parent = <&intc1>;
+			interrupts = <1>;
 			gpio-controller;
 			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
 			ngpios = <30>;
 		};
 
@@ -155,6 +170,18 @@
 		nand: nand-controller@80001000 {
 			compatible = "brcm,bcm11107-umi-nand";
 			reg = <0x80001000 0x1000>;
+			status = "disabled";
+		};
+
+		/* SPI host: an ARM PL022 on a 100 MHz clock */
+		spi: spi@80015000 {
+			compatible = "arm,pl022", "arm,primecell";
+			reg = <0x80015000 0x1000>;
+			interrupts = <26>;
+			clocks = <&clk_spi>, <&clk_bus>;
+			clock-names = "sspclk", "apb_pclk";
+			#address-cells = <1>;
+			#size-cells = <0>;
 			status = "disabled";
 		};
 

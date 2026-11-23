@@ -429,8 +429,22 @@ static int __init t48s_touch_init(void)
 	u8 rx[3];
 	u32 id = 0;
 
+	struct device_node *np;
+
 	if (!of_machine_is_compatible("yealink,sip-t48s"))
 		return -ENODEV;
+	/* a device tree that hands the chip to the kernel's own drivers (SPI
+	 * core, spi-pl022, ads7846) wins: then this driver stays out */
+	np = of_find_compatible_node(NULL, NULL, "ti,tsc2046");
+	if (np) {
+		bool taken = of_device_is_available(np);
+
+		of_node_put(np);
+		if (taken) {
+			pr_info(DRV_NAME ": the device tree gives the touch chip to ads7846; not loading\n");
+			return -ENODEV;
+		}
+	}
 	ssp = ioremap(SSP_PHYS, 0x1000);
 	gpio0 = ioremap(GPIO0_PHYS, 0x1000);
 	rc = -ENOMEM;
