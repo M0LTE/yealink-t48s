@@ -8,7 +8,7 @@ run ./t48-config --config simdata/config set screen dim_seconds 2
 run ./t48-config --config simdata/config set screen off_seconds 4
 
 # ---- brightness, from Settings, Screen ----
-touch 590 420
+touch 700 420
 expectstate settings.page root
 key down
 key down
@@ -74,10 +74,10 @@ key x
 
 # ---- off: the same for a touch (this one is on the Settings button) ----
 waitstate backlight off 8000
-touch 590 420
+touch 700 420
 expectstate backlight on
 expect idle
-touch 590 420
+touch 700 420
 expect settings
 key x
 expect idle

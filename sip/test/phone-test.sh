@@ -7,6 +7,9 @@
 # t48audio modules and a real t48-audiod on its null backend, registered as
 # 1001 to a throwaway Kamailio on loopback. Two more baresips are the far
 # ends, 1002 and 1003, driven by far.py from the scripts' `run` lines.
+# mwi.py stands in for a voicemail server's message-waiting lamp. A second
+# account for the phone, 1004, is added and removed by a scenario through the
+# settings screens: the shell's "apply" restarts baresip, as on the phone.
 # Each script in shell/tests/phone/ is one scenario: it checks state as it
 # goes and saves pictures into $W/shots.
 #
@@ -36,13 +39,15 @@ rm -rf $W && mkdir -p $W/shots $W/phone-config
 FAILS=0
 
 PIDS=
-cleanup() { kill $PIDS $KAM 2>/dev/null || true; wait 2>/dev/null || true; }
+cleanup() { kill $PIDS $KAM 2>/dev/null || true; pkill -f -- "-f $W/phone/run" 2>/dev/null || true; wait 2>/dev/null || true; }
 trap cleanup EXIT
 
 echo "== registrar"
 sed "s|/tmp/t48-sip-test|$W|" "$SIP/test/kamailio.cfg" > $W/kamailio.cfg
 kamailio -f $W/kamailio.cfg -DD -E -Y $W -w $W >$W/kamailio.log 2>&1 &
 KAM=$!
+python3 "$SIP/test/mwi.py" serve $W/mwi >$W/mwi.log 2>&1 &
+PIDS="$PIDS $!"
 sleep 1
 
 # side NAME USER PORT TRANSPORT DISPLAY-NAME SETTINGS-FILE [far]: one baresip, started by t48-sip as on the phone
@@ -64,8 +69,11 @@ side() {
     if [ "$7" = far ]; then bin=$BARESIP; else bin=$PHONE_BARESIP; fi
     printf '#!/bin/sh\nexec %s "$@"\n' "$bin" > $d/baresip
     chmod +x $d/baresip
-    T48_SIP_SETTINGS=$6 T48_SIP_CONFIG=$d/config.in T48_SIP_RUN=$d/run BARESIP=$d/baresip \
-        "$SIP/t48-sip" -c >$d/log 2>&1 &
+    # what t48-apply does on the phone when an account changes: stop baresip, start it again
+    printf '#!/bin/sh\nT48_SIP_SETTINGS=%s T48_SIP_CONFIG=%s T48_SIP_RUN=%s BARESIP=%s exec "%s" -c >>%s 2>&1\n' \
+        "$6" $d/config.in $d/run $d/baresip "$SIP/t48-sip" $d/log > $d/start
+    chmod +x $d/start
+    $d/start &
     PIDS="$PIDS $!"
 }
 
@@ -75,12 +83,16 @@ mkdir -p $W/phone
 $AUDIOD --run-dir $W/phone/audio 2>$W/audiod.log &
 PIDS="$PIDS $!"
 side phone 1001 5071 udp "Desk phone" $W/phone-config/sip
+echo voicemail=1002 >> $W/phone-config/sip
+printf '#!/bin/sh\n[ "$1" = sip ] || exit 0\npkill -f -- "-f %s/phone/run"\nsleep 1\n%s/phone/start &\n' $W $W > $W/apply
+chmod +x $W/apply
 side bob 1002 5072 tcp "Bob Example" $W/bob.sip far
 side carol 1003 5073 udp "Carol Example" $W/carol.sip far
 
 export FAR="python3 $SIP/test/far.py"
 export PHONE=$W/phone/run/ctrl.sock BOB=$W/bob/run/ctrl.sock CAROL=$W/carol/run/ctrl.sock
 export BOBLOG=$W/bob.events CAROLLOG=$W/carol.events
+export MWI="python3 $SIP/test/mwi.py set $W/mwi" CONFIG="$ROOT/shell/build/t48-config --config $W/phone-config"
 for i in 1 2 3 4 5 6 7 8 9 10; do
     [ -S $PHONE ] && [ -S $BOB ] && [ -S $CAROL ] && break
     sleep 0.5
@@ -95,10 +107,10 @@ for s in $SCRIPTS; do
     name=$(basename $s .script)
     echo "== $name"
     # each scenario starts with nothing remembered, unless it says it follows on from the one before
-    grep -q '^# keep-state' $s || rm -rf $W/phone-state $W/phone-config/audio
+    grep -q '^# keep-state' $s || rm -rf $W/phone-state $W/phone-config/audio $W/phone-config/phone
     : > $BOBLOG; : > $CAROLLOG
     if $SIM --sim --apps "$ROOT/shell/build/apps" --data $W/appdata --config $W/phone-config \
-            --state $W/phone-state --sip $PHONE --audio $W/phone/audio/ctl.sock --script $s >$W/$name.log 2>&1; then
+            --state $W/phone-state --sip $PHONE --audio $W/phone/audio/ctl.sock --apply $W/apply --script $s >$W/$name.log 2>&1; then
         echo "PASS $name"
     else
         echo "FAIL $name"; FAILS=$((FAILS + 1))

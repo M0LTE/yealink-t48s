@@ -1,0 +1,30 @@
+# Message waiting: the server says two messages wait; the lamp blinks slowly, the idle screen says so, and the Message key calls voicemail.
+waitstate reg ok 8000
+waitstate audio up 3000
+expectstate messages 0
+expectstate led.message off
+run $MWI 1001 2
+waitstate messages 2 5000
+expectstate led.message slow
+wait 300
+shot shots/phone-messages.png
+# the Message key calls the account's voicemail number (1002 here)
+key message
+waitstate phone outgoing 2000
+expectstate peer 1002
+run $FAR $BOB waitcall incoming 5
+key x
+waitstate phone idle 5000
+# a ringing call takes the lamp, and gives it back
+run $FAR $CAROL cmd dial 1001
+waitstate phone incoming 5000
+expectstate led.message blink
+run $FAR $CAROL cmd hangup
+waitstate phone idle 8000
+# a missed call and messages: the messages win the lamp
+expectstate led.message slow
+# listened to: the server says none, the lamp shows the missed call alone
+run $MWI 1001 0
+waitstate messages 0 5000
+expectstate led.message on
+quit

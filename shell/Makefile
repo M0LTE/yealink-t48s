@@ -11,7 +11,7 @@ CFLAGS ?= -O2
 AUDIOD_INCLUDE ?= ../audiod/include
 CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections -I../libt48/include -I$(AUDIOD_INCLUDE)
 LIB ?= ../libt48/$(O)/libt48.a
-SRC = main.c app.c manifest.c phone.c sipc.c audioc.c leds.c backlight.c be_fb.c be_sim.c config.c settings.c pkg.c
+SRC = main.c app.c manifest.c phone.c contacts.c sipc.c audioc.c leds.c backlight.c be_fb.c be_sim.c config.c settings.c pkg.c
 # what About shows; Buildroot passes it in, as its copy of the source has no git
 T48_VERSION ?= $(shell git describe --always --dirty 2>/dev/null)
 ifneq ($(T48_VERSION),)

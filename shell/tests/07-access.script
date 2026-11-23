@@ -7,7 +7,7 @@ run sh ../tests/access/apply.sh access
 run grep -qx ssh=off simdata/access/status
 run test ! -f simdata/access/dropbear.started
 wait 200
-touch 590 420
+touch 700 420
 expectstate settings.page root
 key down
 key down

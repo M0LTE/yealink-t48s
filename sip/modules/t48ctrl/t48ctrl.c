@@ -9,7 +9,7 @@
  *   out:  <len>:{"response":true,"ok":true,"data":"...","token":"7"},
  *   out:  <len>:{"event":true,"class":"call","type":"CALL_INCOMING",...},
  *
- * Two additions to ctrl_tcp:
+ * Additions to ctrl_tcp:
  *  - Several clients at once (the shell, and a tool over SSH). Each gets
  *    every event.
  *  - A client that has just connected is told how things stand, as events
@@ -17,6 +17,13 @@
  *    each account, and one CALL_INCOMING, CALL_OUTGOING, CALL_RINGING or
  *    CALL_ESTABLISHED for each call. So a restarted shell picks a call back
  *    up. The command "sync" asks for the same again.
+ *  - A command may name an account, "account":"sip:user@domain". It is then
+ *    run for that account: "dial" calls out from it. Without one baresip
+ *    picks, which with a single account is that account.
+ *  - The command "joincalls <call-id> <call-id>" connects the two people we
+ *    are talking to with each other and takes us out: an attended transfer.
+ *    The first call is the one sent away (it must be on hold), the second
+ *    the one it is sent to.
  *
  * Who may connect: the socket is made mode 0600 inside t48-sip's run
  * directory (0700), and each connection's peer is checked: only root, or the
@@ -204,7 +211,8 @@ static bool handle_command(struct client *c, const char *json, size_t len)
 	struct mbuf *resp = mbuf_alloc(1024);
 	struct re_printf pf = {print_handler, resp};
 	struct odict *od = NULL, *out = NULL;
-	const char *cmd, *prm, *tok;
+	const char *cmd, *prm, *tok, *acc;
+	struct ua *ua = NULL;
 	char line[1024], m[128];
 	char *data = NULL;
 	bool alive = true;
@@ -220,6 +228,7 @@ static bool handle_command(struct client *c, const char *json, size_t len)
 	cmd = odict_string(od, "command");
 	prm = odict_string(od, "params");
 	tok = odict_string(od, "token");
+	acc = odict_string(od, "account");
 	if (!cmd) {
 		warning("t48ctrl: no command in message\n");
 		goto out;
@@ -228,11 +237,15 @@ static bool handle_command(struct client *c, const char *json, size_t len)
 	if (!strcmp(cmd, "sync")) {
 		cerr = 0;
 	}
+	else if (acc && !(ua = uag_find_aor(acc))) {
+		mbuf_printf(resp, "no account %s", acc);
+		cerr = ENOENT;
+	}
 	else {
 		re_snprintf(line, sizeof(line), "%s%s%s", cmd,
 			    prm ? " " : "", prm ? prm : "");
 		cerr = cmd_process_long(baresip_commands(), line,
-					str_len(line), &pf, NULL);
+					str_len(line), &pf, ua);
 	}
 
 	resp->pos = 0;
@@ -259,6 +272,40 @@ static bool handle_command(struct client *c, const char *json, size_t len)
 	mem_deref(out);
 	return alive;
 }
+
+
+/* joincalls <call sent away> <call it is sent to>: attended transfer */
+static int cmd_joincalls(struct re_printf *pf, void *arg)
+{
+	const struct cmd_arg *carg = arg;
+	struct pl a, b;
+	char ida[200], idb[200];
+	struct call *away, *to;
+	int err;
+
+	if (re_regex(carg->prm, str_len(carg->prm), "[^ ]+ [^ ]+", &a, &b)) {
+		re_hprintf(pf, "usage: joincalls <call-id> <call-id>");
+		return EINVAL;
+	}
+	pl_strcpy(&a, ida, sizeof(ida));
+	pl_strcpy(&b, idb, sizeof(idb));
+	away = uag_call_find(ida);
+	to = uag_call_find(idb);
+	if (!away || !to || away == to) {
+		re_hprintf(pf, "no such calls");
+		return ENOENT;
+	}
+	err = call_hold(to, true);
+	if (!err)
+		err = call_replace_transfer(away, to);
+	return err;
+}
+
+
+static const struct cmd cmdv[] = {
+	{"joincalls", 0, CMD_PRM, "Attended transfer <call-id> <call-id>",
+	 cmd_joincalls},
+};
 
 
 static void client_read(int flags, void *arg)
@@ -400,6 +447,9 @@ static int module_init(void)
 				NULL);
 	if (!err)
 		err = bevent_register(event_handler, NULL);
+	if (!err)
+		err = cmd_register(baresip_commands(), cmdv,
+				   RE_ARRAY_SIZE(cmdv));
 	if (err) {
 		warning("t48ctrl: %s: %m\n", ctl.path, err);
 		ctl.fhs = fd_close(ctl.fhs);
@@ -415,6 +465,7 @@ static int module_init(void)
 static int module_close(void)
 {
 	bevent_unregister(event_handler);
+	cmd_unregister(baresip_commands(), cmdv);
 	list_flush(&ctl.clients);
 	ctl.fhs = fd_close(ctl.fhs);
 	if (ctl.fd >= 0) {

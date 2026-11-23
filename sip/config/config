@@ -12,8 +12,8 @@ sip_trans_def		udp
 sip_tos			160
 
 # Calls: the shell decides when to answer. Two calls at most: the one the
-# owner is on, and room for a second to arrive and be told "busy" by the
-# shell (or for the far end to transfer us).
+# owner is on, and a second that is waiting, on hold, or being asked before
+# a transfer. The shell holds and resumes them itself.
 call_local_timeout	120
 call_max_calls		2
 call_hold_other_calls	yes
@@ -64,6 +64,8 @@ module			ausine.so
 # t48ctrl_socket to ctrl.sock in its run directory.
 module_app		account.so
 module_app		menu.so
+# message waiting (voicemail): the shell lights the message lamp from its events
+module_app		t48mwi.so
 module_app		t48ctrl.so
 # No tone files on the phone: the audio service plays them (see Audio above)
 ringback_disabled	yes

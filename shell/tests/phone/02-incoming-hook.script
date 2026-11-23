@@ -7,13 +7,13 @@ expect call
 expectstate peer 1002
 waitstate audio.ring 1 2000
 expectstate audio.route none
-expectstate led.power blink
+expectstate led.message blink
 shot shots/phone-incoming.png
 hook off
 waitstate phone incall 5000
 waitstate audio.ring 0 2000
 expectstate audio.route handset
-expectstate led.power off
+expectstate led.message off
 run $FAR $BOB waitcall established 3
 wait 1200
 # the far end hangs up
