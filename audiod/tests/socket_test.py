@@ -171,7 +171,7 @@ def main():
     check(seqs == list(range(100)), "sequence numbers count from 0")
     check(max(abs(x) for x in mic) == 0, "on hook: the call gets pure silence, not the microphone")
     check("route=handset" in d.ctl("route", "handset"), "route handset accepted")
-    c.run(5)
+    c.run(30)   # the first half second after a route change is held back (microphone thump)
     mic, _, _ = c.run(50)
     a = amp(mic, 440)
     check(5700 < a < 6100 and amp(mic, 1000) < 50, "off hook: the call gets the microphone (440 Hz at %.0f, want 6000)" % a)

@@ -3,6 +3,11 @@
 #include <string.h>
 #include "engine.h"
 
+/* Switching a microphone's front end on makes a thump that takes about 0.4 s
+ * to die away (measured on the phone: 14000 counts at first). The far end is
+ * sent silence for that long after a route is set. */
+#define SETTLE_FRAMES 25
+
 void engine_init(struct engine *e)
 {
 	int i;
@@ -44,6 +49,7 @@ void engine_set_route(struct engine *e, int route)
 	echo_init(&e->echo, route ? routes[route].echo : ECHO_NONE,
 		  route ? routes[route].coupling_q8 : 0);
 	memset(&e->dc, 0, sizeof(e->dc));
+	e->settle = route ? SETTLE_FRAMES : 0;
 	/* a ringer that was sounding must not carry on into the new route */
 	if (e->alert_def == &tone_ring || e->alert_def == &tone_waiting) {
 		e->alert_def = 0;
@@ -112,6 +118,8 @@ void engine_tick(struct engine *e, const int16_t *mic_in, const int16_t *spk_in,
 	memcpy(mic_out, mic_in, FRAME * sizeof(int16_t));
 	dsp_dcblock(&e->dc, mic_out, FRAME);
 	echo_process(&e->echo, spk_out, mic_out, FRAME);
-	if (e->mute)
+	if (e->settle > 0)
+		e->settle--;
+	if (e->mute || e->settle > 0)
 		memset(mic_out, 0, FRAME * sizeof(int16_t));
 }

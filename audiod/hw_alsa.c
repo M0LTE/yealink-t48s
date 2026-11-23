@@ -9,12 +9,13 @@
  * written one frame for each frame captured, into a buffer that starts with
  * 40 ms in it; both run off the same sample clock, so that level holds.
  *
- * The driver has no playback yet. Until it does, opening the playback device
- * fails, which is reported once, and the service runs with capture only.
- * What the driver has to provide is listed in docs/audiod.md.
+ * Played frames are replaced with silence in the buffer as they go (ALSA's
+ * silence fill), so if the service is ever late the codec plays silence, not
+ * the last 80 ms again; the driver then fades and idles on zeros until the
+ * stream is prepared and written again.
  *
- * NOT RUN YET: written against the capture driver's behaviour and the ALSA
- * kernel interface, compiled for the phone, never started on one.
+ * A kernel without playback (the first capture-only driver) is reported once
+ * and the service runs with the microphone only.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -96,6 +97,8 @@ static int pcm_open(int card, int dev, int play)
 		sp.xfer_align = 1;
 		sp.start_threshold = PLAY_START;
 		sp.stop_threshold = FRAME * PERIODS;	/* stop when it runs dry */
+		sp.silence_threshold = 0;		/* and keep what has been played */
+		sp.silence_size = ~0UL >> 1;		/* overwritten with silence */
 		if (ioctl(fd, SNDRV_PCM_IOCTL_SW_PARAMS, &sp) < 0)
 			goto fail;
 	}
@@ -162,12 +165,31 @@ static void ctl_set(struct hw_alsa *a, const char *name, int value)
 		fprintf(stderr, "t48-audiod: control \"%s\" = %d: %s\n", name, value, strerror(errno));
 }
 
-static void alsa_stop(struct hw *hw)
+static void streams_close(struct hw_alsa *a)
 {
-	struct hw_alsa *a = (struct hw_alsa *)hw;
 	pcm_close(&a->play_fd);
 	pcm_close(&a->cap_fd);
 	a->part_bytes = 0;
+}
+
+/* Idle means silent and deaf: amplifier, outputs, sidetone and microphones
+ * off, whatever the last route left on. */
+static void alsa_stop(struct hw *hw)
+{
+	static const char *const off[] = {
+		"Speaker Amp Switch",
+		"Codec A Output A Playback Switch", "Codec A Output B Playback Switch",
+		"Codec B Output A Playback Switch", "Codec B Output B Playback Switch",
+		"Codec A Sidetone Switch", "Codec B Sidetone Switch",
+		"Codec A Capture Switch", "Codec B Capture Switch",
+	};
+	struct hw_alsa *a = (struct hw_alsa *)hw;
+	unsigned i;
+
+	streams_close(a);
+	if (a->ctl_fd >= 0)
+		for (i = 0; i < sizeof(off) / sizeof(off[0]); i++)
+			ctl_set(a, off[i], 0);
 }
 
 static int alsa_start(struct hw *hw, const struct route *r)
@@ -177,7 +199,7 @@ static int alsa_start(struct hw *hw, const struct route *r)
 	int i;
 
 	/* Streams off first, so nothing is heard while the paths change */
-	alsa_stop(hw);
+	streams_close(a);
 	if (a->ctl_fd < 0) {
 		char path[40];
 		snprintf(path, sizeof(path), "/dev/snd/controlC%d", a->card);
