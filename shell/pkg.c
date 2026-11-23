@@ -282,8 +282,13 @@ static int unpack(const char *pkg, const char *dest, char *id, size_t idn)
         for (int i = 0; i < 512 && empty; i++) empty = !h[i];
         if (empty) { ok = id[0] ? 0 : -1; if (ok) fail("the package is empty"); break; }
         if (memcmp(h + 257, "ustar", 5)) { fail("the package is not a tar file"); break; }
-        long size = strtol((char *)h + 124, NULL, 8);
-        long mode = strtol((char *)h + 100, NULL, 8);
+        /* the number fields need not end in a NUL */
+        char num[13];
+        snprintf(num, sizeof num, "%.12s", h + 124);
+        long size = strtol(num, NULL, 8);
+        snprintf(num, sizeof num, "%.8s", h + 100);
+        long mode = strtol(num, NULL, 8);
+        if (h[124] & 0x80) size = -1;   /* the binary form, for files far bigger than any app */
         int type = h[156];
         if (h[345]) snprintf(name, sizeof name, "%.155s/%.100s", h + 345, h);
         else snprintf(name, sizeof name, "%.100s", h);
@@ -464,6 +469,15 @@ static void clean_leftovers(void)
         char p[600];
         if (strncmp(de->d_name, ".tmp-", 5) && strncmp(de->d_name, ".old-", 5)) continue;
         snprintf(p, sizeof p, "%s/%s", apps_dir, de->d_name);
+        if (de->d_name[1] == 'o') {
+            /* .old-ID-PID: an update was cut off after the old version was moved
+             * aside. If the new one never arrived, put the old one back. */
+            char id[64], back[600];
+            const char *dash = strrchr(de->d_name, '-');
+            snprintf(id, sizeof id, "%.*s", (int)(dash - (de->d_name + 5)), de->d_name + 5);
+            snprintf(back, sizeof back, "%s/%s", apps_dir, id);
+            if (manifest_id_ok(id) && access(back, F_OK) < 0 && rename(p, back) == 0) continue;
+        }
         rm_rf(p);
     }
     closedir(d);
@@ -599,9 +613,25 @@ static int cmd_remove(const char *id)
     return 0;
 }
 
+/* one line per app, tabs between: nothing from a manifest or a feed may hold either */
+static const char *flat(const char *s)
+{
+    static char b[4][200];
+    static int at;
+    char *o = b[at = (at + 1) % 4];
+    snprintf(o, sizeof b[0], "%s", s);
+    for (char *p = o; *p; p++)
+        if ((unsigned char)*p < 32 || *p == 127) *p = ' ';
+    return o;
+}
+
 static void list_line(const char *id, const char *name, const char *have, const char *offered, long pkg_bytes, long disk_bytes,
                       const char *state, const char *perms, const char *description)
 {
+    name = flat(name);
+    have = flat(have);
+    perms = flat(perms);
+    description = flat(description);
     if (machine) {
         printf("app\t%s\t%s\t%s\t%s\t%ld\t%ld\t%s\t%s\t%s\n", id, name, have, offered, pkg_bytes, disk_bytes, state,
                perms[0] ? perms : "-", description[0] ? description : "-");
