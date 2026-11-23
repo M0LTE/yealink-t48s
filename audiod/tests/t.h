@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static int t_fails, t_checks;
+static int t_fails __attribute__((unused)), t_checks __attribute__((unused));
 
 #define CHECK(cond) do { \
 	t_checks++; \

@@ -33,6 +33,11 @@ check: all $(TESTS:%=$(O)/%)
 	@for t in $(TESTS); do $(O)/$$t || exit 1; done
 	python3 tests/socket_test.py $(O)
 
+# No auto-vectorising: the phone's ARM11 has no NEON, so SSE would flatter this PC
+$(O)/bench: tests/bench.c $(CORE) $(HDRS) tests/t.h
+	@mkdir -p $(O)
+	$(CC) $(CFLAGS) -fno-tree-vectorize -o $@ tests/bench.c $(CORE) -lm $(LDFLAGS)
+
 bench: $(O)/bench
 	$(O)/bench
 
