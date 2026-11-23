@@ -73,6 +73,8 @@ This is also where the unknown in [#6](https://github.com/M0LTE/yealink-t48s/iss
 
 Until #6 reports, a null backend and a file backend let SIP and the phone UI go ahead. (2026-11-23: #6 found the first backend is enough, and the microphone half exists as an ALSA capture driver, `kernel/drivers/t48s_audio.c`; see `docs/audio.md`.)
 
+(2026-11-23, later: the daemon exists and is tested off the phone, see [audiod.md](audiod.md). The speakerphone starts with voice switching, a gentler kind of half-duplex, because an echo canceller would take a large share of this CPU; the app playback stream is not written yet.)
+
 ### The shell
 
 **Decision: one program, `t48-shell`, owns the screen, every input device, the LEDs and the backlight, and contains the phone UI.** Issues [#19](https://github.com/M0LTE/yealink-t48s/issues/19) (screen, input, launcher), [#26](https://github.com/M0LTE/yealink-t48s/issues/26) (phone UI), [#27](https://github.com/M0LTE/yealink-t48s/issues/27) (extras), [#23](https://github.com/M0LTE/yealink-t48s/issues/23) (settings and keyboard), [#18](https://github.com/M0LTE/yealink-t48s/issues/18) (backlight).

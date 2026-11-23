@@ -17,10 +17,11 @@ call_max_calls		4
 call_hold_other_calls	yes
 call_accept		no
 
-# Audio: the audio service's call stream, always 16 kHz mono s16; auresamp
-# converts for 8 kHz codecs. Until t48-audiod exists t48audio is a null
-# device (silence in, audio thrown away). Ringing and tones are played by the
-# audio service at the shell's request, so menu's ring tones are switched off.
+# Audio: the audio service's call stream (docs/audiod.md), always 16 kHz mono
+# s16; auresamp converts for 8 kHz codecs. With no t48-audiod running,
+# t48audio is a null device (silence in, audio thrown away). Ringing and tones
+# are played by the audio service at the shell's request, so menu's ring tones
+# are switched off. t48audio_socket moves the socket (tests).
 audio_player		t48audio,call
 audio_source		t48audio,call
 audio_alert		t48audio,call
