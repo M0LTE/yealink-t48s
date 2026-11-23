@@ -1,0 +1,67 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# t48-live boot | status
+# The live image (issue 7, docs/live-image.md): the phone was started through U-Boot's
+# recovery mode from a USB stick or TFTP, and nothing of ours is in its flash.
+#
+# "boot" is run once by rcS. On any other kind of boot it does nothing. On a live boot:
+#  - it takes U-Boot's BOOTMODE flag out of the flash again, so the owner's next
+#    normal power-up is an ordinary Yealink start with the settings untouched. That
+#    is the one flash write on this path, and it is the kernel that does it
+#    (/sys/kernel/t48s_bootmode, kernel/drivers/t48s_bootmode.c): this script can
+#    only say the word. A kernel whose flash driver cannot write says so, and the
+#    note on the screen then tells the owner what to do instead;
+#  - it leaves a note for the idle screen (t48-shell shows /run/t48-notice): how the
+#    phone was started, that nothing is installed, and how to go back.
+# Settings are typed on the phone and live in RAM here: there is no settings file.
+CMDLINE=${T48_CMDLINE:-/proc/cmdline}
+BM=${T48_BOOTMODE:-/sys/kernel/t48s_bootmode}
+RUN=${T48_RUN:-/run}
+STATE=$RUN/t48-live
+
+case "$1" in
+status)
+    [ -f "$STATE" ] && cat "$STATE" || echo "live=no"
+    exit 0 ;;
+boot) ;;
+*)  echo "usage: t48-live boot | status" >&2; exit 2 ;;
+esac
+
+grep -qw t48boot=live "$CMDLINE" || exit 0
+
+was=$(cat "$BM/mode" 2>/dev/null) || was=unreadable
+[ -n "$was" ] || was=unreadable
+now=$was
+case "$was" in
+none|unreadable) ;;
+*)  echo BOOTMODE > "$BM/clear" 2>/dev/null
+    now=$(cat "$BM/mode" 2>/dev/null) || now=unreadable ;;
+esac
+result=$(cat "$BM/status" 2>/dev/null)
+
+case "$was" in
+usbmode)
+    from=usb
+    l1="Running from the USB stick. Nothing is installed on this phone."
+    # true whether or not the flag went: with no stick in, Yealink's start-up has nothing to reflash from
+    l2="To go back to Yealink: unplug the power, take the stick out, plug the power in." ;;
+resumemode)
+    from=network
+    l1="Started over the network. Nothing is installed on this phone."
+    if [ "$now" = none ]; then
+        l2="To go back to Yealink: unplug the power and plug it in again."
+    else
+        l2="Careful: Yealink's settings will be reset at its next start. See the guide."
+    fi ;;
+*)
+    from=recovery
+    l1="Started in recovery mode. Nothing is installed on this phone."
+    l2="To go back to Yealink: unplug the power and plug it in again." ;;
+esac
+
+mkdir -p "$RUN"
+printf 'live=yes\nfrom=%s\nbootmode_was=%s\nbootmode_now=%s\nclear=%s\n' "$from" "$was" "$now" "${result:-not tried}" > "$STATE"
+printf '%s\n%s\n' "$l1" "$l2" > "$RUN/t48-notice"
+echo "t48-live: $l1"
+echo "t48-live: BOOTMODE was $was, is now $now (${result:-not tried})"
+echo "t48-live: $l2"

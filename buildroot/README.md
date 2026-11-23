@@ -30,6 +30,7 @@ musl, ARM1176 soft-float, Linux 3.6 headers, everything static.
 | `configs/t48s_defconfig` | the configuration |
 | `package/` | our packages; the local ones build straight from this repo's folders |
 | `board/t48s/rootfs-overlay/` | `/etc/inittab`, `/etc/init.d/rcS` (mounts, watchdog off, network, `t48-access boot`), `/etc/pointercal`, `back-to-yealink`, `t48-apply`, `t48-access` |
+| `board/t48s/rootfs-overlay/usr/bin/t48-live` | run by `rcS`; acts only when the phone was started from a USB stick or TFTP: clears U-Boot's flag through the kernel and leaves the "nothing is installed" note for the idle screen ([docs/live-image.md](../docs/live-image.md)) |
 | `board/t48s/post-build.sh` | drops the stock init scripts, makes the `/data` folders, links `/root/.ssh` to `/data/access/ssh` |
 
 The screen fonts for `native/` are committed in `native/gen/`; `make -C native fonts` regenerates them (needs python3-pil and the DejaVu fonts).

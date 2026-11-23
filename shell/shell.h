@@ -43,6 +43,7 @@ struct options {
     const char *audio;   /* the audio service's control socket, NULL: no audio */
     const char *apply;   /* program run with a settings file's name when that file has changed, NULL: none */
     const char *access;  /* folder where t48-access leaves its status file (docs/access.md) */
+    const char *notice;  /* a file of one or two lines shown on the idle screen while it exists (t48-live), NULL: none */
     const char *runner;  /* simulator: a program to run apps with, such as qemu-arm for the phone's own builds */
 };
 extern struct options opt;

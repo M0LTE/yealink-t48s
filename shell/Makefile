@@ -48,7 +48,7 @@ $(O)/feeds: $(O)/apps tests/mkfeeds.sh ../sdk/t48-pack
 	sh tests/mkfeeds.sh $(O)
 
 # apps installed by a test go in simdata/installed, settings in simdata/config
-SIM = ./t48-sim --apps simdata/installed:apps --data simdata/appdata --config simdata/config --state simdata/state --access simdata/access --apply ../tests/access/apply.sh
+SIM = ./t48-sim --apps simdata/installed:apps --data simdata/appdata --config simdata/config --state simdata/state --access simdata/access --notice simdata/notice --apply ../tests/access/apply.sh
 
 check: all $(O)/apps $(O)/feeds
 	@mkdir -p $(O)/shots
