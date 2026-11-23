@@ -23,12 +23,12 @@ A boot is made of two files, both from one Buildroot run:
 
 The first stage looks, in this order:
 
-1. **In RAM beside the kernel**, as the file `/system.img`. That is how a kexec boot works today (`kernel/build.sh kexec` packs it next to the first stage), and how a recovery-mode (live) boot will: U-Boot loads a second file as a ramdisk, and a cpio holding `system.img` lands in the same place.
+1. **In RAM beside the kernel**, as the file `/system.img`. That is how a kexec boot works (`kernel/build.sh kexec` packs it next to the first stage), and a recovery-mode (live) boot too: U-Boot loads a second file as a ramdisk, `T48S.rfs`, and that is a cpio archive holding `system.img`, which lands in the same place ([live-image.md](live-image.md#what-is-in-the-two-files-and-why)).
 2. **In flash**, a system slot, once the phone is installed (issue #29). Not written yet; the script has the place for it.
 
 Either way it is the same file, mounted the same way (squashfs through a loop device), so there is one system image however the phone was started. It costs its own size in RAM, about 4 MB, against 7 MB when everything was unpacked.
 
-The system image is read-only. What changes lives elsewhere: `/run` and `/tmp` in RAM (logs are in `/tmp`), `/data` for everything the owner sets. The two files in `/etc` that change at run time are really in `/run`: `resolv.conf` is a link, and a copy of `shadow` is mounted over the read-only one (the Access page's password door sets root's password for ten minutes). Our own test builds' SSH keys ride beside the first stage and are mounted on `/etc/t48-dev`.
+The system image is read-only. What changes lives elsewhere: `/run` and `/tmp` in RAM (logs are in `/tmp`), `/data` for everything the owner sets (in RAM on a live boot, always). The two files in `/etc` that change at run time are really in `/run`: `resolv.conf` is a link, and a copy of `shadow` is mounted over the read-only one (the Access page's password door sets root's password for ten minutes). Our own test builds' SSH keys ride beside the first stage and are mounted on `/etc/t48-dev`.
 
 ## Rescue
 
@@ -38,7 +38,7 @@ If there is no system image, or it does not mount, the first stage stays up by i
 - the network by DHCP, and SSH as root: with the built-in keys on one of our test builds, otherwise with a password made up at that moment and shown only on the screen;
 - a shell on the serial port.
 
-To see it: build a kernel with the first stage alone (`ROOTFS=firststage.cpio` and no `SYSTEM`) and boot it. The menu (other slot, start without the owner's changes, wipe) is issue #32.
+To see it: build a kernel with the first stage alone (`ROOTFS=firststage.cpio` and no `SYSTEM`) and boot it. A live boot whose ramdisk is missing or damaged ends here too. The menu (other slot, start without the owner's changes, wipe) is issue #32.
 
 ## Services
 

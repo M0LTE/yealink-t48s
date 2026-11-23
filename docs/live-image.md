@@ -2,29 +2,29 @@
 
 Issue [#7](https://github.com/M0LTE/yealink-t48s/issues/7). This is the "try it" path from [architecture.md](architecture.md): an owner copies four files to a USB stick, holds Speakerphone while powering the phone up, presses 2, and our firmware runs from RAM. Nothing of ours is written to the phone, and a normal power-up brings Yealink back. The same files also work from a TFTP server (menu option 1), which is how we tested first.
 
-**Where this stands (2026-11-23).** Proven on the phone: our kernel and root filesystem boot through recovery mode over TFTP. Done offline since: a ROM file we are allowed to share, the stick generator and checker, the formatting script, the live boot step and its screen note. **Not yet proven: U-Boot reading a stick at all.** The one attempt (2026-11-22, a 4 GB stick) froze inside U-Boot. The section "Why the first stick froze" has what is known, and the [test plan](#test-plan-for-a-daytime-session) is built to settle it.
+**Where this stands (2026-11-23).** Proven on the phone: our kernel and root filesystem boot through recovery mode over TFTP. Done offline since: a ROM file we are allowed to share, the stick generator and checker, the formatting script, the live boot step and its screen note, and the move onto the first stage and system image of [boot.md](boot.md) (built and checked; not yet started on the phone in this form). **Not yet proven: U-Boot reading a stick at all.** The one attempt (2026-11-22, a 4 GB stick) froze inside U-Boot. The section "Why the first stick froze" has what is known, and the [test plan](#test-plan-for-a-daytime-session) is built to settle it.
 
 ## The stick
 
 | File | What |
 |---|---|
 | `T48S.rom` | a 4 KB label, built by `tools/mkliveimage.py`. U-Boot checks it before it will start anything. Not Yealink firmware |
-| `T48S.bin` | our kernel (U-Boot legacy image), `kernel/build.sh live`. 1.5 MB; must stay under 4 MB |
-| `T48S.rfs` | our root filesystem: Buildroot's `rootfs.cpio`, gzip, padded with zeros to exactly 8 MB |
+| `T48S.bin` | our kernel with the first stage built in (U-Boot legacy image), `kernel/build.sh live`. 2.5 MB; must stay under 4 MB |
+| `T48S.rfs` | the system image: Buildroot's `system.img` as the one file in a cpio archive, padded with zeros to exactly 8 MB |
 | `README.txt` | the owner's instructions, plain text |
 
 Build the set and put it on a stick (Linux):
 
 ```
-sh kernel/build.sh live                                   # in the kernel container: T48S.bin
-buildroot/build.sh WORKDIR                                # WORKDIR/output/images/rootfs.cpio
-tools/mkliveimage.py usb STICK bin=T48S.bin cpio=WORKDIR/output/images/rootfs.cpio
+buildroot/build.sh WORKDIR                                # WORKDIR/output/images: firststage.cpio, system.img
+ROOTFS=firststage.cpio sh kernel/build.sh live            # in the kernel container: T48S.bin
+tools/mkliveimage.py usb STICK bin=T48S.bin system=WORKDIR/output/images/system.img
 sudo tools/mkusbstick.sh /dev/sdX STICK                   # ERASES the stick, then checks it
 ```
 
 `mkusbstick.sh` refuses anything that is not a whole USB disk. It ends by reading the stick back the way U-Boot will (`tools/mkliveimage.py checkstick`), which you can also run on any stick or image: it says `PASS` or names what U-Boot would trip over.
 
-For TFTP, `tools/mkliveimage.py build OUT bin=... cpio=...` writes the same three files without the README; serve them with `sudo tools/tftpd.py OUT 69 --rom-once`.
+For TFTP, `tools/mkliveimage.py build OUT bin=... system=...` writes the same three files without the README; serve them with `sudo tools/tftpd.py OUT 69 --rom-once`.
 
 ### What kind of stick, and how to format it
 
@@ -50,11 +50,27 @@ Formatting without Linux. Both of these erase the stick; check the disk number t
 - **Windows** (Command Prompt as administrator): `diskpart`, then `list disk`, `select disk N`, `clean`, `convert mbr`, `create partition primary`, `format fs=fat32 quick label=T48S`, `assign`, `exit`. Then copy the four files in Explorer and use "Eject".
 - **macOS** (Terminal): `diskutil list`, then `diskutil eraseDisk FAT32 T48S MBRFormat /dev/diskN`. Copy the four files in Finder and eject. The hidden files macOS adds do no harm.
 
+### What is in the two files, and why
+
+A boot of ours is a first stage and a system image ([boot.md](boot.md)). U-Boot gives us two files to put them in: the kernel, and a ramdisk it loads 4 MB above the kernel. The split is:
+
+- **`T48S.bin` holds the kernel and the first stage**, built in as on a kexec boot. It carries no keys.
+- **`T48S.rfs` holds the system image**, the same `system.img` a kexec boot uses, byte for byte, as the single file `system.img` in a cpio archive. The kernel unpacks that archive over the first stage, so the first stage finds `/system.img` in RAM beside it and mounts it read-only, exactly as on a kexec boot. `buildroot/board/t48s/firststage/init` needed no change.
+
+Why this way round:
+
+- **It is the only split that fits.** The kernel file must stay under 4 MB. Kernel and first stage are 2.5 MB; the system image is 2.4 MB and growing, so it cannot go in the kernel file, and the ramdisk's 8 MB has room for it.
+- **One system image however the phone was started**, which is the point of the boot design: what is tried from a stick is what kexec runs today and what an install will write.
+- **Rescue still works.** With the first stage inside the kernel, a stick whose `T48S.rfs` is missing, cut short or damaged does not end in a kernel panic: the kernel falls back to the first stage alone, and that comes up as the rescue system with the reason on the screen. Putting the first stage in the ramdisk beside the system image would have saved 1 MB of kernel file and lost that.
+- **Nothing is unpacked twice.** The archive is not compressed, because the system image already is (squashfs, xz). The old way (the whole root filesystem as a gzip cpio, unpacked into RAM) cost about 7 MB of RAM; this costs the system image's own size.
+
+`/data` is in RAM on a live boot whatever the flash holds: `t48-data` sees `t48boot=live` and leaves the flash alone, and `t48-data format` refuses. So a phone that already keeps our `/data` in flash ([flash.md](flash.md)) still starts clean from a stick, and the stick writes nothing.
+
 ### Why the ramdisk is padded
 
-U-Boot's `bootstorage` loads the kernel at 0x02680000 and the ramdisk 4 MB higher at 0x02a80000, then starts the kernel with no word about the ramdisk's size. Our kernel's built-in command line says `initrd=0x02a80000,0x800000`: it takes 8 MB from there whatever the file's length. So `T48S.rfs` is the gzip cpio followed by zeros up to 8 MB. Linux unpacks the archive as an initramfs and skips zeros after it; with anything else after it (whatever was in RAM) it gives up and the boot fails. Both cases were run under QEMU with Linux 3.6.11 before being relied on: padded unpacks and starts `/init`; a random tail gives "junk in compressed archive" and a panic.
+U-Boot's `bootstorage` loads the kernel at 0x02680000 and the ramdisk 4 MB higher at 0x02a80000, then starts the kernel with no word about the ramdisk's size. Our kernel's built-in command line says `initrd=0x02a80000,0x800000`: it takes 8 MB from there whatever the file's length. So `T48S.rfs` is the archive followed by zeros up to 8 MB. Linux unpacks the archive and skips zeros after it; with anything else after it (whatever was in RAM) it gives up. Both cases were run under QEMU with this archive and Linux 3.6.11 (2026-11-23): padded, it unpacks without a word; with a random tail the kernel says "rootfs image is not initramfs (junk in compressed archive)", puts the first stage back, and that comes up as rescue. What QEMU did not show is the step after it, the first stage mounting the image: the test board's kernel stopped before starting any init, with or without a ramdisk. That step is the same script and the same file name as a kexec boot, which runs on the phone daily; the first real proof is test 4 below.
 
-Limits: the kernel file under 4 MB (or the ramdisk lands on its end; `kernel/build.sh` and the generator both check), the root filesystem under 8 MB after gzip (today 2.9 MB). There is room above that: about 15 MB lies between the ramdisk address and U-Boot's own stack, if the kernel's command line is changed to match. An ext2 image still works as `T48S.rfs` too; the generator passes one through unchanged.
+Limits: the kernel file under 4 MB (or the ramdisk lands on its end; `kernel/build.sh` and the generator both check), the system image under 8 MB (today 2.4 MB). There is room above that: about 15 MB lies between the ramdisk address and U-Boot's own stack, if the kernel's command line is changed to match.
 
 ## What U-Boot does on the USB route
 
@@ -128,10 +144,10 @@ So the USB route is the gentle one: **take the stick out before powering back up
 Tom approved one write (2026-11-23): the live image may take `BOOTMODE` out of `userenv`, exactly as Yealink's own start-up does on every boot. It is built so that it cannot become anything more:
 
 - **The kernel does it, not userspace** (`kernel/drivers/t48s_bootmode.c`). `/sys/kernel/t48s_bootmode/mode` reads the flag. Writing the word `BOOTMODE` to `clear` is the whole interface: no data comes from userspace. The kernel reads the 4 KB settings block, checks its CRC, builds the same list of variables without `BOOTMODE`, and hands it to the flash driver. No flag, no write. At most one write per boot. An unreadable block is never rewritten.
-- **The flash driver does the write and checks the address itself.** The file above contains no flash-writing code. It calls `t48s_nand_userenv_rewrite(block, data, len)`, which the flash driver must provide and which may accept only one block inside `userenv`. **The read-only driver on this branch does not provide it**, so here "clear" answers "this kernel's flash driver cannot write" and the flash is not touched: every flash write is still impossible. The driver from issue #29 has tested write code; giving it this one function (erase that block, program two pages with its usual error correction, erased check and read-back, refuse any other address) is what switches the clearing on, and is the step to review.
+- **The flash driver does the write and checks the address itself.** The file above contains no flash-writing code. It calls `t48s_nand_userenv_rewrite(block, data, len)`, which the flash driver must provide and which may accept only one block inside `userenv`. **The flash driver does not provide it yet**: it writes our `/data` range and nothing else ([flash.md](flash.md)), so today "clear" answers "this kernel's flash driver cannot write" and `userenv` is not touched. Giving the driver this one function (erase that block, program two pages with its usual error correction, erased check and read-back, refuse any other address) is what switches the clearing on, and is the step to review.
 - **The logic is tested without the phone.** `tools/test-bootmode.sh` runs the kernel's own parsing and rebuilding code on a PC against made-up blocks and the real `userenv` dumps, and compares with an independent implementation. `tools/test-live.sh` runs the boot step through every case.
 
-`t48-live boot` (run by `rcS`) does this on a live boot only (the live kernel's command line says `t48boot=live`), then leaves a note that the idle screen shows for the whole session:
+`t48-live boot` (run by `rcS`, before the services start) does this on a live boot only (the live kernel's command line says `t48boot=live`), then leaves a note that the idle screen shows for the whole session. Its first line leads the screen's one row of notices, ahead of missed calls, messages and do not disturb; its second takes the bottom line:
 
 ![the idle screen with the live note](img/live-notice.png)
 
@@ -163,7 +179,7 @@ Goal: find a stick U-Boot will read, see our firmware come up from it, and confi
 **To have on the desk**
 
 - Two new USB 2.0 sticks of different makes, 16 or 32 GB: a SanDisk Cruzer Blade and a Kingston DataTraveler (SE9 or DT20). Plus the 4 GB stick that froze.
-- The stick files, built beforehand into two folders: `A` (the smoke test of 2026-11-22: Yealink's kernel and our tiny `usbinit` ramdisk from `dumps/usbtest`, with a crafted ROM; it clears BOOTMODE itself with Yealink's tool) and `B` (our kernel and Buildroot root filesystem, `mkliveimage.py usb`).
+- The stick files, built beforehand into two folders: `A` (the smoke test of 2026-11-22: Yealink's kernel and our tiny `usbinit` ramdisk from `dumps/usbtest`, with a crafted ROM; it clears BOOTMODE itself with Yealink's tool) and `B` (our kernel with the first stage, and the system image, `mkliveimage.py usb`).
 - proxmox0 writes the sticks (it has the tools): plug a stick into it, `lsblk -d -o NAME,TRAN,SIZE,MODEL` to find it, `tools/mkusbstick.sh /dev/sdX A`.
 
 **Watch the serial port first.** The logger on proxmox0 is already running: `ssh root@proxmox0 tail -f /root/t48s/session4.log`. Have it on screen before each power-up.
@@ -184,9 +200,9 @@ Goal: find a stick U-Boot will read, see our firmware come up from it, and confi
 | 1 | new SanDisk | A | can this U-Boot boot from a good stick at all? Success: "BOOTED FROM USB" on the screen, `alive N s` lines on serial, and the next normal boot is ordinary |
 | 2 | new Kingston | A | a second make, so the recipe is not one lucky stick |
 | 3 | the old 4 GB, reformatted by `mkusbstick.sh` | A | does it still freeze at `scanning usb for storage devices...`? Expected yes: that pins the freeze on the stick, not the format. If it now works, the format was the cause after all |
-| 4 | whichever worked | B | our firmware from a stick: kernel log on serial, then the clock on the screen with the "Running from the USB stick" note |
+| 4 | whichever worked | B | our firmware from a stick: kernel log on serial, `t48 boot: starting the system image /system.img`, then the clock on the screen with the "Running from USB" note. "RESCUE" on the screen instead means the kernel started but did not get the system image out of `T48S.rfs`: keep the serial log |
 
-During 4, on the serial shell: `t48-live status` (expect `from=usb`, and `clear=this kernel's flash driver cannot write` until the #29 driver has the hook), `ip addr` and a ping (does Ethernet work when U-Boot never used it?), and try touch and keys on the screen.
+During 4, on the serial shell: `t48-live status` (expect `from=usb`, and `clear=this kernel's flash driver cannot write` until the flash driver has the hook), `t48-data status` (expect `RAM`), `ip addr` and a ping (does Ethernet work when U-Boot never used it?), and try touch and keys on the screen.
 
 After 4, the going-back check: power off, stick out, power on. Watch serial for Yealink's "Enter USB Mode" and "Not USB mounted!". If the phone has not reached its normal screen in two minutes, power-cycle once more. Then check the account and settings are as before. That confirms the owner's instructions in `README.txt`.
 
