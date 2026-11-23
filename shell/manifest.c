@@ -5,12 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 #include "shell.h"
 
 struct manifest apps[MAX_APPS];
 int napps;
 
-static int id_ok(const char *id)
+int manifest_id_ok(const char *id)
 {
     if (!*id) return 0;
     for (; *id; id++)
@@ -19,48 +20,54 @@ static int id_ok(const char *id)
     return 1;
 }
 
-static void read_manifest(const char *dir)
+void manifest_free(struct manifest *m)
+{
+    free(m->icon.px);
+    for (int k = 0; k < m->nsettings; k++) { free(m->settings[k]); free(m->setting_label[k]); }
+    memset(m, 0, sizeof *m);
+}
+
+/* Read the manifest of the app folder dir. 0, or -1 with the reason in err. */
+int manifest_read(const char *dir, struct manifest *m, char *err, size_t errn)
 {
     char path[400], *txt;
-    struct manifest *m = &apps[napps];
     FILE *f;
     long n;
 
+    memset(m, 0, sizeof *m);
     snprintf(path, sizeof path, "%s/manifest.json", dir);
     f = fopen(path, "rb");
-    if (!f) return;
+    if (!f) { snprintf(err, errn, "it has no manifest.json"); return -1; }
     txt = malloc(65536);
     n = txt ? (long)fread(txt, 1, 65535, f) : 0;
     fclose(f);
-    if (n <= 0) { free(txt); return; }
+    if (n <= 0) { free(txt); snprintf(err, errn, "its manifest.json is empty"); return -1; }
     txt[n] = 0;
     const char *e = txt + n;
 
-    memset(m, 0, sizeof *m);
     /* a full path: the app is started from inside its folder */
     char *full = realpath(dir, NULL);
     snprintf(m->dir, sizeof m->dir, "%s", full ? full : dir);
     free(full);
     double api = 0;
-    if (!t48_json_str(t48_json_get(txt, e, "id"), e, m->id, sizeof m->id) || !id_ok(m->id) ||
+    if (!t48_json_str(t48_json_get(txt, e, "id"), e, m->id, sizeof m->id) || !manifest_id_ok(m->id) ||
         !t48_json_str(t48_json_get(txt, e, "exec"), e, m->exec, sizeof m->exec) ||
         m->exec[0] == '/' || strstr(m->exec, "..") ||
         !t48_json_num(t48_json_get(txt, e, "api"), e, &api)) {
-        logmsg("%s: needs \"id\" (a-z, 0-9, - . _), \"exec\" (inside the app's folder) and \"api\"; skipped", path);
+        snprintf(err, errn, "its manifest needs \"id\" (a-z, 0-9, - . _), \"exec\" (inside the app's folder) and \"api\"");
         free(txt);
-        return;
+        return -1;
     }
     m->api = (int)api;
     if (m->api < 1 || m->api > T48_API_LEVEL) {
-        logmsg("%s: written for API level %d, this shell speaks %d; skipped", path, m->api, T48_API_LEVEL);
+        snprintf(err, errn, "it is written for API level %d and this phone speaks %d", m->api, T48_API_LEVEL);
         free(txt);
-        return;
+        return -1;
     }
-    for (int i = 0; i < napps; i++)
-        if (!strcmp(apps[i].id, m->id)) { free(txt); return; }  /* an earlier folder wins */
     if (!t48_json_str(t48_json_get(txt, e, "name"), e, m->name, sizeof m->name) || !m->name[0])
         memcpy(m->name, m->id, sizeof m->name);
     t48_json_str(t48_json_get(txt, e, "version"), e, m->version, sizeof m->version);
+    t48_json_str(t48_json_get(txt, e, "description"), e, m->description, sizeof m->description);
 
     for (const char *v = t48_json_first(t48_json_get(txt, e, "permissions"), e); v; v = t48_json_next(v, e)) {
         char p[32];
@@ -72,7 +79,7 @@ static void read_manifest(const char *dir)
     }
     for (const char *v = t48_json_first(t48_json_get(txt, e, "settings"), e); v && m->nsettings < MAX_SETTINGS;
          v = t48_json_next(v, e)) {
-        char key[48], def[160] = "", kv[212];
+        char key[48], def[160] = "", kv[212], label[96] = "";
         const char *d = t48_json_get(v, e, "default");
         double num;
         if (!t48_json_str(t48_json_get(v, e, "key"), e, key, sizeof key) || !key[0] || strchr(key, '=')) continue;
@@ -81,6 +88,11 @@ static void read_manifest(const char *dir)
             else if (d) snprintf(def, sizeof def, "%s", t48_json_true(d, e) ? "true" : "false");
         }
         snprintf(kv, sizeof kv, "%s=%s", key, def);
+        if (!t48_json_str(t48_json_get(v, e, "label"), e, label, sizeof label) || !label[0])
+            snprintf(label, sizeof label, "%s", key);
+        if (!t48_json_str(t48_json_get(v, e, "type"), e, m->setting_type[m->nsettings], sizeof m->setting_type[0]))
+            strcpy(m->setting_type[m->nsettings], "text");
+        m->setting_label[m->nsettings] = strdup(label);
         m->settings[m->nsettings++] = strdup(kv);
     }
 
@@ -95,6 +107,23 @@ static void read_manifest(const char *dir)
         }
     }
     free(txt);
+    return 0;
+}
+
+static void read_manifest(const char *dir)
+{
+    char err[200], path[400];
+    struct manifest *m = &apps[napps];
+
+    snprintf(path, sizeof path, "%s/manifest.json", dir);
+    if (access(path, F_OK) < 0) return;
+    if (manifest_read(dir, m, err, sizeof err) < 0) {
+        logmsg("%s: %s; skipped", dir, err);
+        manifest_free(m);
+        return;
+    }
+    for (int i = 0; i < napps; i++)
+        if (!strcmp(apps[i].id, m->id)) { manifest_free(m); return; }  /* an earlier folder wins */
     napps++;
 }
 
@@ -105,10 +134,7 @@ static int by_name(const void *a, const void *b)
 
 void manifests_scan(const char *dirs)
 {
-    for (int i = 0; i < napps; i++) {
-        free(apps[i].icon.px);
-        for (int k = 0; k < apps[i].nsettings; k++) free(apps[i].settings[k]);
-    }
+    for (int i = 0; i < napps; i++) manifest_free(&apps[i]);
     napps = 0;
 
     char *list = strdup(dirs), *save = NULL;

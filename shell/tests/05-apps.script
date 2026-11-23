@@ -1,0 +1,240 @@
+# The app manager (issue 22), against two small feeds on disk made by
+# tests/mkfeeds.sh: install, open, settings, update, remove, and the refusals.
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/1/index.json
+wait 200
+key ok
+expect launcher
+# the last tile is "Get apps": Clock, Crasher, then it
+key right
+key right
+shot shots/launcher-get-apps.png
+key ok
+expect settings
+expectstate settings.page store
+waitstate store loaded 5000
+expectstate store.clock builtin
+expectstate store.demo available
+expectstate store.future unsupported
+shot shots/apps-list.png
+
+# ---- install Demo ----
+key down
+key down
+key down
+expectstate settings.row Demo
+key ok
+expectstate settings.page storeapp
+expectstate settings.row Install
+shot shots/apps-detail.png
+key ok
+expectstate overlay busy
+waitstate overlay message 10000
+expectstate overlay.title Demo_installed
+expectstate installed.demo 1.0.0
+shot shots/apps-installed.png
+key ok
+expectstate overlay none
+waitstate store.demo installed 5000
+run test -x simdata/installed/demo/clock
+# open it from here
+expectstate settings.row Open
+key ok
+waitframe 3000
+expect app
+expectstate appid demo
+key x
+waitscreen launcher 2000
+shot shots/launcher-with-demo.png
+
+# ---- its settings, from its manifest: text, a switch, a password ----
+key x
+key down
+expect settings
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row App_settings
+key ok
+key down
+expectstate settings.row Demo
+key ok
+expectstate settings.page appconf
+key down
+expectstate settings.row Show_seconds
+expectstate settings.value on
+key ok
+expectstate cfg.apps:demo.seconds false
+key down
+expectstate settings.row A_secret
+expectstate settings.value not_set
+key ok
+key 2
+key ok
+expectstate settings.value set
+run grep -qx pin=a simdata/config/apps/demo.conf
+shot shots/apps-settings.png
+key x
+key x
+key x
+expect idle
+
+# ---- a newer version appears in the feed: update, and the settings stay ----
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/2/index.json
+key ok
+key right
+key right
+key right
+key ok
+expectstate settings.page store
+waitstate store loaded 5000
+expectstate store.demo update
+key down
+key down
+expectstate settings.row Demo
+expectstate settings.value 1.0.0_installed,_1.1.0_available
+shot shots/apps-update-available.png
+key ok
+expectstate settings.row Update
+key ok
+waitstate overlay message 10000
+expectstate overlay.title Demo_updated
+expectstate installed.demo 1.1.0
+key ok
+waitstate store.demo installed 5000
+expectstate cfg.apps:demo.seconds false
+
+# ---- remove: asks first; the app, its data and its settings go ----
+run test -d simdata/appdata/demo
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Remove
+shot shots/apps-detail-installed.png
+key ok
+expectstate overlay confirm
+shot shots/apps-remove-confirm.png
+# X keeps it
+key x
+expectstate overlay none
+expectstate installed.demo 1.1.0
+key ok
+key ok
+waitstate overlay message 10000
+expectstate overlay.title Demo_removed
+expectstate installed.demo no
+key ok
+expectstate settings.page store
+run test ! -e simdata/installed/demo
+run test ! -e simdata/appdata/demo
+run test ! -e simdata/config/apps/demo.conf
+
+# ---- what must be refused ----
+# the feed address has to be https (the tests' file:// is the one exception)
+run ./t48-config --config simdata/config set feed url file:///x
+waitstate store loaded 5000
+key up
+key up
+key up
+key up
+key up
+expectstate settings.row Clock
+key down
+key down
+key down
+expectstate settings.row Look_again
+key ok
+waitstate store error 5000
+# the list now starts with a line about the feed; Feed address is the row after Look again
+expectstate settings.row Look_again
+key down
+expectstate settings.row Feed_address
+key ok
+expectstate kbd.text file:///x
+key left
+key left
+key left
+key left
+key left
+key left
+key left
+key left
+key left
+key 4
+key ok
+expectstate overlay message
+expectstate overlay.title Not_a_feed_address
+key ok
+expectstate cfg.feed.url file:///x
+# an app for a newer API level: no Install on its page, and the command line says why
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/1/index.json
+key up
+expectstate settings.row Look_again
+key ok
+waitstate store loaded 5000
+expectstate store.future unsupported
+key up
+key up
+key up
+key up
+key up
+key up
+expectstate settings.row Clock
+key down
+key down
+key down
+key down
+expectstate settings.row Future
+expectstate settings.value 3.0.0_needs_newer_firmware
+key ok
+expectstate settings.rows 5
+shot shots/apps-unsupported.png
+key x
+run ! ./t48-app --apps simdata/installed:apps --config simdata/config install future 2>simdata/err; grep -q "API level 2" simdata/err; test ! -e simdata/installed/future
+# a package that does not match the feed's checksum: not installed, and said so
+key up
+expectstate settings.row Demo
+key up
+expectstate settings.row Broken
+key ok
+key ok
+waitstate overlay message 10000
+expectstate overlay.title Broken_was_not_installed
+shot shots/apps-checksum.png
+key ok
+expectstate installed.broken no
+run test ! -e simdata/installed/broken
+# by hand from a file works; packages that climb out of their folder or hold links do not
+run ./t48-app --apps simdata/installed:apps --config simdata/config install feeds/2/demo-1.1.0.t48app >/dev/null
+run test -x simdata/installed/demo/clock
+run ! ./t48-app --apps simdata/installed:apps --config simdata/config install feeds/evil.t48app 2>/dev/null
+run ! ./t48-app --apps simdata/installed:apps --config simdata/config install feeds/link.t48app 2>/dev/null
+run test ! -e simdata/escaped -a ! -e simdata/installed/evil -a ! -e simdata/installed/link
+run test -z "$(ls -A simdata/installed | grep -v -e '^demo$' -e '^.lock$')"
+# the firmware's own apps cannot be removed
+run ! ./t48-app --apps simdata/installed:apps --config simdata/config remove clock 2>/dev/null
+# a feed that is not there: the installed apps are still listed
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/none/index.json
+key x
+key x
+expect launcher
+key right
+key right
+key right
+key ok
+waitstate store error 5000
+shot shots/apps-feed-error.png
+key x
+key x
+expect idle
+quit

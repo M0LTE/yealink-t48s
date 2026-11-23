@@ -116,6 +116,36 @@ void t48_ws_close(t48_ws *ws);
 /* split a ws:// address: 1 if it is one */
 int t48_ws_parse_url(const char *url, char *host, size_t hn, int *port, char *path, size_t pn);
 
+/* ---------- an on-screen keyboard ---------- */
+
+/* A full-screen text editor: touch keys, and multi-tap on the keypad (2 is
+ * a b c 2; # steps abc, ABC, 123; X rubs out; OK is Done). The caller keeps
+ * its own event loop: open it, draw it, pass keys and touches in, and draw
+ * again whenever one of the calls returns T48_KBD_REDRAW. */
+enum { T48_KBD_PASSWORD = 1,   /* never drawn in full: stars, but for the character just typed */
+       T48_KBD_DIGITS = 2 };   /* start on the numbers, and the keypad types digits */
+enum { T48_KBD_NOTHING = 0, T48_KBD_REDRAW, T48_KBD_DONE, T48_KBD_CANCEL };
+
+typedef struct t48_kbd {
+    char title[96];
+    char text[200];
+    int len, cur, max, flags;
+    int page, shift, mode;           /* touch page; shift 0, once, locked; keypad abc, ABC, 123 */
+    int tap_key, tap_n;              /* multi-tap in progress */
+    long long tap_until, reveal_until, flash_until;
+    int flash;
+    int w, h;                        /* the surface last drawn on */
+} t48_kbd;
+
+/* max is the longest text allowed (up to 199) */
+void t48_kbd_open(t48_kbd *k, const char *title, const char *text, int max, int flags);
+void t48_kbd_draw(t48_kbd *k, t48_surface *s);          /* fills the whole surface */
+int t48_kbd_key(t48_kbd *k, int code, int down);        /* T48_KEY_* */
+int t48_kbd_touch(t48_kbd *k, int state, int x, int y);
+int t48_kbd_timeout(const t48_kbd *k);                  /* ms until t48_kbd_tick is wanted, -1: never */
+int t48_kbd_tick(t48_kbd *k);
+const char *t48_kbd_text(const t48_kbd *k);
+
 /* ---------- the app side of the protocol ---------- */
 
 enum {

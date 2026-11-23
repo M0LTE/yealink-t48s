@@ -34,7 +34,7 @@ hook on
 expect idle
 waitstate audio.tone 0 2000
 # the history, by touch on Calls; looking at it clears the count
-touch 496 420
+touch 400 420
 expect history
 expectstate missed 0
 expectstate led.power off

@@ -1,0 +1,356 @@
+# The settings screens and the on-screen keyboard (issue 23).
+wait 200
+expect idle
+# Down, or the Settings button, from the idle screen
+touch 590 420
+expect settings
+expectstate settings.page root
+expectstate settings.row Phone_account
+expectstate settings.value not_set
+shot shots/settings.png
+
+# ---- the SIP account: keypad typing ----
+key ok
+expectstate settings.page sip
+key ok
+expectstate kbd open
+# the keypad starts on letters; # steps abc, ABC, 123
+key hash
+key hash
+key 1
+key 0
+key 0
+key 1
+expectstate kbd.text 1001
+key ok
+expectstate kbd closed
+expectstate cfg.sip.user 1001
+# the password: typed blind, by touch (h, i) and keypad digits
+key down
+expectstate settings.row Password
+expectstate settings.value not_set
+key ok
+expectstate kbd.text (hidden)
+touch 439 248
+touch 597 158
+shot shots/keyboard-password.png
+key hash
+key hash
+key 7
+key 3
+key 5
+key 5
+key 7
+key 1
+key 9
+wait 1300
+shot shots/keyboard-password-hidden.png
+touch 719 428
+expectstate kbd closed
+expectstate settings.value set
+expectstate cfg.sip.password (set)
+run grep -qx password=hi7355719 simdata/config/sip
+# the file can be read by root only
+run test "$(stat -c %a simdata/config/sip)" = 600
+# an empty password leaves the one that is set
+key ok
+key ok
+run grep -qx password=hi7355719 simdata/config/sip
+# the domain: multi-tap. 3 3 is e, 9 9 9 is y, a pause, 2 is a; then touch for the rest
+key down
+key ok
+key 3
+key 3
+expectstate kbd.text e
+key 9
+key 9
+key 9
+expectstate kbd.text ey
+wait 1000
+key 2
+expectstate kbd.text eya
+# X rubs out; left and right move the cursor
+key x
+key x
+key left
+key 7
+key 7
+key 7
+key 7
+expectstate kbd.text se
+wait 1000
+key right
+# s i p . e ... by touch: . is on the letters page, shift gives capitals once
+touch 123 248
+touch 597 158
+touch 755 158
+touch 755 248
+touch 62 338
+touch 281 158
+touch 202 158
+expectstate kbd.text sesip.Re
+shot shots/keyboard.png
+# the other two pages
+touch 62 428
+shot shots/keyboard-numbers.png
+touch 62 428
+shot shots/keyboard-symbols.png
+touch 62 428
+# rub it all out and type the real thing on the keypad
+key x
+key x
+key x
+key x
+key x
+key x
+key x
+key x
+key 7
+key 7
+key 7
+key 7
+wait 1000
+key 4
+key 4
+key 4
+wait 1000
+key 7
+wait 1000
+key 1
+wait 1000
+key 5
+key 5
+key 5
+wait 1000
+key 2
+wait 1000
+key 6
+key 6
+expectstate kbd.text sip.lan
+key ok
+expectstate cfg.sip.domain sip.lan
+# transport is a choice: OK steps through
+key down
+key down
+key down
+key down
+expectstate settings.row Transport
+key ok
+expectstate cfg.sip.transport tcp
+key left
+expectstate cfg.sip.transport udp
+shot shots/settings-sip.png
+# leaving the page applies it: the idle screen's account follows
+key x
+expectstate settings.page root
+expectstate settings.value 1001@sip.lan
+
+# ---- network ----
+key down
+key ok
+expectstate settings.page network
+expectstate settings.value dhcp
+# the address rows are greyed while it is DHCP
+key down
+key ok
+expectstate kbd closed
+key up
+key ok
+expectstate cfg.network.mode static
+key down
+key ok
+expectstate kbd open
+# the keypad types digits here, and * is the dot
+key 1
+key 9
+key 2
+key star
+key 1
+key ok
+# not an address: refused, nothing stored
+expectstate overlay message
+shot shots/settings-not-an-address.png
+key ok
+expectstate cfg.network.address (unset)
+key ok
+key 1
+key 9
+key 2
+key star
+key 1
+key 6
+key 8
+key star
+key 1
+key star
+key 5
+key 0
+key ok
+expectstate cfg.network.address 192.168.1.50
+shot shots/settings-network.png
+# back to DHCP before leaving
+key up
+key ok
+expectstate cfg.network.mode dhcp
+key x
+
+# ---- time zone ----
+key down
+key ok
+expectstate settings.page time
+key ok
+expectstate settings.page timezone
+shot shots/settings-timezone.png
+# touch: the second row is Europe/London
+touch 300 140
+expectstate settings.page time
+expectstate cfg.system.timezone Europe/London
+expectstate tz GMT0BST,M3.5.0/1,M10.5.0
+shot shots/settings-time.png
+# further down the list with the page arrow
+key ok
+touch 758 360
+touch 300 80
+expectstate cfg.system.timezone Europe/Berlin
+expectstate tz CET-1CEST,M3.5.0,M10.5.0/3
+# and back by key: the list opens on the current zone
+key ok
+expectstate settings.row Europe/Berlin
+key up
+key up
+key up
+key up
+key up
+key ok
+expectstate cfg.system.timezone Europe/London
+key x
+
+# ---- sound: stored, and nothing is played ----
+key down
+key ok
+expectstate settings.page sound
+expectstate settings.row Ringer
+key right
+key right
+expectstate vol.ringer 12
+key left
+expectstate vol.ringer 11
+# touch on minus and plus of the handset row
+touch 470 139
+expectstate vol.handset 9
+touch 740 139
+touch 740 139
+expectstate vol.handset 11
+expectstate cfg.audio.ringer 11
+expectstate cfg.audio.handset 11
+shot shots/settings-sound.png
+key x
+
+# ---- screen: no backlight driver yet ----
+key down
+key ok
+expectstate settings.page screen
+shot shots/settings-screen.png
+key right
+expectstate cfg.screen.brightness (unset)
+key x
+
+# ---- access: stored only for now ----
+key down
+key ok
+expectstate settings.value on
+key ok
+expectstate cfg.access.ssh off
+key ok
+expectstate cfg.access.ssh on
+shot shots/settings-access.png
+key x
+
+# ---- an app's own settings, from its manifest ----
+key down
+key down
+expectstate settings.row App_settings
+key ok
+expectstate settings.page appsettings
+expectstate settings.row Clock
+key ok
+expectstate settings.page appconf
+expectstate settings.row Title
+expectstate settings.value Clock
+key ok
+expectstate kbd.text Clock
+key x
+key x
+key x
+key x
+key x
+key 8
+wait 1000
+key 4
+key 4
+key 4
+wait 1000
+key 6
+wait 1000
+key 3
+key 3
+key ok
+expectstate cfg.apps:clock.title time
+shot shots/settings-app.png
+# the clock gets it as a SETTING message: its heading says so
+key x
+key x
+key x
+expect idle
+key ok
+key ok
+waitframe 3000
+wait 200
+shot shots/settings-app-applied.png
+key x
+waitscreen launcher 2000
+key x
+# and back to its own default
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key ok
+key ok
+key down
+key down
+key down
+key down
+expectstate settings.row Back_to_the_app's_own_defaults
+key ok
+expectstate cfg.apps:clock.title (unset)
+key x
+key x
+
+# ---- about ----
+key down
+key ok
+expectstate settings.page about
+key x
+key x
+expect idle
+
+# ---- a call takes the screen from the keyboard and gives it back ----
+key down
+key ok
+key ok
+expectstate kbd open
+hook off
+expect call
+hook on
+expect settings
+expectstate kbd open
+key ok
+key x
+key x
+expect idle
+quit

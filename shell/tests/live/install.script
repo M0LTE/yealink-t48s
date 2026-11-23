@@ -1,0 +1,58 @@
+# Against the real feed on the internet (not part of "make check"): install
+# hello, links and waterfall from the Apps screen, then remove one.
+# make check-live
+wait 300
+key ok
+key right
+key right
+key ok
+expectstate settings.page store
+waitstate store loaded 30000
+expectstate store.hello available
+expectstate store.links available
+expectstate store.waterfall available
+shot shots/live-list.png
+# rows: Clock, Crasher, Hello, Node links, Waterfall
+key down
+key down
+expectstate settings.row Hello
+key ok
+shot shots/live-hello.png
+key ok
+waitstate overlay message 60000
+expectstate overlay.title Hello_installed
+key ok
+key x
+waitstate store.hello installed 30000
+# installed apps come first in the list now: Clock, Crasher, Hello, then Node links
+key down
+expectstate settings.row Node_links
+key ok
+key ok
+waitstate overlay message 60000
+expectstate overlay.title Node_links_installed
+key ok
+key x
+waitstate store.links installed 30000
+key down
+expectstate settings.row Waterfall
+key ok
+key ok
+shot shots/live-progress.png
+waitstate overlay message 60000
+expectstate overlay.title Waterfall_installed
+shot shots/live-installed.png
+key ok
+key x
+waitstate store.waterfall installed 30000
+shot shots/live-list-installed.png
+expectstate installed.hello 0.1.0
+expectstate installed.links 0.1.0
+expectstate installed.waterfall 0.1.0
+run test -x simdata/installed/hello/hello -a -x simdata/installed/links/links -a -x simdata/installed/waterfall/waterfall
+# the packages are what the feed's checksums say (the command line agrees: nothing to update)
+run ./t48-app --apps simdata/installed:apps --config simdata/config update | grep -q "up to date"
+key x
+expect launcher
+shot shots/live-launcher.png
+quit

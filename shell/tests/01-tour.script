@@ -41,7 +41,7 @@ waitscreen launcher 2000
 # touch works too: the Apps button, then the clock's tile, then idle again
 key x
 expect idle
-touch 300 420
+touch 200 420
 expect launcher
 touch 100 150
 waitframe 3000

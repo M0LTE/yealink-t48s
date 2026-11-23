@@ -1,0 +1,34 @@
+# After install.script, with --runner qemu-arm: start the three apps from the
+# feed (they are the phone's own ARM programs) and look at them.
+wait 300
+key ok
+expect launcher
+# Clock, Crasher, Hello, Node links, Waterfall, Get apps
+key right
+key right
+key ok
+waitframe 10000
+expectstate appid hello
+wait 500
+shot shots/live-hello-running.png
+# Home, then the next one: opening it closes the one before
+key x 1000
+expect launcher
+key right
+key ok
+waitstate appid links 5000
+waitframe 10000
+wait 3000
+shot shots/live-links-running.png
+key x 1000
+expect launcher
+key right
+key ok
+waitstate appid waterfall 5000
+waitframe 10000
+wait 4000
+shot shots/live-waterfall-running.png
+key x 1000
+expect launcher
+shot shots/live-launcher-open.png
+quit

@@ -41,6 +41,8 @@ struct options {
     const char *state;   /* things the shell remembers: call history */
     const char *sip;     /* baresip's control socket (t48ctrl), NULL: no SIP */
     const char *audio;   /* the audio service's control socket, NULL: no audio */
+    const char *apply;   /* program run with a settings file's name when that file has changed, NULL: none */
+    const char *runner;  /* simulator: a program to run apps with, such as qemu-arm for the phone's own builds */
 };
 extern struct options opt;
 
@@ -78,6 +80,7 @@ extern t48_surface ui;                       /* the shell's own picture of the s
 void ui_status_bar(const char *title);
 /* a rounded button; fill is its colour, and the label is dark on bright fills */
 void ui_button(int x, int y, int w, int h, const char *label, uint32_t fill);
+void ui_network_status(char *out, size_t n, int *up);
 int ui_inside(int x, int y, int bx, int by, int bw, int bh);
 
 /* ---------- the phone (phone.c): calls, the dialler, history ---------- */
@@ -108,6 +111,42 @@ void phone_audio_state(void);
 void shell_phone_screen(int want);           /* the phone wants the screen, or is done with it */
 void shell_phone_changed(void);              /* something a phone screen or the idle screen shows has changed */
 void shell_show_history(int on);
+
+void phone_reload_account(void);             /* the SIP settings file has changed */
+int phone_volume(int which);                 /* T48AC_VOL_* */
+void phone_set_volume(int which, int level); /* stores it and tells the audio service; plays nothing */
+
+/* ---------- the settings store (config.c): key=value files under opt.config ---------- */
+
+int cfg_get(const char *file, const char *key, char *out, size_t n);       /* 1 if the key is there */
+const char *cfg_str(const char *file, const char *key, const char *def);   /* good until four calls later */
+int cfg_set(const char *file, const char *key, const char *value);         /* NULL removes; 0, or -1 with errno */
+int config_main(int argc, char **argv);                                    /* the t48-config command */
+
+/* ---------- the app manager (pkg.c): the t48-app command ---------- */
+
+int pkg_main(int argc, char **argv);
+const char *pkg_default_feed(void);
+
+/* ---------- settings and app manager screens (settings.c) ---------- */
+
+void settings_init(void);                    /* at start: the time zone, the backlight */
+void settings_open(int app_manager);         /* the settings list, or straight to the app manager */
+void settings_close(void);
+void settings_draw(void);
+void settings_key(int code, int down);
+void settings_touch(int state, int x, int y);
+int settings_timeout(long long now);
+void settings_tick(long long now);
+int settings_job_fd(void);                   /* the app manager's child process, -1 if none */
+void settings_job_readable(void);
+int settings_reaped(pid_t pid, int status);  /* 1 if that was ours */
+const char *settings_state(const char *key);
+const char *settings_tz(void);               /* the TZ string for the zone in the store */
+/* from settings.c back to the shell */
+void shell_settings_changed(void);           /* redraw, if the settings are showing */
+void shell_settings_closed(int to_launcher);
+void shell_settings_open_app(const char *id);
 
 /* baresip's control socket (sipc.c) */
 void sipc_init(const char *socket_path);
@@ -151,13 +190,20 @@ struct manifest {
     char exec[128];      /* program to run, relative to dir */
     char perms[96];      /* permissions, space separated */
     int api;
+    char description[160];
     char *settings[MAX_SETTINGS];  /* "key=default" */
+    char *setting_label[MAX_SETTINGS];
+    char setting_type[MAX_SETTINGS][12];   /* text, number, bool, password */
     int nsettings;
     t48_surface icon;    /* px is NULL if the app has none we can read */
 };
 extern struct manifest apps[MAX_APPS];
 extern int napps;
 void manifests_scan(const char *dirs);
+int manifest_id_ok(const char *id);
+/* read one app folder's manifest: 0, or -1 with the reason in err */
+int manifest_read(const char *dir, struct manifest *m, char *err, size_t errn);
+void manifest_free(struct manifest *m);
 
 /* ---------- the one running app ---------- */
 

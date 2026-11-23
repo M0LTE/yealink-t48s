@@ -11,7 +11,12 @@ CFLAGS ?= -O2
 AUDIOD_INCLUDE ?= ../audiod/include
 CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections -I../libt48/include -I$(AUDIOD_INCLUDE)
 LIB ?= ../libt48/$(O)/libt48.a
-SRC = main.c app.c manifest.c phone.c sipc.c audioc.c leds.c be_fb.c be_sim.c
+SRC = main.c app.c manifest.c phone.c sipc.c audioc.c leds.c be_fb.c be_sim.c config.c settings.c pkg.c
+# what About shows; Buildroot passes it in, as its copy of the source has no git
+T48_VERSION ?= $(shell git describe --always --dirty 2>/dev/null)
+ifneq ($(T48_VERSION),)
+CFLAGS += -DT48_VERSION='"$(T48_VERSION)"'
+endif
 
 all: $(O)/t48-shell $(O)/t48-sim
 
@@ -25,8 +30,11 @@ $(O)/t48-shell: $(SRC) shell.h $(LIB)
 	@mkdir -p $(O)
 	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@ $(SRC) $(LIB)
 
+# the same program under its other names: the simulator, the app manager, the settings tool
 $(O)/t48-sim: $(O)/t48-shell
 	ln -sf t48-shell $@
+	ln -sf t48-shell $(O)/t48-app
+	ln -sf t48-shell $(O)/t48-config
 
 # a folder of installed apps for the tests: the example clock and a badly behaved one
 $(O)/apps: $(LIB) tests/crasher.c tests/crasher.json
@@ -35,15 +43,30 @@ $(O)/apps: $(LIB) tests/crasher.c tests/crasher.json
 	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@/crasher/crasher tests/crasher.c $(LIB)
 	cp tests/crasher.json $@/crasher/manifest.json
 
-check: all $(O)/apps
+# feeds on disk for the app manager's tests
+$(O)/feeds: $(O)/apps tests/mkfeeds.sh ../sdk/t48-pack
+	sh tests/mkfeeds.sh $(O)
+
+# apps installed by a test go in simdata/installed, settings in simdata/config
+SIM = ./t48-sim --apps simdata/installed:apps --data simdata/appdata --config simdata/config --state simdata/state
+
+check: all $(O)/apps $(O)/feeds
 	@mkdir -p $(O)/shots
 	cd $(O) && for t in ../tests/*.script; do echo "== $$t"; rm -rf simdata; \
-		./t48-sim --apps apps --data simdata --config simdata --state simdata --script $$t || exit 1; done
+		$(SIM) --script $$t || exit 1; done
 	@echo "all simulator tests passed"
+
+# the same against the real feed on the internet: installs hello, links and
+# waterfall, and starts them if RUNNER (such as qemu-arm) is given, as they
+# are built for the phone
+check-live: all $(O)/apps
+	@mkdir -p $(O)/shots
+	cd $(O) && rm -rf simdata && $(SIM) --script ../tests/live/install.script
+	$(if $(RUNNER),cd $(O) && $(SIM) --runner $(RUNNER) --script ../tests/live/run.script)
 
 clean:
 	rm -rf build build-arm
 	$(MAKE) -C ../libt48 clean
 
 FORCE:
-.PHONY: all check clean FORCE
+.PHONY: all check check-live clean FORCE

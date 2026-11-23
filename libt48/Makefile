@@ -8,7 +8,7 @@ O ?= build
 CFLAGS ?= -O2
 CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections -Iinclude
 
-OBJ = $(O)/draw.o $(O)/image.o $(O)/json.o $(O)/app.o $(O)/ws.o $(O)/fonts_gen.o
+OBJ = $(O)/draw.o $(O)/image.o $(O)/json.o $(O)/app.o $(O)/ws.o $(O)/kbd.o $(O)/fonts_gen.o
 
 all: $(O)/libt48.a $(O)/examples/clock/clock
 

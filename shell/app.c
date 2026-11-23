@@ -153,6 +153,7 @@ int app_launch(const struct manifest *m)
         setenv(T48_ENV_APP_DATA, data, 1);
         setenv("HOME", data, 1);
         signal(SIGPIPE, SIG_DFL);
+        if (opt.runner) execlp(opt.runner, opt.runner, path, (char *)NULL);
         execl(path, m->exec, (char *)NULL);
         _exit(127);
     }
@@ -173,18 +174,14 @@ int app_launch(const struct manifest *m)
     struct t48_msg_hello h = {T48_API_LEVEL, SW, SH, T48_FORMAT_XRGB8888, SW * 4, BUF_BYTES};
     send_msg(T48_MSG_HELLO, &h, sizeof h);
 
-    /* settings: the manifest's defaults, unless the owner's file says otherwise */
-    snprintf(conf, sizeof conf, "%s/apps/%s.conf", opt.config, m->id);
+    /* settings: the manifest's defaults, unless the owner has set them (config.c) */
+    snprintf(conf, sizeof conf, "apps/%s", m->id);
     for (int i = 0; i < m->nsettings; i++) {
-        char line[256], kv[256];
+        char key[64], val[200], kv[280];
         size_t kl = strcspn(m->settings[i], "=");
-        snprintf(kv, sizeof kv, "%s", m->settings[i]);
-        FILE *f = fopen(conf, "r");
-        while (f && fgets(line, sizeof line, f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            if (!strncmp(line, kv, kl + 1)) snprintf(kv, sizeof kv, "%s", line);
-        }
-        if (f) fclose(f);
+        snprintf(key, sizeof key, "%.*s", (int)kl, m->settings[i]);
+        if (cfg_get(conf, key, val, sizeof val)) snprintf(kv, sizeof kv, "%s=%s", key, val);
+        else snprintf(kv, sizeof kv, "%s", m->settings[i]);
         send_msg(T48_MSG_SETTING, kv, strlen(kv));
     }
     send_msg(T48_MSG_START, NULL, 0);

@@ -148,18 +148,33 @@ static void load_settings(void)
     }
 }
 
+void phone_reload_account(void)
+{
+    P.account[0] = 0;
+    load_settings();
+    changed();
+}
+
+static void save_volumes(void);
+
+int phone_volume(int which) { return which > 0 && which < T48AC_VOL_COUNT ? P.vol[which] : 0; }
+
+void phone_set_volume(int which, int level)
+{
+    if (which <= 0 || which >= T48AC_VOL_COUNT || level < 0 || level > T48AC_VOL_MAX || P.vol[which] == level) return;
+    P.vol[which] = level;
+    audioc_volume(which, level);
+    save_volumes();
+}
+
 static void save_volumes(void)
 {
-    char path[300], tmp[310];
-    snprintf(path, sizeof path, "%s/audio", opt.config);
-    snprintf(tmp, sizeof tmp, "%s.new", path);
-    mkdir(opt.config, 0755);
-    FILE *f = fopen(tmp, "w");
-    if (!f) return;
-    fprintf(f, "# Volumes, 0 to 15. Written by t48-shell when a volume key is pressed.\n"
-               "handset=%d\nspeaker=%d\nheadset=%d\nringer=%d\n",
-            P.vol[T48AC_VOL_HANDSET], P.vol[T48AC_VOL_SPEAKER], P.vol[T48AC_VOL_HEADSET], P.vol[T48AC_VOL_RINGER]);
-    if (fclose(f) == 0) rename(tmp, path);
+    static const char *const keys[] = {"", "handset", "speaker", "headset", "ringer"};
+    for (int i = 1; i < T48AC_VOL_COUNT; i++) {
+        char v[8];
+        snprintf(v, sizeof v, "%d", P.vol[i]);
+        cfg_set("audio", keys[i], v);
+    }
 }
 
 static void count_missed(void)
