@@ -232,7 +232,7 @@ Each milestone ends with something that can be shown. M1 and M2 do not need audi
 ## Decisions for Tom
 
 1. **Yealink's DSP firmware, if #6 finds it is needed.** The plan assumes we never publish it and the installer copies it from each owner's own phone. Shipping it in our releases would be simpler for users but is redistribution of a vendor file: your call.
-2. **Licence for libt48 and the SDK.** Recommended: MIT for the library, protocol headers and the hello template, so other people's apps can carry any licence; the firmware stays AGPL-3.0-or-later. Keeping the library AGPL would make every app AGPL.
+2. **Licence for libt48 and the SDK.** Recommended: MIT for the library, protocol headers and the hello template, so other people's apps can carry any licence; the firmware stays AGPL-3.0-or-later. Keeping the library AGPL would make every app AGPL. Until Tom decides, libt48 is AGPL-3.0-or-later like everything else (his standing rule); as sole authors we can relax it later, not the other way round.
 3. **Licence for the apps repo.** Recommended: AGPL-3.0-or-later, the same as esp32-knob-pages, which the waterfall code comes from.
 4. **First write to the flash of the one test phone** (M5). Everything before that is reversible by a power cycle. The go-ahead should be yours, once the backup and restore path has been shown to work as far as it can be without writing.
 5. **Release signing key**, when updates go to other people's phones: whether to sign releases and where the private key lives.
