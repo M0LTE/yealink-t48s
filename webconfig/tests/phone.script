@@ -71,6 +71,39 @@ key x
 key x
 expect idle
 
+# ---- the theme: one setting, and both wear it ----
+run $B expect /sound "<html lang='en' data-theme='switchboard'>"
+run $B post /theme theme=directory
+waitstate theme directory 3000
+waitpixel 400 20 FFCE00 2000
+shot shots/web-phone-theme-directory.png
+run $B expect / "<html lang='en' data-theme='directory'>"
+# chosen at the phone, worn by the page at once
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Screen
+key ok
+key down
+key ok
+expectstate settings.page theme
+expectstate settings.row Directory
+key right
+key ok
+expectstate theme twotone
+run $B expect / "<html lang='en' data-theme='twotone'>"
+key left
+key left
+key ok
+expectstate theme switchboard
+run $B expect / "<html lang='en' data-theme='switchboard'>"
+key x
+key x
+key x
+expect idle
+
 # ---- changed on the web, shown on the phone ----
 # the time zone: the idle clock follows
 expectstate tz UTC0

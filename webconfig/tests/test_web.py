@@ -127,6 +127,7 @@ class Browser:
                 else:
                     self.cookies.pop(name, None)
         c.close()
+        r.raw = data
         r.body = data.decode("utf-8", "replace")
         m = re.search(r"name='csrf' value='([0-9a-f]+)'", r.body)
         if m:
@@ -466,6 +467,46 @@ class Paired(unittest.TestCase):
         self.assertEqual(p.get("screen", "brightness"), "4")
         page = self.b.get("/sound").body
         self.assertIn("name='ringer' min='0' max='15' value='3'", page)
+
+    def test_41_theme(self):
+        p, b = self.p, self.b
+        # Switchboard until told otherwise, and the page says which in <html>
+        page = b.get("/sound").body
+        self.assertIn("<html lang='en' data-theme='switchboard'>", page)
+        self.assertIn("value='switchboard' checked", page)
+        for name in ("directory", "twotone", "switchboard"):
+            self.ok("/theme", {"theme": name}, "/sound")
+            self.assertEqual(p.get("screen", "theme"), name)
+            for path in ("/sound", "/", "/accounts"):
+                self.assertIn("<html lang='en' data-theme='%s'>" % name, b.get(path).body, path)
+            self.assertIn("value='%s' checked" % name, b.get("/sound").body)
+        self.bad("/theme", {"theme": "plaid"}, "/sound")
+        self.bad("/theme", {}, "/sound")
+        self.assertEqual(p.get("screen", "theme"), "switchboard")
+        # set at the phone (or by hand): the next page wears it; a name that is no theme is Switchboard
+        p.set("screen", "theme", "twotone")
+        self.assertIn("data-theme='twotone'", b.get("/").body)
+        p.set("screen", "theme", "plaid")
+        self.assertIn("data-theme='switchboard'", b.get("/").body)
+        p.set("screen", "theme", "switchboard")
+        # a stranger's pages wear it too, and get the style sheet and fonts without pairing
+        p.set("screen", "theme", "directory")
+        s = Browser(p)
+        self.assertIn("data-theme='directory'", s.get("/").body)
+        css = s.get("/style.css")
+        self.assertEqual(css.status, 200)
+        for name in ("switchboard", "directory", "twotone"):
+            self.assertIn("[data-theme=%s]" % name, css.body)
+        for family in ("b612", "plex", "figtree"):
+            for weight in ("regular", "bold"):
+                path = "/fonts/%s-%s.woff2" % (family, weight)
+                self.assertIn(path, css.body)
+                r = s.get(path)
+                self.assertEqual((r.status, r.getheader("Content-Type")), (200, "font/woff2"), path)
+                self.assertEqual(r.raw[:4], b"wOF2", path)
+        self.assertEqual(s.get("/fonts/none.woff2").status, 404)
+        self.assertEqual(s.get("/fonts/../style.css").status, 404)
+        p.set("screen", "theme", "switchboard")
 
     def contacts(self):
         path = os.path.join(self.p.state, "contacts")

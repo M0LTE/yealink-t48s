@@ -1,23 +1,19 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# web.sh [DIRECTION...]: the web setup page's pictures for docs/design, taken from the
-# real server with Playwright. Run render.sh first: this uses what it built.
+# web.sh [THEME...]: the web setup page's pictures for docs/design, taken from the
+# real server with Playwright, once in each theme. Run render.sh first: this uses
+# what it built.
 #   NODE_PATH=.../node_modules docs/design/web.sh
-# Switchboard is webconfig's own style sheet and fonts; the other two have theirs here.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PORT=${WEB_PORT:-8439}
 [ $# -gt 0 ] || set -- switchboard directory twotone
+O=build
+SB=$ROOT/shell/$O
+make -s -C "$ROOT/webconfig" O=$O
+make -s -C "$ROOT/shell" O=$O $O/feeds >/dev/null
 for d in "$@"; do
-    O=build-$d
-    SB=$ROOT/shell/$O
-    if [ "$d" = switchboard ]; then
-        make -s -C "$ROOT/webconfig" O=$O
-    else
-        make -s -C "$ROOT/webconfig" O=$O STYLE="$HERE/$d/web.css" FONT_REGULAR="$HERE/$d/regular.woff2" FONT_BOLD="$HERE/$d/bold.woff2"
-    fi
-    make -s -C "$ROOT/shell" O=$O $O/feeds >/dev/null
     T=$(mktemp -d)
     cfg() { "$SB/t48-config" --config "$T/config" set "$@"; }
     mkdir -p "$T/config" "$T/phone" "$T/access" "$T/keep/ssh" "$T/installed"
@@ -27,7 +23,7 @@ for d in "$@"; do
     cfg sip2 user tom; cfg sip2 domain sip.club.example; cfg sip2 password another; cfg sip2 transport tls
     cfg sip2 label Club; cfg sip2 enabled on
     cfg phone default_account 1; cfg system timezone Europe/London
-    cfg audio ringer 9; cfg screen brightness 8
+    cfg audio ringer 9; cfg screen brightness 8; cfg screen theme $d
     cfg feed url "file://$SB/feeds/1/index.json"
     printf '%s\n' 'Alice Example|1002' 'Bob Example|+441184960123' 'Club bar|2001' 'Front door|*8' 'Mum|01184960456' > "$T/phone/contacts"
     now=$(date +%s)

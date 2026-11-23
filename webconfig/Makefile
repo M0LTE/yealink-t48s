@@ -30,14 +30,13 @@ $(LIB): FORCE
 	$(MAKE) -C ../libt48 CC="$(CC)" O=$(O)
 endif
 
-# the style sheet and the two faces of its font (libt48/tools/mkwebfont.py makes those)
-STYLE ?= style.css
-FONT_REGULAR ?= fonts/b612-regular.woff2
-FONT_BOLD ?= fonts/b612-bold.woff2
+# the style sheet (every theme) and two faces of each theme's font (libt48/tools/mkwebfont.py makes those)
+FONTS = fonts/b612-regular.woff2 fonts/b612-bold.woff2 fonts/plex-regular.woff2 fonts/plex-bold.woff2 \
+	fonts/figtree-regular.woff2 fonts/figtree-bold.woff2
 
-$(O)/assets.c: $(STYLE) t48.js $(FONT_REGULAR) $(FONT_BOLD) mkassets.sh
+$(O)/assets.c: style.css t48.js $(FONTS) mkassets.sh
 	@mkdir -p $(O)
-	sh mkassets.sh $(STYLE) t48.js $(FONT_REGULAR) $(FONT_BOLD) > $@
+	sh mkassets.sh style.css t48.js $(FONTS) > $@
 
 $(O)/t48-web: $(SRC) web.h $(SHELL_DIR)/shell.h $(SHELL_DIR)/zones.h $(LIB)
 	@mkdir -p $(O)

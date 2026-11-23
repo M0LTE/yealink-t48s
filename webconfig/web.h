@@ -78,10 +78,12 @@ struct route {
 extern const struct route routes[];
 void page_overview(struct req *r);
 
+const char *web_theme(void);   /* the theme the phone is in, for <html data-theme> */
+
 /* ---------- assets.c ---------- */
 
 extern const char asset_css[], asset_js[];
-extern const unsigned char asset_font_regular[], asset_font_bold[];
-extern const unsigned asset_font_regular_len, asset_font_bold_len;
+struct asset_font { const char *name; const unsigned char *data; unsigned len; };   /* served as /fonts/NAME */
+extern const struct asset_font asset_fonts[];   /* the last has no name */
 
 #endif

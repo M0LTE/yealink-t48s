@@ -1,4 +1,4 @@
-# The six screens every direction is shown with (docs/design/README.md). Run by render.sh
+# The seven screens every theme is shown with (docs/design/README.md). Run by render.sh
 # against fakesip.py, so the account is registered and the call is answered.
 wait 2500
 expect idle
@@ -22,6 +22,21 @@ expect idle
 key down
 expect settings
 shot shots/phone-settings.png
+key down
+key down
+key down
+key down
+key ok
+key down
+key ok
+expectstate settings.page theme
+shot shots/phone-theme.png
+key x
+key x
+key up
+key up
+key up
+key up
 key ok
 key ok
 expectstate settings.page sip

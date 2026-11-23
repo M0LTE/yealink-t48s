@@ -487,6 +487,19 @@ static void page_sound(struct req *r)
     field("Dim after (seconds)", "dim_seconds", val("screen", "dim_seconds", "120"), "inputmode='numeric' pattern='[0-9]*'", "0: never");
     field("Off after (seconds)", "off_seconds", val("screen", "off_seconds", "1800"), "inputmode='numeric' pattern='[0-9]*'", "0: never");
     H("</div><div class='actions'><button class='primary' type='submit'>Save</button></div></form></div>");
+    /* the theme: the phone's screen, this page and apps wear the same one */
+    static const char *const labels[] = {"Switchboard", "Directory", "Two-tone"};
+    H("<div class='card'><h2>Theme</h2>");
+    form_begin(r, "/theme", NULL);
+    H("<div class='themes'>");
+    for (int i = 0; i < t48_theme_count && i < 3; i++) {
+        const char *name = t48_themes[i].name;
+        H("<label class='theme'><input type='radio' name='theme' value='%s'%r><span class='pick'><span class='swatch' data-theme='%s'>"
+          "<span class='band'>Calls</span><span class='line'>Alice</span><span class='line here'>Bob</span>"
+          "<span class='keys'><span>5</span><span class='go'>Call</span></span></span></span><span class='name'>%s</span></label>",
+          name, !strcmp(name, web_theme()) ? " checked" : "", name, labels[i]);
+    }
+    H("</div><div class='actions'><button class='primary' type='submit'>Save</button></div></form></div>");
     page_end(r);
 }
 
@@ -508,6 +521,16 @@ static void post_sound(struct req *r)
         if ((v[i] = whole(r, keys[i], 0, 15)) < 0) { flash(r, 1, "Not saved: levels are 0 to 15."); redirect(r, "/sound"); return; }
     for (int i = 0; i < 4; i++) { snprintf(b, sizeof b, "%ld", v[i]); cfg_set("audio", keys[i], b); }
     flash(r, 0, "Sound saved.");
+    redirect(r, "/sound");
+}
+
+/* the shell sees the store change within a second, and tells the open app */
+static void post_theme(struct req *r)
+{
+    char name[24];
+    if (!line(r, "theme", name, sizeof name) || !t48_theme_named(name)) { flash(r, 1, "Not saved: no such theme."); redirect(r, "/sound"); return; }
+    cfg_set("screen", "theme", name);
+    flash(r, 0, "Theme saved.");
     redirect(r, "/sound");
 }
 
@@ -1193,9 +1216,9 @@ static void post_web_off(struct req *r)
     logmsg("turned off from the page itself");
     run_apply("access", 0, 1);
     page_reset();
-    H("<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>T48S</title>"
+    H("<!doctype html><html lang='en' data-theme='%s'><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>T48S</title>"
       "<link rel='stylesheet' href='/style.css'><main class='lone'><div class='card'><h1>Web setup is off</h1>"
-      "<p>Turn it on at the phone: Settings, Access.</p></div></main></html>");
+      "<p>Turn it on at the phone: Settings, Access.</p></div></main></html>", web_theme());
     send_page(r, 200);
     web_stop_soon();
 }
@@ -1421,6 +1444,7 @@ const struct route routes[] = {
     {"GET", "/sound", page_sound},
     {"POST", "/sound", post_sound},
     {"POST", "/screen", post_screen},
+    {"POST", "/theme", post_theme},
     {"GET", "/contacts", page_contacts},
     {"POST", "/contacts/save", post_contact_save},
     {"POST", "/contacts/delete", post_contact_delete},

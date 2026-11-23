@@ -358,12 +358,20 @@ void redirect(struct req *r, const char *where)
     respond(r, 303, "text/plain", "", 0);
 }
 
+/* The theme the phone is in (the store's screen, theme; Switchboard if it names none we
+ * have): every page says it in <html data-theme>, and the style sheet does the rest. */
+const char *web_theme(void)
+{
+    const char *name = cfg_str("screen", "theme", t48_themes[0].name);
+    return t48_theme_named(name) ? name : t48_themes[0].name;
+}
+
 static void plain(struct req *r, int status, const char *text)
 {
     page.n = 0;
-    H("<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+    H("<!doctype html><html lang='en' data-theme='%s'><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
       "<title>T48S</title><link rel='stylesheet' href='/style.css'><main class='lone'><div class='card'><h1>%s</h1>"
-      "<p><a href='/'>Overview</a></p></div></main></html>", text);
+      "<p><a href='/'>Overview</a></p></div></main></html>", web_theme(), text);
     send_page(r, status);
 }
 
@@ -664,9 +672,9 @@ static void pair_finish(struct req *r)
 static void lone_begin(const char *title)
 {
     page.n = 0;
-    H("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+    H("<!doctype html><html lang='en' data-theme='%s'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
       "<title>%s</title><link rel='stylesheet' href='/style.css'></head><body><main class='lone'>"
-      "<div class='brand'><span class='dot'></span>T48S <span class='dim'>open firmware</span></div><div class='card'>", title);
+      "<div class='brand'><span class='dot'></span>T48S <span class='dim'>open firmware</span></div><div class='card'>", web_theme(), title);
 }
 
 static void lone_end(struct req *r)
@@ -717,9 +725,9 @@ void page_begin(struct req *r, const char *title, const char *nav)
         {"/access", "Access"}, {"/backup", "Backup"},
     };
     page.n = 0;
-    H("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+    H("<!doctype html><html lang='en' data-theme='%s'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
       "<title>%s - T48S</title><link rel='stylesheet' href='/style.css'><script src='/t48.js' defer></script></head><body>"
-      "<header><div class='brand'><span class='dot'></span>T48S <span class='dim'>open firmware</span></div>", title);
+      "<header><div class='brand'><span class='dot'></span>T48S <span class='dim'>open firmware</span></div>", web_theme(), title);
     form_begin(r, "/logout", "class='out'");
     H("<button type='submit' class='quiet'>Sign out</button></form></header><div class='frame'><nav>");
     for (unsigned i = 0; i < sizeof items / sizeof items[0]; i++)
@@ -848,10 +856,12 @@ static void handle(struct req *r)
         respond(r, 200, "text/css; charset=utf-8", asset_css, strlen(asset_css));
         goto done;
     }
-    if (!post && (!strcmp(r->path, "/regular.woff2") || !strcmp(r->path, "/bold.woff2"))) {
-        int bold = r->path[1] == 'b';
+    if (!post && !strncmp(r->path, "/fonts/", 7)) {
+        const struct asset_font *f = asset_fonts;
+        while (f->name && strcmp(f->name, r->path + 7)) f++;
+        if (!f->name) { plain(r, 404, "Not found"); goto done; }
         add_header("Cache-Control: max-age=86400\r\n");
-        respond(r, 200, "font/woff2", (const char *)(bold ? asset_font_bold : asset_font_regular), bold ? asset_font_bold_len : asset_font_regular_len);
+        respond(r, 200, "font/woff2", (const char *)f->data, f->len);
         goto done;
     }
     if (!post && !strcmp(r->path, "/t48.js")) {
