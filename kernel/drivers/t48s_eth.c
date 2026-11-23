@@ -31,6 +31,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
+#include <linux/workqueue.h>
 #include <mach/irqs.h>
 
 #define DRV_NAME	"t48s_eth"
@@ -158,6 +159,8 @@ struct t48s_eth {
 	int tx_busy;
 	unsigned int tx_len;
 
+	struct delayed_work guard;	/* keeps an eye on the IMP port's settings */
+	unsigned int imp_fixes;		/* times the guard had to put them back */
 };
 
 static u8 t48s_mac[ETH_ALEN] = { 0x80, 0x5e, 0xc0, 0x03, 0x1c, 0x05 };
@@ -459,27 +462,63 @@ static void t48s_tx_timeout(struct net_device *dev)
 
 /* ---- open / close ---- */
 
+/*
+ * Turn the switch's CPU (IMP) port on or off.
+ *
+ * The IMP control register also decides whether broadcasts reach the CPU. On
+ * the first open after a kexec from Yealink's kernel that register was seen
+ * to end up as 0 although 0x0c had just been written to it (issue 34): no
+ * broadcasts, so no ARP requests, and the phone could only be reached by
+ * hosts that already knew its MAC address. A write that is read back
+ * afterwards has always held, so: say exactly which frames we want, as
+ * Broadcom's driver does, read every write back, and let imp_guard() below
+ * check again from time to time.
+ */
+#define ESW_IMPCTRL_WANTED	(ESW_IMPCTRL_RX_BCAST | ESW_IMPCTRL_RX_MCAST)
+
+static void esw_wr_check(struct t48s_eth *p, u32 off, u32 val)
+{
+	esw_wr(p, off, val);
+	if (esw_rd(p, off) != val) {
+		esw_wr(p, off, val);
+		netdev_warn(p->dev, "switch register 0x%x did not take 0x%x at once, now 0x%x\n",
+			    off / 8, val, esw_rd(p, off));
+	}
+}
+
 static void esw_imp_enable(struct t48s_eth *p, int on)
 {
 	u32 v;
 
 	v = esw_rd(p, ESW_GBLMGMT);
 	v = on ? (v | ESW_GBLMGMT_IMP_EN) : (v & ~ESW_GBLMGMT_IMP_EN);
-	esw_wr(p, ESW_GBLMGMT, v);
+	esw_wr_check(p, ESW_GBLMGMT, v);
 
 	v = esw_rd(p, ESW_IMPENABLE);
 	v = on ? (v | 1) : (v & ~1);
-	esw_wr(p, ESW_IMPENABLE, v);
+	esw_wr_check(p, ESW_IMPENABLE, v);
 
 	v = esw_rd(p, ESW_IMPCTRL);
-	if (on) {
-		v &= ~ESW_PORTCTRL_DISABLE;
-		/* broadcasts (ARP requests) and unlearned multicast must reach us */
-		v |= ESW_IMPCTRL_RX_BCAST | ESW_IMPCTRL_RX_MCAST;
-	} else {
+	if (on)
+		v = (v & ~ESW_PORTCTRL_DISABLE) | ESW_IMPCTRL_WANTED;
+	else
 		v |= ESW_PORTCTRL_DISABLE;
+	esw_wr_check(p, ESW_IMPCTRL, v);
+}
+
+/* every two seconds while the interface is up: are broadcasts still coming our way? */
+static void imp_guard(struct work_struct *work)
+{
+	struct t48s_eth *p = container_of(work, struct t48s_eth, guard.work);
+	u32 v = esw_rd(p, ESW_IMPCTRL);
+
+	if ((v & (ESW_IMPCTRL_WANTED | ESW_PORTCTRL_DISABLE)) != ESW_IMPCTRL_WANTED) {
+		p->imp_fixes++;
+		netdev_warn(p->dev, "switch: IMP control was 0x%02x, putting broadcasts back (time %u)\n",
+			    v, p->imp_fixes);
+		esw_wr_check(p, ESW_IMPCTRL, (v & ~ESW_PORTCTRL_DISABLE) | ESW_IMPCTRL_WANTED);
 	}
-	esw_wr(p, ESW_IMPCTRL, v);
+	schedule_delayed_work(&p->guard, 2 * HZ);
 }
 
 /*
@@ -497,11 +536,11 @@ static int diag_get(char *buf, const struct kernel_param *kp)
 		return sprintf(buf, "no device\n");
 	llp = dmac_rd(p, DMAC_CH(CH_RX) + DMAC_LLP);
 	return sprintf(buf,
-		"imp ctrl 0x%02x (bcast %s), gblmgmt 0x%02x, imp enable 0x%02x, link 0x%04x\n"
+		"imp ctrl 0x%02x (bcast %s, put back %u times), gblmgmt 0x%02x, imp enable 0x%02x, link 0x%04x\n"
 		"to cpu: bcast %u mcast %u ucast %u dropped %u\n"
 		"rx ring: driver at %d, dma at %d, channels on 0x%x\n",
 		esw_rd(p, ESW_IMPCTRL),
-		(esw_rd(p, ESW_IMPCTRL) & ESW_IMPCTRL_RX_BCAST) ? "on" : "OFF",
+		(esw_rd(p, ESW_IMPCTRL) & ESW_IMPCTRL_RX_BCAST) ? "on" : "OFF", p->imp_fixes,
 		esw_rd(p, ESW_GBLMGMT), esw_rd(p, ESW_IMPENABLE), esw_rd(p, ESW_LINK),
 		esw_rd(p, ESW_MIB(ESW_PORT_IMP, ESW_MIB_TX_BCAST)),
 		esw_rd(p, ESW_MIB(ESW_PORT_IMP, ESW_MIB_TX_MCAST)),
@@ -554,6 +593,7 @@ static int t48s_open(struct net_device *dev)
 		    esw_rd(p, ESW_IMPCTRL), esw_rd(p, ESW_GBLMGMT));
 	netif_carrier_on(dev);
 	netif_start_queue(dev);
+	schedule_delayed_work(&p->guard, HZ);
 	return 0;
 }
 
@@ -561,6 +601,7 @@ static int t48s_stop(struct net_device *dev)
 {
 	struct t48s_eth *p = netdev_priv(dev);
 
+	cancel_delayed_work_sync(&p->guard);
 	netif_stop_queue(dev);
 	esw_imp_enable(p, 0);
 	dmac_chbit(p, DMAC_MASK_BLOCK, CH_RX, 0);
@@ -596,6 +637,7 @@ static int __init t48s_eth_init(void)
 	p = netdev_priv(dev);
 	p->dev = dev;
 	spin_lock_init(&p->lock);
+	INIT_DELAYED_WORK(&p->guard, imp_guard);
 
 	p->esw = ioremap(ESW_PHYS, ESW_SIZE);
 	p->dmac = ioremap(DMA1_PHYS, DMA1_SIZE);

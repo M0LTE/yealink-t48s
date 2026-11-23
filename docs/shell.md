@@ -96,6 +96,10 @@ All with injected input, nobody at the phone:
 - The devices are grabbed: a second program reading `/dev/input/event0` sees nothing while keys are pressed, and nothing is typed on the text console underneath.
 - `kill -9` on the app gives "Clock has stopped", no process or buffer left behind. The Crasher test app's three cases (crash, error exit, hang) all end the same way as in the simulator. Killing the shell takes its app with it, and `init` restarts the shell.
 
+No fault was found in the shell or libt48 on the phone: the phone side worked as built. The clock is in UTC until there is a time zone setting (#23).
+
+![the clock app on the phone](img/clock-on-phone.png)
+
 ### Still needs fingers
 
 1. Press each key on the idle screen, in the launcher and in the clock: digits, `*`, `#`, arrows, OK, X. The clock should name each one.

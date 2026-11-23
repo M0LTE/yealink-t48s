@@ -1,9 +1,11 @@
 # Status
 
-Last updated 2026-11-22.
+Last updated 2026-11-23.
 
 ## Done
 
+- **The shell runs on the phone** (2026-11-23, issue #19): our kernel now boots straight to `t48-shell` on the screen, with the clock app installed. Idle screen, launcher, the app, Home, the handset placeholder and the clean-up of a killed app were all checked on the real phone by injecting keys and touches from a PC (`tools/phone-input.sh`); nobody has pressed a real key on it yet. The short list for fingers is in `docs/shell.md`.
+- **ARP fixed in our kernel** (2026-11-23, issue #34): the switch's CPU port had broadcasts turned off after every boot of our kernel, so the phone never heard ARP requests and vanished for any host that had forgotten its MAC address. The driver now sets and checks that register. `tools/arp-test.sh` shows it: fails on the old image, passes on the new one.
 - **Touchscreen in our kernel** (2026-11-22, issue #4): `kernel/drivers/t48s_touch.c`, a Linux input device with raw 12-bit positions like Yealink's, polled. Tom tapped the corners and dragged: dots land under the finger using the factory calibration (U-Boot's `calparam`, now `/etc/pointercal` in our root filesystem). Test again any time with `tools/ourkernel.sh ssh touchtest`.
 - **Keys, hook switch and the keypad chip's watchdog in our kernel** (2026-11-22, issue #3): `kernel/drivers/t48s_keypad.c` (keys and hook as Linux input devices, polled) and `kernel/drivers/t48s_holtek.c` (reads the chip's version, turns its watchdog off at boot). The drivers load, read "no key pressed", and the watchdog is proven both ways. **No key has been pressed yet**: see the test steps in `kernel/README.md`. Six function keys still need their labels matched.
 - **Screen console in our kernel** (2026-11-22, issue #2): `kernel/drivers/t48s_fb.c` makes the screen U-Boot leaves running into `/dev/fb0`; kernel messages, status and a login prompt show on it (`docs/img/fbcon-2026-11-22.png`). The loader now stops all DMA before jumping: Yealink's audio DMA kept writing into RAM our kernel uses, which crashed one boot and probably caused the earlier network trouble.
