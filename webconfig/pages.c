@@ -224,6 +224,8 @@ static void scan_apps(void)
     log_quiet = 0;
 }
 
+static int ssh_is_on(void);
+
 void page_overview(struct req *r)
 {
     char now[80];
@@ -263,7 +265,7 @@ void page_overview(struct req *r)
     scan_apps();
     H("<a class='card tile' href='/apps'><h2>Apps</h2><p>%d installed</p><p class='dim'>Install, update, remove, settings</p></a>", napps);
 
-    int ssh = !strcmp(val("access", "ssh", "off"), "on");
+    int ssh = ssh_is_on();
     H("<a class='card tile' href='/access'><h2>Access</h2><p><span class='pill %r'>SSH %r</span> %d key%r</p><p class='dim'>%d browser%r paired with this page</p></a>",
       ssh ? "good" : "", ssh ? "on" : "off", keys_count(), keys_count() == 1 ? "" : "s", sessions_count(), sessions_count() == 1 ? "" : "s");
 
@@ -1047,13 +1049,19 @@ static const char *access_status(const char *key, const char *def)
     return out;
 }
 
+/* SSH takes logins: turned on by the owner, or a development build, where it always is */
+static int ssh_is_on(void)
+{
+    return !strcmp(access_status("dev", "no"), "yes") || !strcmp(val("access", "ssh", "off"), "on");
+}
+
 static void page_access(struct req *r)
 {
     struct key k[MAX_KEYS];
     char *text;
     int n = keys_load(k, MAX_KEYS, &text);
     int dev = !strcmp(access_status("dev", "no"), "yes");
-    int on = dev || !strcmp(val("access", "ssh", "off"), "on");
+    int on = ssh_is_on();
     char host[64];
     snprintf(host, sizeof host, "%s", web_url()[0] ? web_url() + 7 : "the-phone");
     host[strcspn(host, ":/")] = 0;
@@ -1141,7 +1149,7 @@ static void post_key_add(struct req *r)
     else if (refused) flash(r, 1, "%d key%s added. %d line%s refused: a public key is one line that starts with its kind, such as ssh-ed25519, then the key, then a name. The list holds %d.",
                             added, added == 1 ? "" : "s", refused, refused == 1 ? " was" : "s were", MAX_KEYS);
     else if (!added) flash(r, 1, "Nothing was added: that key is already in the list.");
-    else flash(r, 0, "%d key%s added.%s", added, added == 1 ? "" : "s", !strcmp(val("access", "ssh", "off"), "on") ? "" : " SSH is off: turn it on to use it.");
+    else flash(r, 0, "%d key%s added.%s", added, added == 1 ? "" : "s", ssh_is_on() ? "" : " SSH is off: turn it on to use it.");
     if (added) { logmsg("%d SSH key%s added", added, added == 1 ? "" : "s"); run_apply("access-status", 4000, 0); }
     free(text);
     free(add);
