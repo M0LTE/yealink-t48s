@@ -15,6 +15,7 @@ Issue [#25](https://github.com/M0LTE/yealink-t48s/issues/25). Design: [architect
 |---|---|
 | `account` | reads the accounts file that `t48-sip` writes |
 | `menu` | the call commands (`dial`, `accept`, `hangup`, `reginfo`, ...) that t48ctrl runs |
+| `t48mwi` | ours: asks each account's server about waiting voicemail (RFC 3842) and passes the answer on as an event, for the message lamp. baresip's own `mwi` module is not built: it can spin for ever at start when an account registers before its start-up timer runs (seen against a server on the same machine), and it delays shutdown by half a second |
 | `g711`, `libg722` | codecs: G.711 (PCMU, PCMA) and G.722. G.722 is not inside baresip: `libg722` wraps sippy's [libg722](https://github.com/sippy/libg722) (two C files, BSD-2-Clause and public domain) |
 | `auresamp` | converts the 16 kHz device audio to and from 8 kHz for G.711 |
 | `t48audio` | ours: the call stream to the audio service (see below) |
@@ -26,7 +27,7 @@ libre is built without BFCP, PCP, RTMP, zlib and backtraces. It needs a crypto l
 
 | Binary (stripped) | Size |
 |---|---|
-| ARM, no TLS (the default) | 979,376 bytes |
+| ARM, no TLS (the default) | 982,968 bytes |
 | ARM, with TLS | 3,464,920 bytes |
 | x86-64, for the PC test | 1,058,424 bytes |
 
@@ -51,15 +52,18 @@ The phone's image builds the same thing with Buildroot (#16): packages `libre`, 
 
 ## Running it
 
-`t48-sip` is the program runit starts. It reads the owner's account from `/data/config/sip`, writes baresip's accounts file into `/run/t48-sip` (mode 0700, as it holds the password) beside a copy of the config, and runs baresip there.
+`t48-sip` is the program runit starts. It reads the owner's accounts from `/data/config/sip` (account 1) and `sip2` to `sip6` beside it (#36), leaves out any that are switched off or have no user or domain, writes baresip's accounts file into `/run/t48-sip` (mode 0700, as it holds the password) beside a copy of the config, and runs baresip there.
 
 ```
 # /data/config/sip  (see sip/config/sip.example)
 user=1001
 password=...
 domain=sip.example.com
-# optional: auth_user, display_name, transport (udp, tcp, tls), outbound_proxy, register_seconds
+# optional: auth_user, display_name, transport (udp, tcp, tls), outbound_proxy, register_seconds,
+#           enabled (off), mwi (off); label and voicemail are for the shell
 ```
+
+When an account is changed in Settings, `t48-apply sip` kills baresip and starts `t48-sip` again a second later. `t48-sip` keeps its process number in the run directory and waits (up to five seconds) for an old baresip to let go of the SIP port before starting the new one.
 
 The config is [`sip/config/config`](../sip/config/config), installed as `/usr/share/t48/sip/config`; `/data/local/sip/config` replaces it. No credentials are in the repository; the test's passwords are made up for the throwaway registrar.
 
@@ -78,7 +82,7 @@ The config is [`sip/config/config`](../sip/config/config), installed as `/usr/sh
 <- {"event":true,"class":"call","type":"CALL_ESTABLISHED","accountaor":"sip:alice@...","direction":"outgoing","peeruri":"sip:bob@...","id":"..."}
 ```
 
-The commands the shell needs: `dial <uri>`, `accept`, `hangup`, `hold`, `resume`, `mute`, `transfer <uri>`, `sndcode <digit>` (DTMF, sent as RFC 4733 events by default), `reginfo`, `listcalls`.
+The commands the shell needs: `dial <uri>`, `accept`, `hangup`, `hold`, `resume`, `mute`, `transfer <uri>`, `sndcode <digit>` (DTMF, sent as RFC 4733 events by default), `reginfo`, `listcalls`. Those that act on a call take its id, which is how the shell handles two calls.
 
 The catch: ctrl_tcp only listens on TCP, so any local program, including an app running as its own user, could connect and place calls. So it is not built. Our own module, **t48ctrl** ([source](../sip/modules/t48ctrl/t48ctrl.c)), serves the same protocol on a Unix socket:
 
@@ -87,6 +91,9 @@ The catch: ctrl_tcp only listens on TCP, so any local program, including an app 
 - **Several clients at once** (the shell, and a tool over SSH); each gets every event.
 - **Catching up:** a client that has just connected is told how things stand, as events marked `"sync":true`: one `REGISTER_OK`, `REGISTER_FAIL` or `REGISTERING` for each account and one `CALL_INCOMING`, `CALL_OUTGOING`, `CALL_RINGING` or `CALL_ESTABLISHED` for each call (with `onhold` and `duration`). That is how a restarted shell picks a call back up. The command `sync` asks for the same again.
 - Level meter and RTCP report events are left out; the shell has no use for them.
+- **Which account:** a command may carry `"account":"sip:user@domain"` and is then run for that account, so `dial` calls out from it. Every event already says which account it is about (`accountaor`).
+- **`joincalls <call-id> <call-id>`** is ours: it connects the two people we are talking to with each other and takes us out (an attended transfer, REFER with Replaces). The first call is the one sent away, the second where it is sent.
+- `MWI_NOTIFY` events (from `t48mwi`) carry the server's message-summary text in `param`.
 
 To try it by hand: `python3 sip/test/far.py /run/t48-sip/ctrl.sock cmd reginfo`.
 
@@ -94,7 +101,7 @@ To try it by hand: `python3 sip/test/far.py /run/t48-sip/ctrl.sock cmd reginfo`.
 
 `t48audio` ([source](../sip/modules/t48audio/t48audio.c)) is baresip's audio source and player for the phone. The contract ([`t48audio_proto.h`](../sip/modules/t48audio/t48audio_proto.h)) was proposed here and agreed in #24 with small changes; [audiod.md](audiod.md#the-call-stream-baresip) has the details.
 
-- **One call stream** per baresip process, on a Unix socket the audio service owns (`/run/t48-audiod/call.sock`; `t48audio_socket` in the config moves it). Framing as the app protocol: `u16 type, u16 len`, payload, little endian.
+- **One call stream** per baresip process, shared by all its calls: the phone can have two (one on hold, or one being asked before a transfer). Each call's source gets the microphone frame and the players' frames are added together; a held call sends and plays nothing. The stream is on a Unix socket the audio service owns (`/run/t48-audiod/call.sock`; `t48audio_socket` in the config moves it). Framing as the app protocol: `u16 type, u16 len`, payload, little endian.
 - **Fixed format: 16 kHz, mono, signed 16-bit, always 20 ms frames.** baresip resamples for G.711 (`ausrc_srate`/`auplay_srate 16000` in the config) and re-cuts frames for the codec's packet time.
 - **The audio service is the clock.** Every 20 ms it sends one MIC frame; baresip answers each with one SPK frame. Both directions run off the codec's own clock, so nothing drifts, and a missing SPK frame is simply silence.
 - **Not on this socket:** routes (handset, headset, speaker), volume, mute, ringing and tones. The shell asks the audio service for those directly, so they survive a baresip restart and baresip never needs to know which path is live.

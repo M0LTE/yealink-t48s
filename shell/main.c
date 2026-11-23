@@ -151,7 +151,7 @@ void ui_button(int x, int y, int w, int h, const char *label, uint32_t fill)
 #define IDLE_BTN_X(i) (20 + (i) * (IDLE_BTN_W + 10))
 enum { IB_APPS, IB_CALLS, IB_CONTACTS, IB_DND, IB_SETTINGS };
 /* one line for each account, when there is more than one */
-#define ACC_Y 288
+#define ACC_Y 294
 #define ACC_H 36
 #define ACC_MAX 6
 

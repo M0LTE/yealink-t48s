@@ -85,7 +85,8 @@ chmod 700 "$RUN"
 if [ -f "$RUN/pid" ]; then
     old=$(cat "$RUN/pid")
     i=0
-    while [ -n "$old" ] && [ "$old" != $$ ] && kill -0 "$old" 2>/dev/null; do
+    # only ever a baresip: the number may since have gone to some other program
+    while [ -n "$old" ] && [ "$old" != $$ ] && grep -q baresip "/proc/$old/cmdline" 2>/dev/null; do
         i=$((i + 1))
         [ $i -gt 25 ] && { kill -9 "$old" 2>/dev/null || true; break; }
         sleep 0.2

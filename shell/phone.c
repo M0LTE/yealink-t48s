@@ -923,7 +923,7 @@ static void do_transfer(void)
 
 static void toggle_mute(void)
 {
-    if (P.st == PH_INCOMING || P.o_st == O_WAITING) { set_ring(0); return; }   /* quiet, but still ringing on the screen */
+    if (P.st == PH_INCOMING || (P.o_st == O_WAITING && P.ring)) { set_ring(0); return; }   /* quiet, but still ringing on the screen */
     if (P.st != PH_INCALL && P.st != PH_OUTGOING) return;
     P.muted = !P.muted;
     audioc_mute(P.muted);
