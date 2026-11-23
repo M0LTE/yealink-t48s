@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Builds the root filesystem (Buildroot) and the kexec kernel image with that root
 # filesystem built in. Artifacts on pushes to main; a release on a v* tag. The SDK
-# is built only for tags and runs started by hand.
+# is built only for tags and runs started by hand (gh workflow run build.yml), and
+# each of those also updates the rolling pre-release "sdk-latest" (sdk/README.md).
 # No SSH keys go into anything built here.
 name: build
 
@@ -55,7 +56,9 @@ jobs:
 
       - name: SDK
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        run: buildroot/build.sh "$RUNNER_TEMP/br" sdk
+        run: |
+          buildroot/build.sh "$RUNNER_TEMP/br" sdk
+          sdk/assemble.sh "$RUNNER_TEMP"/br/output/images/*_sdk-buildroot.tar.gz "$RUNNER_TEMP/t48s-sdk.tar.gz"
 
       - name: Linux source cache
         uses: actions/cache@v4
@@ -80,9 +83,7 @@ jobs:
           mkdir out
           cp "$RUNNER_TEMP/k/Image-kexec" out/
           cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" out/
-          for f in "$RUNNER_TEMP"/br/output/images/*_sdk-buildroot.tar.gz; do
-            if [ -f "$f" ]; then cp "$f" out/t48s-sdk.tar.gz; fi
-          done
+          if [ -f "$RUNNER_TEMP/t48s-sdk.tar.gz" ]; then cp "$RUNNER_TEMP/t48s-sdk.tar.gz" out/; fi
           gzip -9 out/rootfs.cpio
           (cd out && sha256sum * > SHA256SUMS)
           ls -l out
@@ -93,10 +94,26 @@ jobs:
           path: out/
           retention-days: 30
 
+      - name: SDK as the rolling pre-release sdk-latest
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd out && sha256sum t48s-sdk.tar.gz > t48s-sdk.tar.gz.sha256)
+          git push -f origin "$GITHUB_SHA:refs/tags/sdk-latest"
+          notes="The newest app SDK, rebuilt by hand or for a release. Built from $GITHUB_REF_NAME at $GITHUB_SHA on $(date -u +%Y-%m-%d). How to use it: sdk/README.md."
+          if gh release view sdk-latest >/dev/null 2>&1; then
+            gh release edit sdk-latest --prerelease --latest=false --title "SDK (latest build)" --notes "$notes"
+          else
+            gh release create sdk-latest --prerelease --latest=false --verify-tag --title "SDK (latest build)" --notes "$notes"
+          fi
+          gh release upload sdk-latest out/t48s-sdk.tar.gz out/t48s-sdk.tar.gz.sha256 --clobber
+          rm out/t48s-sdk.tar.gz.sha256
+
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
-            --notes "Image-kexec boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). It carries no SSH keys: use the serial console. rootfs.cpio.gz is the root filesystem built into it; t48s-sdk.tar.gz is the cross toolchain."
+            --notes "Image-kexec boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). It carries no SSH keys: use the serial console. rootfs.cpio.gz is the root filesystem built into it; t48s-sdk.tar.gz is the app SDK (sdk/README.md)."

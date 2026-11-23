@@ -2,6 +2,7 @@
   "id": "clock",
   "name": "Clock",
   "version": "0.1.0",
+  "description": "A clock, and the last key or touch",
   "api": 1,
   "exec": "clock",
   "icon": "icon.ppm",

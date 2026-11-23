@@ -1,7 +1,7 @@
 # Programs for the T48S (ARMv6, Linux 2.6.27, EABI soft-float).
 # Freestanding ones use raw syscalls; the rest link musl built by build-dropbear.sh.
 # The Buildroot package (buildroot/package/t48s-tools) sets CROSS_CC.
-# gen/fonts.h and gen/wf_fonts.h are committed; "make fonts" regenerates them
+# gen/fonts.h is committed; "make fonts" regenerates it
 # (needs python3-pil and the DejaVu fonts).
 T ?= $(HOME)/src-build/t48s
 CROSS_CC ?= $(T)/bin/armcc
@@ -10,7 +10,7 @@ FREE = clang --target=armv6-linux-gnueabi -march=armv6 -mfloat-abi=soft -marm -O
        -ffreestanding -fno-builtin -nostdlib -fuse-ld=lld
 MUSLCC = $(CROSS_CC) -Os -Wall
 
-all: fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner cpubench keytest touchtest waterfall apmcap t48rec t48mix
+all: fbtest fbswap.so envexec fbinfo tap sertest usbinit membanner cpubench keytest touchtest apmcap t48rec t48mix
 
 fbtest: fbtest.c
 	$(FREE) -static -Wl,-e,_start -o $@ $<
@@ -23,12 +23,9 @@ envexec fbinfo tap sertest usbinit keytest touchtest: %: %.c
 	$(MUSLCC) -o $@ $<
 
 fonts:
-	mkdir -p gen && python3 $(MKFONT) gen/fonts.h && python3 $(MKFONT) gen/wf_fonts.h wf
+	mkdir -p gen && python3 $(MKFONT) gen/fonts.h
 
 .PHONY: all clean fonts
-
-t48ui: t48ui.c gen/fonts.h
-	$(MUSLCC) -o $@ t48ui.c
 
 # Microphone capture straight from the APM block, no DSP (issue #6, docs/audio.md)
 apmcap: apmcap.c
@@ -42,7 +39,7 @@ t48mix: t48mix.c
 	$(MUSLCC) -static -o $@ $<
 
 clean:
-	rm -f fbtest fbswap.so envexec fbinfo tap sertest usbinit t48ui membanner cpubench touchtest waterfall waterfall-host
+	rm -f fbtest fbswap.so envexec fbinfo tap sertest usbinit membanner cpubench keytest touchtest apmcap t48rec t48mix
 
 membanner: membanner.c gen/fonts.h
 	$(MUSLCC) -o $@ membanner.c
@@ -51,12 +48,5 @@ membanner: membanner.c gen/fonts.h
 cpubench: cpubench.c
 	$(MUSLCC) -O2 -o $@ $<
 
-# Live receive waterfall of a pdn-soundmodem station (issue #13). waterfall-host
-# is the same program for this PC: run it with --shot to render into a file.
-WF_SRC = waterfall.c wf_fold.c ws_parse.c
-WF_DEP = $(WF_SRC) wf_fold.h ws_parse.h gen/wf_fonts.h
-waterfall: $(WF_DEP)
-	$(MUSLCC) -O2 -s -o $@ $(WF_SRC) -lm
-
-waterfall-host: $(WF_DEP)
-	cc -O2 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -o $@ $(WF_SRC) -lm
+# The waterfall and the GB7RDG links screen (t48ui) are apps now, in
+# M0LTE/yealink-t48s-apps (apps/waterfall, apps/links).

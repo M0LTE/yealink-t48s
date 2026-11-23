@@ -93,6 +93,29 @@ int t48_json_true(const char *v, const char *e);
 const char *t48_json_first(const char *arr, const char *e);                /* first element, or NULL */
 const char *t48_json_next(const char *v, const char *e);                   /* the one after v, or NULL */
 
+/* ---------- a WebSocket client (plain ws:// for now) ---------- */
+
+typedef struct t48_ws t48_ws;
+enum { T48_WS_TEXT = 1, T48_WS_BINARY = 2 };
+/* A whole message. Text is NUL terminated (data[len] is 0); data is valid
+ * only during the call, and the callback may change it in place. */
+typedef void (*t48_ws_cb)(void *ctx, int type, unsigned char *data, size_t len);
+
+/* Connect to ws://host[:port][/path] and upgrade. Waits up to timeout_ms
+ * (a name lookup may take longer; addresses do not). Messages bigger than
+ * max_msg are dropped. NULL on failure, with a short reason in err. Call
+ * t48_ws_read once straight away: frames may have come with the answer. */
+t48_ws *t48_ws_open(const char *url, int timeout_ms, size_t max_msg, char *err, size_t errn);
+/* for t48_watch_fd */
+int t48_ws_fd(const t48_ws *ws);
+/* Take what has arrived and call cb for each whole message; pings are
+ * answered here. 0, or -1 when the connection has ended (then t48_ws_close). */
+int t48_ws_read(t48_ws *ws, t48_ws_cb cb, void *ctx);
+int t48_ws_send_text(t48_ws *ws, const char *text, size_t len);
+void t48_ws_close(t48_ws *ws);
+/* split a ws:// address: 1 if it is one */
+int t48_ws_parse_url(const char *url, char *host, size_t hn, int *port, char *path, size_t pn);
+
 /* ---------- the app side of the protocol ---------- */
 
 enum {

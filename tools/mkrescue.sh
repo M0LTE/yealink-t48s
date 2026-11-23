@@ -2,8 +2,8 @@
 # mkrescue.sh OUTDIR: build the rescue set (T48S.bin, T48S.rfs, T48S.rom) for U-Boot's
 # recovery mode, option 1 (serve with tools/tftpd.py OUTDIR 69 --rom-once).
 # T48S.bin is Yealink's own kernel (NAND drivers built in); T48S.rfs runs
-# tools/rescue-init.sh, which clears the boot-mode flags, puts our boot hook, SSH
-# and t48ui back, prints diagnostics on the serial port and resets via the watchdog.
+# tools/rescue-init.sh, which clears the boot-mode flags, puts our boot hook and SSH
+# back, prints diagnostics on the serial port and resets via the watchdog.
 # Needs: dumps/usbtest (Yealink kernel, ROM, a ramdisk holding Yealink's libc),
 # dumps/userenv-usr-sbin, the musl busybox and dropbear builds, sudo.
 set -e
@@ -17,7 +17,7 @@ cp $T/busybox-1.36.1/busybox $S/bin/busybox && ln -s busybox $S/bin/sh
 cp $T/dropbear-2025.88/dropbearmulti $S/payload/ssh/
 cat ~/.ssh/id_ed25519.pub "$HERE/phone/authorized_keys.extra" > $S/payload/ssh/authorized_keys
 cp "$HERE"/phone/simulator.sh "$HERE"/phone/start.sh "$HERE"/phone/rearm.sh $S/payload/custom/
-(cd "$HERE/native" && make -s t48ui fbswap.so envexec tap >/dev/null && llvm-strip-21 -o $S/payload/custom/t48ui t48ui && cp fbswap.so envexec tap $S/payload/custom/)
+(cd "$HERE/native" && make -s fbswap.so envexec tap >/dev/null && cp fbswap.so envexec tap $S/payload/custom/)
 cp "$HERE/tools/rescue-init.sh" $S/sbin/init
 sudo chmod 755 $S/sbin/init $S/bin/busybox $S/usr/sbin/userenv $S/lib/ld.so.1 $S/lib/libc.so.6
 sudo chown -R root:root $S

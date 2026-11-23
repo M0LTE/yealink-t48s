@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""t48-pack: make .t48app packages and feed indexes for T48 apps.
+
+  t48-pack APPDIR OUTDIR        check APPDIR (an app folder: manifest.json, the
+                                program, an icon) and write OUTDIR/ID-VERSION.t48app
+  t48-pack --index DIR [--base URL]
+                                write DIR/index.json listing every .t48app in DIR
+
+A .t48app is a tar.gz holding one folder named after the app's id, so
+`tar -C /data/apps -xzf FILE` installs it. Packages are reproducible: fixed
+times, owners and modes. In index.json each "url" is relative to the index
+unless --base is given."""
+import gzip, hashlib, io, json, os, re, sys, tarfile, time
+
+ID_RE = re.compile(r"^[a-z0-9._-]+$")
+
+
+def die(msg):
+    sys.exit("t48-pack: " + msg)
+
+
+def check_manifest(m, files):
+    for k in ("id", "name", "version", "api", "exec"):
+        if k not in m:
+            die(f"manifest.json has no \"{k}\"")
+    if not isinstance(m["id"], str) or not ID_RE.match(m["id"]) or m["id"] in (".", ".."):
+        die("id must be a-z, 0-9, '-', '.', '_'")
+    if not isinstance(m["api"], int) or m["api"] < 1:
+        die("api must be a whole number from 1")
+    if m["exec"] not in files:
+        die(f"the program \"{m['exec']}\" is not in the folder")
+    if m.get("icon") and m["icon"] not in files:
+        die(f"the icon \"{m['icon']}\" is not in the folder")
+
+
+def pack(appdir, outdir):
+    with open(os.path.join(appdir, "manifest.json")) as f:
+        m = json.load(f)
+    files = sorted(os.path.relpath(os.path.join(r, n), appdir)
+                   for r, _, ns in os.walk(appdir) for n in ns)
+    check_manifest(m, files)
+    with open(os.path.join(appdir, m["exec"]), "rb") as f:
+        head = f.read(20)
+    if head[:4] != b"\x7fELF" or int.from_bytes(head[18:20], "little") != 40:
+        print(f"t48-pack: warning: {m['exec']} is not an ARM program", file=sys.stderr)
+    mtime = int(os.environ.get("SOURCE_DATE_EPOCH", "0"))
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+        def add_dir(name):
+            ti = tarfile.TarInfo(name)
+            ti.type, ti.mode, ti.mtime = tarfile.DIRTYPE, 0o755, mtime
+            tar.addfile(ti)
+        add_dir(m["id"])
+        made = set()
+        for rel in files:
+            parts = rel.split(os.sep)[:-1]
+            for i in range(1, len(parts) + 1):
+                d = "/".join(parts[:i])
+                if d not in made:
+                    made.add(d)
+                    add_dir(m["id"] + "/" + d)
+            path = os.path.join(appdir, rel)
+            ti = tarfile.TarInfo(m["id"] + "/" + rel.replace(os.sep, "/"))
+            ti.size, ti.mtime = os.path.getsize(path), mtime
+            ti.mode = 0o755 if os.access(path, os.X_OK) or rel == m["exec"] else 0o644
+            with open(path, "rb") as f:
+                tar.addfile(ti, f)
+    os.makedirs(outdir, exist_ok=True)
+    out = os.path.join(outdir, f"{m['id']}-{m['version']}.t48app")
+    with open(out, "wb") as f:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=f, mtime=mtime, compresslevel=9) as gz:
+            gz.write(buf.getvalue())
+    print(out)
+
+
+def read_package(path):
+    with tarfile.open(path, "r:gz") as tar:
+        for ti in tar.getmembers():
+            parts = ti.name.split("/")
+            if len(parts) == 2 and parts[1] == "manifest.json" and ti.isfile():
+                return json.load(tar.extractfile(ti))
+    die(f"{path} has no manifest.json")
+
+
+def index(d, base):
+    apps = []
+    for name in sorted(os.listdir(d)):
+        if not name.endswith(".t48app"):
+            continue
+        path = os.path.join(d, name)
+        m = read_package(path)
+        with open(path, "rb") as f:
+            data = f.read()
+        e = {k: m[k] for k in ("id", "name", "version", "api") if k in m}
+        e["description"] = m.get("description", "")
+        e["permissions"] = m.get("permissions", [])
+        e["url"] = (base.rstrip("/") + "/" + name) if base else name
+        e["size"] = len(data)
+        e["sha256"] = hashlib.sha256(data).hexdigest()
+        apps.append(e)
+    feed = {"feed": 1, "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "apps": apps}
+    with open(os.path.join(d, "index.json"), "w") as f:
+        json.dump(feed, f, indent=2)
+        f.write("\n")
+    print(os.path.join(d, "index.json"))
+
+
+def main(a):
+    if len(a) >= 2 and a[0] == "--index":
+        base = a[a.index("--base") + 1] if "--base" in a else ""
+        index(a[1], base)
+    elif len(a) == 2 and not a[0].startswith("-"):
+        pack(a[0], a[1])
+    else:
+        sys.exit(__doc__)
+
+
+main(sys.argv[1:])

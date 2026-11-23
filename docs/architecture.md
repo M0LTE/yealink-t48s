@@ -137,7 +137,7 @@ Its CI downloads the SDK, builds each app, runs it in the simulator for a smoke 
 
 On the phone, `t48-app list | install | update | remove` and an Apps screen do the rest ([#22](https://github.com/M0LTE/yealink-t48s/issues/22)); packages are checked against the SHA-256 in the feed, which is fetched over HTTPS. Copying a `.t48app` over SSH and installing it by hand also works.
 
-The existing pages become apps: the waterfall ([apps#3](https://github.com/M0LTE/yealink-t48s-apps/issues/3), from [#13](https://github.com/M0LTE/yealink-t48s/issues/13)), the GB7RDG links screen ([apps#4](https://github.com/M0LTE/yealink-t48s-apps/issues/4)), and later the station picker and UberSDR client ([apps#5](https://github.com/M0LTE/yealink-t48s-apps/issues/5), from [#15](https://github.com/M0LTE/yealink-t48s/issues/15) and [#14](https://github.com/M0LTE/yealink-t48s/issues/14)). Once the waterfall runs as an app, its copy here is deleted, so the separation is real.
+The existing pages become apps: the waterfall ([apps#3](https://github.com/M0LTE/yealink-t48s-apps/issues/3), from [#13](https://github.com/M0LTE/yealink-t48s/issues/13)), the GB7RDG links screen ([apps#4](https://github.com/M0LTE/yealink-t48s-apps/issues/4)), and later the station picker and UberSDR client ([apps#5](https://github.com/M0LTE/yealink-t48s-apps/issues/5), from [#15](https://github.com/M0LTE/yealink-t48s/issues/15) and [#14](https://github.com/M0LTE/yealink-t48s/issues/14)). Once the waterfall runs as an app, its copy here is deleted, so the separation is real. (2026-11-23: done for the waterfall and the links screen, which are `apps/waterfall` and `apps/links` there.)
 
 ## 4. Configuration, patchability and safety
 
