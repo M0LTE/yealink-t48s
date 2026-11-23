@@ -1,4 +1,4 @@
-# One call at a time: a second caller is told "busy" and noted as missed; the first call is not disturbed.
+# Call waiting: a second caller is shown while the first call goes on, with a beep and the lamp; X turns them away.
 waitstate reg ok 8000
 waitstate audio up 3000
 run $FAR $BOB cmd dial 1001
@@ -6,12 +6,38 @@ waitstate phone incoming 5000
 hook off
 waitstate phone incall 5000
 run $FAR $CAROL cmd dial 1001
+waitstate other waiting 5000
+expectstate other.peer 1003
+expectstate phone incall
+expectstate peer 1002
+expectstate led.message blink
+# the audio service is asked to ring; with the sound on the handset that is a quiet beep there
+waitstate audio.ring 1 2000
+expectstate audio.route handset
+wait 300
+shot shots/phone-call-waiting.png
+# Mute silences the beep, and does not mute the call
+key mute
+waitstate audio.ring 0 2000
+expectstate mute 0
+expectstate other waiting
+# X: the second caller hears busy; the first call is not disturbed
+key x
+expectstate other none
 run $FAR waitlog $CAROLLOG CALL_CLOSED.*486 8
 expectstate phone incall
 expectstate peer 1002
-expectstate missed 1
-expectstate last m:1003
+expectstate led.message off
+expectstate last i:1003
 run $FAR $BOB waitcall established 3
+# a second caller who gives up is a missed call
+run $FAR $CAROL cmd dial 1001
+waitstate other waiting 5000
+run $FAR $CAROL cmd hangup
+waitstate other none 5000
+expectstate last m:1003
+expectstate missed 1
+expectstate phone incall
 hook on
 expectstate phone ended
 waitstate phone idle 4000

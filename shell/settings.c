@@ -31,14 +31,14 @@
 #define T48_VERSION "development build"
 #endif
 
-enum page { P_ROOT, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP };
-static const char *const page_names[] = {"root", "sip", "network", "time", "timezone", "sound", "screen", "access", "about",
+enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP };
+static const char *const page_names[] = {"root", "accounts", "sip", "network", "time", "timezone", "sound", "screen", "access", "about",
                                          "appsettings", "appconf", "store", "storeapp"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
 enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16 };
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
-              A_SSH, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS };
+              A_SSH, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE };
 
 struct row {
     int kind, flags;
@@ -168,7 +168,8 @@ static void run_apply_with(const char *what, const char *input)
 {
     int p[2] = {-1, -1};
     logmsg("settings: %s", what);
-    if (!strcmp(what, "sip")) phone_reload_account();
+    if (!strcmp(what, "sip") || !strcmp(what, "phone")) phone_reload_account();
+    if (!strcmp(what, "phone")) return;   /* the shell's own file: nothing else follows it */
     if (!opt.apply || !opt.apply[0]) return;
     if (input && pipe(p) < 0) return;
     pid_t pid = fork();
@@ -531,7 +532,15 @@ static void build_root(void)
     snprintf(user, sizeof user, "%s", cfg_str("sip", "user", ""));
     if (user[0]) snprintf(v, sizeof v, "%s@%s", user, cfg_str("sip", "domain", "?"));
     else snprintf(v, sizeof v, "not set");
-    add_menu("Phone account", P_SIP, v);
+    int extra = 0;
+    for (int i = 2; i <= 6; i++) {
+        char f[8];
+        snprintf(f, sizeof f, "sip%d", i);
+        if (cfg_str(f, "user", "")[0]) extra++;
+    }
+    if (extra && user[0]) { size_t at = strlen(v); snprintf(v + at, sizeof v - at, " and %d more", extra); }
+    else if (extra) snprintf(v, sizeof v, "%d set", extra);
+    add_menu("Phone accounts", P_ACCOUNTS, v);
     ui_network_status(v, sizeof v, &up);
     add_menu("Network", P_NET, v);
     add_menu("Date and time", P_TIME, cfg_str("system", "timezone", "UTC"));
@@ -545,20 +554,82 @@ static void build_root(void)
     add_menu("About", P_ABOUT, "");
 }
 
-static void build_sip(void)
+/* the settings file of account 1 to 6: sip, sip2, ... sip6 */
+static const char *sip_file(int n)
+{
+    static char f[4][8];
+    static int at;
+    char *o = f[at++ & 3];
+    if (n <= 1) snprintf(o, 8, "sip");
+    else snprintf(o, 8, "sip%d", n);
+    return o;
+}
+
+static int sip_usable(int n)
+{
+    const char *f = sip_file(n);
+    char user[64] = "", domain[64] = "", on[8] = "on";
+    cfg_get(f, "user", user, sizeof user);
+    cfg_get(f, "domain", domain, sizeof domain);
+    cfg_get(f, "enabled", on, sizeof on);
+    return user[0] && domain[0] && strcmp(on, "off");
+}
+
+/* up to six accounts, and which one calls go out from when nothing else is said */
+static void build_accounts(void)
+{
+    char label[40], v[200], choices[24] = "";
+    snprintf(title, sizeof title, "Phone accounts");
+    for (int n = 1; n <= 6; n++) {
+        const char *f = sip_file(n);
+        char user[64] = "", domain[64] = "?", name[40] = "", on[8] = "on";
+        cfg_get(f, "user", user, sizeof user);
+        cfg_get(f, "domain", domain, sizeof domain);
+        cfg_get(f, "label", name, sizeof name);
+        cfg_get(f, "enabled", on, sizeof on);
+        snprintf(label, sizeof label, "Account %d", n);
+        if (!user[0]) snprintf(v, sizeof v, "not set");
+        else snprintf(v, sizeof v, "%s%s%s@%s%s", name, name[0] ? ": " : "", user, domain, strcmp(on, "off") ? "" : " (off)");
+        snprintf(add_menu(label, P_SIP, v)->arg, sizeof rows[0].arg, "%d", n);
+        if (sip_usable(n)) { size_t at = strlen(choices); snprintf(choices + at, sizeof choices - at, "%s%d", at ? "|" : "", n); }
+    }
+    if (strchr(choices, '|')) {
+        static char keep[24];
+        struct row *r;
+        snprintf(keep, sizeof keep, "%s", choices);
+        snprintf(v, sizeof v, "%d", atoi(phone_state("acct.default")));
+        r = add_stored(R_CHOICE, "Usual account for calls", "phone", "default_account", v, 0);
+        r->choices = keep;
+        if (!strstr(keep, r->value)) snprintf(r->value, sizeof r->value, "%s", v);
+    }
+    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
+             "Each account rings this phone. In the dialler, Left and Right choose which one a call goes out from.");
+}
+
+static void build_sip(const char *arg)
 {
     char acc[120];
-    uint32_t c;
-    snprintf(title, sizeof title, "Phone account");
-    add_stored(R_TEXT, "User", "sip", "user", "", 0);
-    add_stored(R_TEXT, "Password", "sip", "password", "", F_PASSWORD);
-    add_stored(R_TEXT, "Domain", "sip", "domain", "", 0);
-    add_stored(R_TEXT, "Server or proxy (optional)", "sip", "outbound_proxy", "", 0);
-    add_stored(R_TEXT, "Login name, if not the user", "sip", "auth_user", "", 0);
-    add_stored(R_TEXT, "Name shown to others", "sip", "display_name", "", 0);
-    add_stored(R_CHOICE, "Transport", "sip", "transport", "udp", 0)->choices = "udp|tcp|tls";
-    phone_account_text(acc, sizeof acc, &c);
-    add_info("Now", acc);
+    int n = atoi(arg);
+    const char *f = sip_file(n < 1 ? 1 : n);
+    if (n < 1) n = 1;
+    snprintf(title, sizeof title, "Account %d", n);
+    add_stored(R_TEXT, "User", f, "user", "", 0);
+    add_stored(R_TEXT, "Password", f, "password", "", F_PASSWORD);
+    add_stored(R_TEXT, "Domain", f, "domain", "", 0);
+    add_stored(R_TEXT, "Server or proxy (optional)", f, "outbound_proxy", "", 0);
+    add_stored(R_TEXT, "Login name, if not the user", f, "auth_user", "", 0);
+    add_stored(R_TEXT, "Name shown to others", f, "display_name", "", 0);
+    add_stored(R_CHOICE, "Transport", f, "transport", "udp", 0)->choices = "udp|tcp|tls";
+    add_stored(R_TEXT, "Name on this phone (optional)", f, "label", "", 0);
+    add_stored(R_TEXT, "Voicemail number (the Message key)", f, "voicemail", "", F_DIGITS);
+    add_stored(R_TOGGLE, "In use", f, "enabled", "on", 0);
+    snprintf(acc, sizeof acc, "reg.%d", n);
+    const char *reg = phone_state(acc);
+    add_info("Now", !strcmp(phone_state("sip"), "up") ? (!strcmp(reg, "ok") ? "registered" : !strcmp(reg, "fail") ? "not registered" :
+             !strcmp(reg, "trying") ? "registering" : "not in use") : "no phone service");
+    if (cfg_str(f, "user", "")[0] || cfg_str(f, "domain", "")[0])
+        snprintf(add_action("Remove this account", A_ACCOUNT_REMOVE, "")->def, sizeof rows[0].def, "%s", f);
+    rows[nrows - 1].flags |= rows[nrows - 1].kind == R_ACTION ? F_DANGER : 0;
 }
 
 static void build_net(void)
@@ -836,7 +907,8 @@ static void rebuild(void)
     nrows = 0;
     switch (stack[depth].page) {
     case P_ROOT: build_root(); break;
-    case P_SIP: build_sip(); break;
+    case P_ACCOUNTS: build_accounts(); break;
+    case P_SIP: build_sip(stack[depth].arg); break;
     case P_NET: build_net(); break;
     case P_TIME: build_time(); break;
     case P_TZ: build_tz(); break;
@@ -911,7 +983,10 @@ void settings_close(void)
 
 static void mark_dirty(const char *file)
 {
-    if (!strcmp(file, "sip") || !strcmp(file, "network") || !strcmp(file, "access")) snprintf(dirty, sizeof dirty, "%s", file);
+    if (!strcmp(file, "network") || !strcmp(file, "access")) snprintf(dirty, sizeof dirty, "%s", file);
+    /* any account's file: baresip is restarted once, with all of them */
+    if (!strncmp(file, "sip", 3)) snprintf(dirty, sizeof dirty, "sip");
+    if (!strcmp(file, "phone")) run_apply("phone");
     if (!strncmp(file, "apps/", 5) && !strcmp(app_id(), file + 5)) app_quit();   /* it restarts with the new values */
 }
 
@@ -1018,6 +1093,14 @@ static void do_action(const struct row *r)
         door_password[0] = 0;
         run_apply("access-door-close");
         break;
+    case A_ACCOUNT_REMOVE:
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_CONFIRM;
+        ov.act = A_ACCOUNT_REMOVE;
+        snprintf(ov.arg, sizeof ov.arg, "%s", r->def);
+        snprintf(ov.title, sizeof ov.title, "Remove this account?");
+        snprintf(ov.text, sizeof ov.text, "Its user, password and server are forgotten.");
+        break;
     case A_FORGET_KEYS:
         memset(&ov, 0, sizeof ov);
         ov.kind = O_CONFIRM;
@@ -1051,6 +1134,16 @@ static void confirmed(enum action act, const char *arg)
         ov.kind = O_DOOR;
         break;
     case A_FORGET_KEYS: run_apply("access-forget-keys"); break;
+    case A_ACCOUNT_REMOVE: {
+        char path[400];
+        if (strncmp(arg, "sip", 3) || strchr(arg, '/')) break;
+        snprintf(path, sizeof path, "%s/%s", opt.config, arg);
+        unlink(path);
+        logmsg("settings: account file %s removed", arg);
+        snprintf(dirty, sizeof dirty, "sip");
+        pop();
+        break;
+    }
     default: break;
     }
 }

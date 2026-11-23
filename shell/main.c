@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -39,8 +40,8 @@ struct options opt = {
     .access = "/run/t48-access",
 };
 
-enum screen { SCR_IDLE, SCR_LAUNCHER, SCR_APP, SCR_CALL, SCR_MESSAGE, SCR_HISTORY, SCR_SETTINGS };
-static const char *const screen_names[] = {"idle", "launcher", "app", "call", "message", "history", "settings"};
+enum screen { SCR_IDLE, SCR_LAUNCHER, SCR_APP, SCR_CALL, SCR_MESSAGE, SCR_HISTORY, SCR_SETTINGS, SCR_CONTACTS };
+static const char *const screen_names[] = {"idle", "launcher", "app", "call", "message", "history", "settings", "contacts"};
 
 static const struct backend *be;
 static uint32_t ui_px[SW * SH];
@@ -55,7 +56,7 @@ static int sel;                      /* launcher: selected app */
 static char pending_id[64];          /* app to start once the old one has gone */
 static char msg_title[96], msg_text[200];
 static long long x_deadline;         /* in an app: when a held X becomes Home; 0 if X is up */
-static char idle_shown[320];         /* time, date, network and account as last drawn, to redraw only on a change */
+static char idle_shown[700];         /* time, date, network and account as last drawn, to redraw only on a change */
 static volatile sig_atomic_t stopping;
 static int exit_status;
 static int chld_pipe[2];
@@ -73,6 +74,16 @@ void logmsg(const char *fmt, ...)
     vfprintf(stderr, fmt, ap);
     va_end(ap);
     fputc('\n', stderr);
+}
+
+/* make a folder, and those above it, for the shell's own files */
+void shell_mkdirs(const char *path)
+{
+    char p[300];
+    snprintf(p, sizeof p, "%s", path);
+    for (char *q = p + 1; *q; q++)
+        if (*q == '/') { *q = 0; mkdir(p, 0755); *q = '/'; }
+    mkdir(p, 0700);
 }
 
 const char *shell_screen_name(void) { return screen_names[scr]; }
@@ -133,12 +144,16 @@ void ui_button(int x, int y, int w, int h, const char *label, uint32_t fill)
     t48_text_centre(&ui, x + w / 2, y + (h - t48_font_bold.height) / 2, &t48_font_bold, bright ? C_BG : C_TEXT, label);
 }
 
-#define IDLE_BTN_X 118
+/* five buttons along the bottom of the idle screen */
 #define IDLE_BTN_Y 392
-#define IDLE_BTN_W 180
+#define IDLE_BTN_W 144
 #define IDLE_BTN_H 56
-#define IDLE_CALLS_X 310
-#define IDLE_SETTINGS_X 502
+#define IDLE_BTN_X(i) (20 + (i) * (IDLE_BTN_W + 10))
+enum { IB_APPS, IB_CALLS, IB_CONTACTS, IB_DND, IB_SETTINGS };
+/* one line for each account, when there is more than one */
+#define ACC_Y 288
+#define ACC_H 36
+#define ACC_MAX 6
 
 static void idle_text(char *out, size_t n)
 {
@@ -151,7 +166,31 @@ static void idle_text(char *out, size_t n)
     ui_network_status(net, sizeof net, &up);
     phone_account_text(acc, sizeof acc, &c);
     size_t k = strftime(out, n, "%H:%M|%A %e %B %Y|", &tm);
-    snprintf(out + k, n - k, "%s|%s|%d", net, acc, phone_missed());
+    k += (size_t)snprintf(out + k, n - k, "%s|%s|%d|%d|%d", net, acc, phone_missed(), phone_messages(), phone_dnd());
+    for (int i = 0; i < ACC_MAX && k < n; i++) {
+        char line[80];
+        int def;
+        if (!phone_account_line(i, line, sizeof line, &c, &def)) break;
+        k += (size_t)snprintf(out + k, n - k, "|%s %x %d", line, (unsigned)c, def);
+    }
+}
+
+/* where the k-th of n account lines goes: a row of up to three, or two rows */
+static void acc_box(int k, int n, int *x, int *y, int *w)
+{
+    int per = n > 3 ? 3 : n, row = k / 3, in_row = row == 0 ? per : n - 3;
+    *w = n > 3 ? 248 : n == 3 ? 248 : 300;
+    *x = (SW - in_row * *w - (in_row - 1) * 8) / 2 + (k % 3) * (*w + 8);
+    *y = ACC_Y - (n > 3 ? 40 : 0) + row * (ACC_H + 4);
+}
+
+/* a rounded label in the middle of the idle screen's row of notices; returns the x after it */
+static int notice(int x, int y, const char *text, uint32_t fill)
+{
+    int w = t48_text_width(&t48_font_bold, text) + 44;
+    t48_round_fill(&ui, x, y, w, 42, 21, fill);
+    t48_text_centre(&ui, x + w / 2, y + (42 - t48_font_bold.height) / 2, &t48_font_bold, C_BG, text);
+    return x + w + 12;
 }
 
 static void draw_idle(void)
@@ -167,17 +206,42 @@ static void draw_idle(void)
     ui_status_bar(NULL);
     t48_text_centre(&ui, SW / 2, 106, &t48_font_huge, C_TEXT, hm);
     t48_text_centre(&ui, SW / 2, 248, &t48_font_head, C_DIM, date);
-    if (phone_missed()) {
-        char b[40];
-        snprintf(b, sizeof b, "%d missed call%s", phone_missed(), phone_missed() == 1 ? "" : "s");
-        int w = t48_text_width(&t48_font_bold, b) + 44;
-        t48_round_fill(&ui, (SW - w) / 2, 312, w, 42, 21, C_BAD);
-        t48_text_centre(&ui, SW / 2, 312 + (42 - t48_font_bold.height) / 2, &t48_font_bold, C_BG, b);
+    /* the accounts, when there are several: which are registered, and a touch dials from one */
+    int naccts = phone_accounts(), several = naccts > 1;
+    for (int i = 0; several && i < ACC_MAX; i++) {
+        char line[80];
+        uint32_t c;
+        int def, x, y, w;
+        if (!phone_account_line(i, line, sizeof line, &c, &def)) break;
+        acc_box(i, naccts, &x, &y, &w);
+        t48_round_fill(&ui, x, y, w, ACC_H, 10, C_PANEL);
+        t48_round_fill(&ui, x + 12, y + 13, 10, 10, 5, c);
+        t48_text_fit(&ui, x + 30, y + (ACC_H - t48_font_normal.height) / 2, w - (def ? 96 : 40), &t48_font_normal, C_TEXT, line);
+        if (def) t48_text_right(&ui, x + w - 10, y + (ACC_H - t48_font_small.height) / 2, &t48_font_small, C_ACCENT, "usual");
     }
-    ui_button(IDLE_BTN_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, "Apps", C_PANEL);
-    ui_button(IDLE_CALLS_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, "Calls", C_PANEL);
-    ui_button(IDLE_SETTINGS_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, "Settings", C_PANEL);
-    t48_text_centre(&ui, SW / 2, 456, &t48_font_small, C_FAINT, "OK for apps, Up for calls, Down for settings, or just dial");
+    /* notices: missed calls, voice messages, do not disturb */
+    char note[3][48];
+    uint32_t fill[3];
+    int nn = 0, total = 0, ny = several ? 336 : 312;
+    if (phone_missed()) {
+        snprintf(note[nn], sizeof note[0], "%d missed call%s", phone_missed(), phone_missed() == 1 ? "" : "s");
+        fill[nn++] = C_BAD;
+    }
+    if (phone_messages()) {
+        snprintf(note[nn], sizeof note[0], "%d new message%s", phone_messages(), phone_messages() == 1 ? "" : "s");
+        fill[nn++] = C_ACCENT;
+    }
+    if (phone_dnd()) {
+        snprintf(note[nn], sizeof note[0], "Do not disturb");
+        fill[nn++] = C_BAD;
+    }
+    for (int i = 0; i < nn; i++) total += t48_text_width(&t48_font_bold, note[i]) + 44 + (i ? 12 : 0);
+    for (int i = 0, x = (SW - total) / 2; i < nn; i++) x = notice(x, ny, note[i], fill[i]);
+    static const char *const labels[5] = {"Apps", "Calls", "Contacts", "DND", "Settings"};
+    for (int i = 0; i < 5; i++)
+        ui_button(IDLE_BTN_X(i), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, i == IB_DND && phone_dnd() ? "DND on" : labels[i],
+                  i == IB_DND && phone_dnd() ? C_BAD : C_PANEL);
+    t48_text_centre(&ui, SW / 2, 456, &t48_font_small, C_FAINT, "OK apps, Up calls, Left contacts, Right do not disturb, Down settings, or just dial");
 }
 
 /* launcher grid: 4 across, 2 down, a page at a time */
@@ -288,6 +352,7 @@ static void redraw(void)
     case SCR_MESSAGE: draw_message(); break;
     case SCR_APP: draw_starting(); break;
     case SCR_SETTINGS: settings_draw(); break;
+    case SCR_CONTACTS: contacts_draw(); break;
     }
     phone_draw_overlay();
     be->flush(ui_px, SW, 0, 0, SW, SH);
@@ -498,6 +563,9 @@ void shell_key(int code, int down)
     case SCR_SETTINGS:
         settings_key(code, down);
         break;
+    case SCR_CONTACTS:
+        contacts_key(code, down);
+        break;
     }
 }
 
@@ -511,17 +579,31 @@ void shell_touch(int state, int x, int y)
     if (backlight_touch(state)) return;
     if (scr == SCR_APP) { app_touch(state, x, y); return; }
     if (scr == SCR_SETTINGS) { settings_touch(state, x, y); return; }
+    if (scr == SCR_CONTACTS) { contacts_touch(state, x, y); return; }
     if (state != T48_TOUCH_DOWN) return;
     if (scr == SCR_CALL) {
         phone_touch(x, y);
     } else if (scr == SCR_HISTORY) {
         phone_history_touch(x, y);
-    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
+    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_APPS), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
         shell_key(T48_KEY_OK, 1);
-    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_CALLS_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
+    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_CALLS), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
         phone_open_history();
-    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_SETTINGS_X, IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
+    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_CONTACTS), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
+        contacts_open(NULL);
+    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_DND), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
+        phone_toggle_dnd();
+    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_SETTINGS), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
         shell_key(T48_KEY_DOWN, 1);
+    } else if (scr == SCR_IDLE && phone_accounts() > 1) {
+        for (int i = 0; i < ACC_MAX; i++) {
+            char line[80];
+            uint32_t c;
+            int def, ax, ay, aw, acct = phone_account_line(i, line, sizeof line, &c, &def);
+            if (!acct) break;
+            acc_box(i, phone_accounts(), &ax, &ay, &aw);
+            if (ui_inside(x, y, ax, ay, aw, ACC_H)) { phone_dial_from(acct - 1); return; }
+        }
     } else if (scr == SCR_MESSAGE && ui_inside(x, y, MSG_BTN_X, MSG_BTN_Y, MSG_BTN_W, MSG_BTN_H)) {
         show(SCR_LAUNCHER);
     } else if (scr == SCR_LAUNCHER) {
@@ -552,7 +634,7 @@ void shell_phone_screen(int want)
     if (want) backlight_wake("the phone");
     if (want && scr != SCR_CALL) {
         /* calls come first: whatever is showing gives way at once */
-        under_call = scr == SCR_HISTORY ? SCR_IDLE : scr;
+        under_call = scr == SCR_HISTORY || scr == SCR_CONTACTS ? SCR_IDLE : scr;
         if (scr == SCR_APP) {
             if (app_state() == APP_RUNNING) app_pause();
             else { app_quit(); under_call = SCR_LAUNCHER; }
@@ -580,13 +662,20 @@ void shell_show_history(int on)
     else if (!on && scr == SCR_HISTORY) show(SCR_IDLE);
 }
 
+void shell_show_contacts(int on)
+{
+    if (on && scr != SCR_CALL && scr != SCR_APP) show(SCR_CONTACTS);
+    else if (!on && scr == SCR_CONTACTS) show(SCR_IDLE);
+}
+
 const char *shell_state(const char *key)
 {
     static const char *const app_states[] = {"none", "starting", "running", "pausing", "stopped", "quitting"};
     if (!strcmp(key, "screen")) return screen_names[scr];
     if (!strcmp(key, "app")) return app_states[app_state()];
     if (!strcmp(key, "appid")) return app_id()[0] ? app_id() : "-";
-    const char *v = settings_state(key);
+    const char *v = contacts_state(key);
+    if (!v) v = settings_state(key);
     if (!v) v = backlight_state(key);
     return v ? v : phone_state(key);
 }
@@ -720,6 +809,7 @@ int main(int argc, char **argv)
         if ((t = sipc_timeout(now)) >= 0 && t < wait) wait = t;
         if ((t = audioc_timeout(now)) >= 0 && t < wait) wait = t;
         if (scr == SCR_SETTINGS && (t = settings_timeout(now)) >= 0 && t < wait) wait = t;
+        if (scr == SCR_CONTACTS && (t = contacts_timeout(now)) >= 0 && t < wait) wait = t;
         if ((t = backlight_timeout(now)) >= 0 && t < wait) wait = t;
         if (x_deadline && x_deadline - now < wait) wait = (int)(x_deadline > now ? x_deadline - now : 0);
 
@@ -760,6 +850,7 @@ int main(int argc, char **argv)
         audioc_tick(now);
         phone_tick(now);
         if (scr == SCR_SETTINGS) settings_tick(now);
+        if (scr == SCR_CONTACTS) contacts_tick(now);
         be->tick(now);
         backlight_tick(now);
         if (x_deadline && now >= x_deadline && scr == SCR_APP) go_home();
