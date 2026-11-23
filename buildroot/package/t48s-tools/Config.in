@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config BR2_PACKAGE_T48S_TOOLS
+	bool "t48s-tools"
+	help
+	  Our test programs for the T48S, from native/ in this repo:
+	  keytest, touchtest, membanner, cpubench, waterfall.
+
+	  Building the screen fonts needs python3 with Pillow and the
+	  DejaVu fonts on the build host (python3-pil, fonts-dejavu-core).

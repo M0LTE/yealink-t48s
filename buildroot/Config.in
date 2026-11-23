@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+source "$BR2_EXTERNAL_T48S_PATH/package/t48s-tools/Config.in"
