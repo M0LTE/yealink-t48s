@@ -18,7 +18,7 @@ Issue [#38](https://github.com/M0LTE/yealink-t48s/issues/38). A feasibility spik
 - **There is no platform code.** One small patch (`patches/`) adds a Kconfig entry that switches on the standard drivers the SoC needs. The parts are ordinary ARM ones and the kernel's own drivers run them: PL192 interrupt controllers, SP804 timers, PL011 serial ports.
 - **No clock driver.** U-Boot sets up the PLLs; the device tree states the rates it leaves.
 - **The configuration starts from nothing** (`allnoconfig` plus `t48s.config`), because the kernel has to fit a 2.5 MB flash slot.
-- **No flash driver yet**, on purpose: `build.sh` refuses to build a configuration that has one, until the NAND driver is ported and checked (issue #51).
+- **The flash driver writes only our `/data` range**, like the one in `kernel/`: see [Flash](#flash) below. `build.sh` stops if the configuration holds any other way to the flash.
 
 ## Building
 
@@ -27,9 +27,14 @@ docker build -t t48s-kbuild6:trixie kernel6
 docker run --rm -u $(id -u):$(id -g) -v $PWD:/w -w /w -e ROOTFS=/w/rootfs.cpio.gz t48s-kbuild6:trixie sh kernel6/build.sh /w/work
 ```
 
-`ROOTFS` is Buildroot's root filesystem (`buildroot/`), as for `kernel/build.sh`. The result is `work/zImage-t48s`: the compressed kernel with the device tree on the end and the root filesystem inside. A rebuild after changing a driver or the device tree takes well under a minute, because the source tree is kept.
+`ROOTFS` is Buildroot's first stage or root filesystem (`buildroot/`), as for `kernel/build.sh`; the same one serves both kernels. The result is `work/zImage-t48s`: the compressed kernel with the device tree on the end and the root filesystem inside. A rebuild after changing a driver or the device tree takes well under a minute, because the source tree is kept.
 
-For now `initramfs-overlay/` replaces the root filesystem's start-up script with a short one that brings up only what this kernel has drivers for.
+```
+ROOTFS=firststage.cpio SYSTEM=system.img OUT=Image6-kexec   # the whole system, for kexec (what CI publishes)
+ROOTFS=firststage.cpio SLOT=1                               # first stage alone; fails if over the 2.5 MB kernel slot
+```
+
+CI (`.github/workflows/build.yml`) builds both of those after the 3.6 image, from the same first stage and system image, and publishes `Image6-kexec` beside `Image-kexec`.
 
 ## Booting
 
@@ -47,7 +52,7 @@ The loader copies the file to 0x00408000 and jumps to it. This file is a self-ex
 
 ## Status (2026-11-23)
 
-**It runs on the phone.** Started from Yealink's firmware by the unchanged loader, Linux 6.18.65 reaches the shell prompt about 10 seconds after the jump, and the whole system built against 6.18 headers (first stage, system image, `t48-shell` on the screen, the audio service, SSH) comes up on it. `reboot` works and lands in Yealink 55 seconds later.
+**It runs on the phone, with `/data` in flash.** Started from Yealink's firmware by the unchanged loader, Linux 6.18.65 reaches the shell prompt about 10 seconds after the jump, and the whole system built against 6.18 headers (first stage, system image, `t48-shell` on the screen, the audio service, SSH) comes up on it. `reboot` works and lands in Yealink 55 seconds later.
 
 | Part | How | Checked on the phone |
 |---|---|---|
@@ -55,7 +60,7 @@ The loader copies the file to 0x00408000 and jumps to it. This file is a self-ex
 | RAM | 118 MB of the 124 MB; the top 6 MB are the frame buffers | yes (115.6 MB free to use; the 144 KB just under the frame buffers are left out, as on 3.6) |
 | GPIO | `drivers/gpio-bcmring.c`, with interrupts | yes: lamps through it, pen-down interrupt delivered |
 | Screen | the kernel's simple framebuffer on U-Boot's picture; console and `/dev/fb0` | yes: the shell draws on it |
-| Watchdog, reset | the kernel's SP805 driver with `patches/0002` | yes: `/dev/watchdog`, stops on close, `reboot` resets |
+| Watchdog, reset | the kernel's SP805 driver with `patches/0002`; `t48-watchdog` uses `/dev/watchdog` | yes: fed by `t48-watchdog`; off for 50 s without a reset; a frozen feeder resets the phone within the 30 s; `back-to-yealink` and `reboot` reset |
 | Key lamps | the kernel's `gpio-leds`, same names | by reading the pins back, not by eye |
 | Holtek chip, message lamp | `drivers/t48s_holtek.c` | the chip answers and its watchdog is turned off; the lamp not by eye |
 | Backlight | `drivers/t48s_backlight.c` | yes, by reading the register back |
@@ -63,20 +68,43 @@ The loader copies the file to 0x00408000 and jumps to it. This file is a self-ex
 | Touchscreen | `drivers/t48s_touch.c` | the chip answers; a test touch opens Settings; no finger yet |
 | Ethernet | `drivers/t48s_eth.c`, bound from the device tree | yes: DHCP, SSH, a 138 MB transfer |
 | Audio | `drivers/t48s_audio.c`, bound from the device tree | recording yes (16000.9 frames/s, no errors); playback not tried |
-| Flash | `drivers/t48s_nand.c`, read-only, with `NAND=1` | yes: the whole chip read in 51 s, no bad blocks; every partition Yealink does not rewrite is identical, data and spare bytes, to the dump made under 3.6 |
+| Flash | `drivers/t48s_nand.c`: reads everything, writes only `/data`'s range; UBI and UBIFS | yes: see [Flash](#flash) |
+| U-Boot's BOOTMODE flag | `kernel/drivers/t48s_bootmode.c`, the same file as under 3.6 | reads `none`, as it should after a kexec start; a live start not tried |
 
 Two more things were tried and work: the kernel's own `spi-pl022` and `ads7846` drivers find and talk to the touch chip, with pen-down as a GPIO interrupt (`dts/bcm11188-yealink-t48s-ads7846.dts` with `ads7846.config`). They are not the default because the input device then has another name and none of the test hooks our tools use.
 
 DMA: both users (Ethernet on controller 1, audio on controller 0) program their channels directly, as on 3.6. The kernel's `dw_dmac` driver was not needed, and nothing else touches either controller now, so the 3.6 patches that kept the old platform code off controller 0 have no counterpart here.
 
-Size: 2.01 MB compressed with the first stage and every driver above, against the 2.5 MB kernel slot (1.46 MB for the kernel alone).
+Size: 2,147,794 bytes compressed with the first stage, every driver above, UBI and UBIFS, against the 2,621,440 of the kernel slot: 0.45 MB to spare. (1.60 MB for the kernel alone.)
 
-Not done yet:
+## Flash
 
-- Writing the flash (`/data` in UBI). This kernel cannot write it at all, so `/data` is in RAM.
-- Userspace still reaches the watchdog through `/dev/mem`; it works, and can move to `/dev/watchdog` when 3.6 goes.
-- Someone at the phone: real key presses, the hook, a finger on the screen, the lamps by eye, sound out.
-- A cold start through U-Boot (only the kexec path has been run). U-Boot passes no device tree; the appended one is used.
-- CI.
+`drivers/t48s_nand.c` is the 3.6 driver ([docs/flash.md](../docs/flash.md)) on the current NAND layer, with the same rule: it reads the whole chip and can erase and program only 0x06a80000 to 0x07200000, the 60 blocks that hold `/data`. The range is compiled in. The same three layers each check the address themselves (chip commands, the NAND layer's write hooks, the MTD entry points); a page must read as erased before it is programmed, its error-correction bytes are computed in software, and it is read back and compared afterwards. No bad block table in flash.
+
+One thing is new. **Every time it starts, the driver tries to break its own rule**: 167 attempts to erase or program places that are not ours (a block in every other partition, the blocks either side of our range, raw writes, spare-byte writes, commands it never sends), put to each layer separately, the lowest one as if the layers above had failed. Each must be refused with not one byte sent to the chip's command, address or data latches, which the driver counts. If any attempt gets through, there is no flash at all. The result is in the boot log and in `/sys/module/t48s_nand/parameters/selftest`.
+
+UBI and UBIFS are configured as under 3.6 (LZO and zlib, two blocks reserved for bad ones) and with nothing 3.6 could not read: no zstd, no encryption, no authentication, no fastmap. `build.sh` checks.
+
+Checked on the phone, 2026-11-23, against the `/data` that 3.6 made and has been using:
+
+- before attaching, 6.18's read of the range matched 3.6's dump page for page, apart from the 11 pages 3.6 wrote after the dump;
+- 6.18 attached it without writing anything (0 pages, 0 erases) and sees the same layout 3.6 does (60 blocks, 56 in use, 2 reserved, format w4);
+- every file was identical: the SIP account, the SSH host key, the owner's keys;
+- 6.18 wrote a 900 KB file (446 pages, 3 erases, no errors), and after a reboot **3.6 mounted the same filesystem with no recovery or complaint**, read that file back identical, and wrote one of its own; back under 6.18 both files and everything else were identical. The format stays w4: 6.18 does not upgrade it;
+- a dump taken afterwards, spare bytes included, passes `tools/nandcheck.py ecc`: all 3480 written steps carry the right error-correction bytes, whichever kernel wrote them;
+- from userspace, every other partition refuses to open for writing; the counters show nothing refused and nothing blocked beyond the one reset command at start-up.
+
+A filesystem made fresh by 6.18 would be in a newer format (w5) that 3.6 can only read, so `t48-data format` asks for w4 while both kernels are in use.
+
+## What is left before 3.6 can go (issue #55)
+
+Done here: the flash, the watchdog from userspace, CI, the boot-mode reader, one root filesystem for both kernels.
+
+Needs someone at the phone:
+
+- real key presses, the hook, a finger on the screen, the lamps by eye, sound out of the handset and speaker (the hands-on list is in issue #55);
+- a cold start through U-Boot. Only the kexec start has been run. U-Boot passes no device tree; the appended one is used. A `live` build for 6.18 (a U-Boot image with `t48boot=live`, as `kernel/build.sh live` makes) does not exist yet, and is best written with the phone on the bench in recovery mode.
+
+Then: make 6.18 the default in CI and `tools/ourkernel.sh`, move `t48s_bootmode.c` here, build the root filesystem against 6.18 headers (`buildroot/configs/kernel6.fragment`), drop the `/dev/mem` half of `t48-watchdog`, and remove `kernel/`.
 
 Found on the way, all fixed here: the kernel's unpacker ignores an appended device tree when it works out where RAM starts (`patches/0003`); this SoC's watchdog has its lock register at 0x400 and treats a load of 0 as 2^32 (`patches/0002`); the generic memory-mapped GPIO driver cannot share the pins with drivers that change them directly; programs built against 3.6 headers need `CONFIG_COMPAT_32BIT_TIME` or `sleep` returns at once.

@@ -27,6 +27,8 @@ At boot `rcS` runs `t48-data mount`: if our blocks hold UBI, `/data` comes from 
 
 ## What the driver will write, and what it will not
 
+Both kernels have the same driver with the same rule: `kernel/drivers/t48s_nand.c` (Linux 3.6) and `kernel6/drivers/t48s_nand.c` (Linux 6.18). The 6.18 one also tests the rule against itself at every start, and the two kernels have been checked to mount and write the same `/data` in turn: [kernel6/README.md](../kernel6/README.md#flash).
+
 `kernel/drivers/t48s_nand.c` reads the whole chip and writes **only the ranges compiled into it**; today that is the one above. A range must lie inside `kernel` or `app` or the driver refuses to start. The loader, U-Boot, both environments, the logo and the safe-mode kernel and root filesystem can never be written; nor, today, can anything else of Yealink's.
 
 Three layers each check the address for themselves:

@@ -15,7 +15,7 @@ To boot it, build it into the kernel (`kernel/README.md`), then `tools/ourkernel
 
 ## What is in it
 
-musl, ARM1176 soft-float, Linux 3.6 headers, everything static.
+musl, ARM1176 soft-float, Linux 3.6 headers, everything static. The same files run under Linux 6.18 (`kernel6/`), which CI builds from them too; the one program that cares which kernel it is on, `t48-watchdog`, finds out when it starts.
 
 - busybox (init, DHCP, NTP from the DHCP servers), dropbear (off until the owner turns it on at the screen, key login only: [docs/access.md](../docs/access.md)), curl with mbedTLS and a CA bundle. runit from busybox supervises the services. busybox's UBI tools for `/data` in flash ([docs/flash.md](../docs/flash.md)); no mtd-utils and no raw flash applets, and the kernel driver writes only our own range.
 - `t48-shell` on the screen at boot, with the clock app in `/usr/share/t48/apps` (packages `t48-shell`, `libt48`). The same program is `t48-app` ([docs/apps.md](../docs/apps.md)) and `t48-config` ([docs/settings.md](../docs/settings.md)); `t48-apply` makes the running phone follow a changed settings file. libt48's static library and headers are in staging, so the SDK has them.
