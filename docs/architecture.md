@@ -186,7 +186,7 @@ Issue [#28](https://github.com/M0LTE/yealink-t48s/issues/28). SSH (dropbear) is 
 
 ### The web setup page
 
-Issue [#37](https://github.com/M0LTE/yealink-t48s/issues/37). (2026-11-23: written and tested off the phone, see [web.md](web.md).) A small HTTP server of our own on the LAN, off until the owner turns it on at the screen. A browser pairs by typing a code the screen shows. It uses the same settings store as the Settings screens, and the shell notices changed files by itself. Plain HTTP, and it says so.
+Issue [#37](https://github.com/M0LTE/yealink-t48s/issues/37). (2026-11-23: written, and run on the phone, see [web.md](web.md).) A small HTTP server of our own on the LAN, off until the owner turns it on at the screen. A browser pairs by typing a code the screen shows. It uses the same settings store as the Settings screens, and the shell notices changed files by itself. Plain HTTP, and it says so.
 
 ### Updates
 

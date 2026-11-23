@@ -203,6 +203,11 @@ void watch_tick(long long now)
     if (history) phone_reload_history();
     if (contacts || contacts_late) contacts_late = !contacts_reload();
     if (apps || apps_late) {
+        /* the app that is open was removed or updated: it is closed, as its files have gone */
+        if (app_state() != APP_NONE && app_state() != APP_QUITTING && app_folder_changed()) {
+            logmsg("watch: %s was removed or replaced while open: closing it", app_id());
+            app_quit();
+        }
         apps_late = app_state() != APP_NONE;   /* the list is not changed under a running app */
         if (!apps_late) manifests_scan(opt.apps);
     }

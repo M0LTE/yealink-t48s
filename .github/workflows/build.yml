@@ -6,6 +6,7 @@
 # each of those also updates the rolling pre-release "sdk-latest" (sdk/README.md).
 # No SSH keys go into anything built here, so what it builds starts with SSH off
 # (docs/access.md).
+# A separate quick job, check, runs the shell's and the web setup page's tests.
 name: build
 
 on:
@@ -24,6 +25,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The shell's simulator tests and the web setup page's tests: host gcc and
+  # python3, a few minutes, and nothing to do with the image build below.
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell tests (the simulator scripts)
+        run: make -C shell check
+
+      - name: Web setup page tests (the handlers, then with the shell)
+        run: make -C webconfig check
+
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 150

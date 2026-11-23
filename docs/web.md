@@ -52,7 +52,8 @@ Open that address in a browser. A browser the phone has not seen gets one page o
 - The page writes through the shell's own settings store (`shell/config.c` is compiled into `t48-web`), with the same atomic save. Contacts and the call history are the shell's files in `/data/phone`.
 - **The shell looks at those files once a second** (`shell/watch.c`): about two dozen `stat` calls. A file that is not the one it last saw is read again, by the part of the shell that holds it: accounts, volumes (told to the audio service; nothing is played), the time zone, brightness, contacts, history, the installed apps. If Settings is showing, the page on the screen is built again. An app whose settings changed is closed, as when they are changed on the phone.
 - This also means `t48-config set` from SSH now shows on the screen by itself.
-- For the things the screens hand to `t48-apply` (restart the phone service after an account changes, bring the network up differently, SSH on or off), the web page runs `t48-apply` too. A network change is applied two seconds after the page has answered, so the answer gets back first.
+- An app that is open on the phone is closed when it is removed or updated from the page (or by `t48-app` over SSH): its files have gone.
+- For the things the screens hand to `t48-apply` (restart the phone service after an account changes, bring the network up differently, SSH on or off), the web page runs `t48-apply` too. A network change is applied two seconds after the page has answered, so the answer gets back first. The page is then at the new address, and the browser pairs again there.
 - The other way needs nothing: every page is made from the files at the moment it is asked for.
 
 ## The backup file
@@ -131,6 +132,8 @@ grep pair_code /tmp/t48/run/status    # the code the phone's screen would show
 make -C webconfig check
 ```
 
+CI runs this and `make -C shell check` on every push to main, as the quick job `check` beside the image build ([build.yml](../.github/workflows/build.yml)).
+
 1. **The handlers** ([`tests/test_web.py`](../webconfig/tests/test_web.py)): the real program over HTTP against a temporary settings tree, 23 tests. It does not start with the setting off, and leaves when it is turned off. Without pairing: only the welcome page, every other page sends the browser back to it, every form is refused. Pairing: the code, a wrong code, another browser trying the right code, five tries, asking again too soon, refused at the phone, fifteen wrong tries closing it, another site's form. Paired: forms without the token, with a wrong one, and from another site are refused and change nothing; then every form, good and bad values; contacts in and out as CSV and vCard; apps installed from the test feed, updated, their settings, removed; SSH and keys (a private key, a line with options and junk are refused); and the backup both ways, with and without passwords, with seven kinds of damaged file. Passwords, the code and the cookie are checked to be in no page and no log.
 2. **With the phone's shell** ([`tests/phone.script`](../webconfig/tests/phone.script), run by `with-phone.sh`): the shell as its PC simulator, the real `t48-web`, and a scripted browser. The page is not there until it is turned on at the Access screen; the code appears on the screen; X refuses it; the next one pairs. Then changes made on the web are watched arriving on the phone (time zone, an account, the ringer level while the Sound page is showing, brightness, a contact, the history cleared, an app installed), and changes made on the phone are read back from the web (the volume key, the time zone, SSH). Off at the screen: the page is gone and the browser is a stranger when it comes back.
 3. The same 23 handler tests pass against the phone's own ARM build under qemu: `make -C webconfig CC=.../armcc O=build-arm`, then `RUNNER=qemu-arm SHELL_BUILD=$PWD/shell/build python3 webconfig/tests/test_web.py webconfig/build-arm`.
@@ -143,16 +146,37 @@ make -C webconfig check
 | ![on a mobile phone](img/web-mobile-overview.png) | ![the history on a mobile phone](img/web-mobile-history.png) |
 | ![the ringer level arriving on the phone](img/web-phone-sound.png) | ![a contact arriving on the phone](img/web-phone-contact.png) |
 
-## What needs the phone
+## On the phone
 
-Nothing here has run on the phone yet.
+Run on the real phone on 2026-11-23, with a build of main under Linux 3.6, a real browser (Chromium, driven by Playwright from another computer on the LAN) and the phone's keys and screen worked through `tools/phone-input.sh`. The code was read off a picture of the screen.
 
-1. A boot of an image with it in: the service stays down with the setting off, comes up when it is turned on at the screen, and listens on the phone's address on port 80. The runit part was tried with the phone's busybox under qemu only.
-2. Pairing with a real screen and a real browser on another computer.
-3. An account saved from the page: `t48-apply sip` restarts baresip and it registers.
-4. A fixed address set from the page, and the page found again at the new address.
-5. An app installed from the real feed (HTTPS from the phone), and how long the page waits.
-6. A key pasted in, then `ssh` with it.
+| | |
+|---|---|
+| ![turning it on](img/web-on-phone-confirm.png) | ![on, with the address](img/web-on-phone-on.png) |
+| ![the code](img/web-on-phone-code.png) | ![registered after the account was saved](img/web-on-phone-registered.png) |
+| ![two accounts, one made up](img/web-on-phone-accounts.png) | ![an app from the feed, open](img/web-on-phone-app.png) |
+| ![pairing again at the fixed address](img/web-on-phone-fixed-address.png) | ![off again](img/web-on-phone-off.png) |
+
+| What | How it went |
+|---|---|
+| The service at boot | down with the setting off, nothing on port 80. Turned on at the screen: listening on the phone's address two seconds later |
+| Pairing | the code came up on the screen within a second of the browser asking; typed in, the browser was paired |
+| Account 1 saved from the page (the bench account, password and all) | baresip was restarted and had registered four seconds later; the idle screen showed it |
+| A second account with a made-up server | on the screen at once, "not registered"; removed from the page, gone from the screen |
+| An app from the real feed | Hello, fetched by the phone over HTTPS: the page answered in under two seconds. It opened from the launcher |
+| A key pasted in | `ssh` with that key logged in; removed on the page, it was refused |
+| A backup without passwords | the account is in it, the password is not |
+| A fixed address | the page answered at the new address three seconds after Save, and DHCP came back the same way. The browser has to pair again there: its pairing belongs to the address it was made at |
+| Off | at the screen, and from the page's own button: the service is down and the port is closed |
+
+Four faults showed up there and are fixed:
+
+- **An app removed or updated from the page while it was open on the phone stayed on the screen**, running from files that had gone. The shell now closes it (`shell/watch.c`, and a step in `tests/phone.script`).
+- **After a change of address the phone could not register or be called** until baresip was restarted: baresip listens on the address it finds when it starts. `t48-apply network` and the DHCP script now start it again when the address is a different one. This was there for the Network page on the phone's own screen too.
+- **"SSH is off: turn it on to use it"** after adding a key on a development build, where SSH is always on. The page and the overview now ask the same question the Access page does.
+- **The question on the phone's screen was cut short** ("...shown on this screen ge.."). Shorter words.
+
+And one in the shell that the test rig found: a touch in line with the last touch before the shell was restarted landed in the wrong place, because the kernel sends only the coordinate that changed. The shell asks the kernel for both when it starts (`shell/be_fb.c`).
 
 ## Not done
 

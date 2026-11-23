@@ -1056,7 +1056,7 @@ static void do_action(const struct row *r)
             ov.yes = "Turn on";
             ov.no = "Keep off";
             snprintf(ov.title, sizeof ov.title, "Turn the web page on?");
-            snprintf(ov.text, sizeof ov.text, "Anyone on your network can open it, but only a browser that types a code shown on this screen gets in.");
+            snprintf(ov.text, sizeof ov.text, "Anyone on your network can open it, but only a browser that types a code shown here gets in.");
             snprintf(ov.extra, sizeof ov.extra, "It is plain HTTP: use it on a network you trust.");
         }
         break;

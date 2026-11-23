@@ -15,7 +15,7 @@ Press **Down** on the idle screen, or touch **Settings**. Everything here can al
 | Page | What it sets | Takes effect |
 |---|---|---|
 | Phone accounts | up to six accounts ([phone.md](phone.md#several-accounts)), and which is the usual one for calls. For each: user, password, domain, server or proxy, login name, name shown to others, transport, a short name for this phone's screens, the voicemail number, in use or not, and Remove | on leaving an account's page: baresip is restarted if it is running. The usual account changes at once |
-| Network | DHCP, or a fixed address, netmask, gateway and DNS server | on leaving the page |
+| Network | DHCP, or a fixed address, netmask, gateway and DNS server | on leaving the page. If the address is a different one, baresip is started again, as it listens on the address it started with |
 | Date and time | time zone, from a list | at once, in the shell and in apps started afterwards |
 | Sound | ringer, handset, speakerphone and headset levels, 0 to 15 | at once, through the audio service. Nothing is played. The volume keys change the same levels |
 | Screen | brightness, 1 to 10 | at once ([shell.md](shell.md#the-backlight)). The page also says when the screen dims and goes off |

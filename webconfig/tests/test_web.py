@@ -625,6 +625,17 @@ class Paired(unittest.TestCase):
         self.assertIn("access-forget-keys", p.applied_list())
         self.ok("/access/ssh", {"to": "off"}, "/access")
         self.assertEqual(p.get("access", "ssh"), "off")
+        # a key added while SSH is off says so. Not on a development build, where SSH
+        # is on whatever the setting says (the real phone showed "SSH is off" there)
+        self.assertIn("SSH is off", self.ok("/access/key-add", {"keys": KEY1}, "/access"))
+        self.assertIn("SSH off", b.get("/").body)
+        with open(os.path.join(p.access, "status"), "w") as f:
+            f.write("dev=yes\nssh=on\nhost_key=SHA256:abcDEF123 (ed25519)\ndoor=closed\nkeys=1\n")
+        self.assertNotIn("SSH is off", self.ok("/access/key-add", {"keys": KEY2}, "/access"))
+        self.assertIn("SSH on", b.get("/").body)
+        with open(os.path.join(p.access, "status"), "w") as f:
+            f.write("dev=no\nssh=off\nhost_key=SHA256:abcDEF123 (ed25519)\ndoor=closed\nkeys=2\n")
+        self.ok("/access/keys-forget", {"sure": "yes"}, "/access")
         # a second browser, signed out from the first
         other = Browser(p).pair()
         self.assertEqual(p.status()["paired"], "2")

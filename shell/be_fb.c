@@ -124,6 +124,14 @@ static int fb_init(void)
         if (ioctl(dev[DEV_HOOK], EVIOCGKEY(sizeof bits), bits) >= 0 && (bits[KEY_PHONE / 8] & (1 << (KEY_PHONE % 8))))
             shell_hook(1);
     }
+    /* the kernel sends a coordinate only when it changes, so a touch on a line
+     * with the last one before this program started would come without it: ask
+     * where that last one was (seen on the phone after the shell was restarted) */
+    if (dev[DEV_TOUCH] >= 0) {
+        struct input_absinfo a;
+        if (ioctl(dev[DEV_TOUCH], EVIOCGABS(ABS_X), &a) >= 0) raw_x = a.value;
+        if (ioctl(dev[DEV_TOUCH], EVIOCGABS(ABS_Y), &a) >= 0) raw_y = a.value;
+    }
     return 0;
 }
 
