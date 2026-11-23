@@ -1,0 +1,79 @@
+#!/bin/busybox sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The first stage (issue #17, docs/boot.md): the only thing built into the kernel
+# image. It finds the system image, mounts it read-only and hands over to it.
+# If there is none, or it will not start, it stays up as the rescue system:
+# a message on the screen, the network, SSH and a shell on the serial port.
+/bin/busybox mkdir -p /proc /sys /dev /sysroot /run /tmp /sbin /usr/bin /usr/sbin /root
+/bin/busybox --install -s
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+
+say() { echo "t48 boot: $*" > /dev/console; }
+
+rescue() {
+    say "RESCUE: $1"
+    # the loader's watchdog would reset the phone in a minute: turn it off
+    devmem 0x80017c00 32 0x1ACCE551; devmem 0x80017808 32 0; devmem 0x80017c00 32 0
+    hostname t48s-rescue
+    ifconfig lo 127.0.0.1 up
+    ifconfig eth0 up
+    udhcpc -b -q -t 10 -i eth0 -s /etc/udhcpc.script >/dev/null 2>&1 &
+    { date; cat /proc/interrupts /proc/uptime /sys/class/net/eth0/address; dmesg; } > /dev/urandom 2>/dev/null
+    mkdir -p /root/.ssh /run/dropbear
+    chmod 700 /root /root/.ssh
+    dropbearkey -t ed25519 -f /run/dropbear/host >/dev/null 2>&1
+    if [ -s /etc/t48-dev/authorized_keys ]; then
+        # one of our own test builds: its keys
+        cp /etc/t48-dev/authorized_keys /root/.ssh/authorized_keys
+        dropbear -s -r /run/dropbear/host
+        how="SSH: root, with the keys built into this test image"
+    else
+        # anyone else's phone: a password made up now and shown only on the screen
+        pw=$(head -c 64 /dev/urandom | sha256sum | head -c 12)
+        hash=$(printf %s "$pw" | mkpasswd -m sha512 -P 0)
+        sed -i "s|^root:[^:]*:|root:$hash:|" /etc/shadow
+        dropbear -r /run/dropbear/host
+        how="SSH: root, password $pw"
+    fi
+    sleep 8     # for DHCP, so the address can be shown
+    addr=$(ifconfig eth0 | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p')
+    {
+        printf '\033[2J\033[H\n'
+        echo "  T48S open firmware: RESCUE"
+        echo
+        echo "  $1"
+        echo
+        echo "  Address: ${addr:-none (no answer from DHCP)}"
+        echo "  $how"
+        echo "  The serial port has a shell too."
+        echo
+        echo "  To leave: power the phone off and on."
+    } > /dev/tty1 2>/dev/null
+    say "address ${addr:-none}; ${how%%password*}"
+    while :; do setsid sh -c 'exec sh </dev/ttyAMA0 >/dev/ttyAMA0 2>&1'; sleep 1; done
+}
+
+# 1. A system image in RAM beside the kernel: kexec and recovery-mode (live) boots
+# 2. Installed: a system slot in flash (issue #29; not yet)
+IMG=
+[ -f /system.img ] && IMG=/system.img
+[ -n "$IMG" ] || rescue "No system image was found."
+mount -t squashfs -o loop,ro "$IMG" /sysroot 2>/dev/null || rescue "The system image is damaged: it does not mount."
+[ -x /sysroot/sbin/init ] || rescue "The system image has no init."
+
+# what the read-only system needs writable; /data is the system's own business (rcS)
+mount -t tmpfs -o mode=755 tmpfs /sysroot/run
+mount -t tmpfs -o mode=1777 tmpfs /sysroot/tmp
+# our own test builds carry keys beside the first stage (docs/access.md)
+if [ -s /etc/t48-dev/authorized_keys ]; then
+    mount -t tmpfs -o mode=700 tmpfs /sysroot/etc/t48-dev
+    cp /etc/t48-dev/authorized_keys /sysroot/etc/t48-dev/
+    chmod 600 /sysroot/etc/t48-dev/authorized_keys
+fi
+say "starting the system image $IMG"
+mount -o move /dev /sysroot/dev
+umount /proc /sys
+exec switch_root /sysroot /sbin/init

@@ -1,4 +1,19 @@
 # Added to Buildroot's default busybox config: clock from NTP (servers from DHCP)
 CONFIG_NTPD=y
-# No flash or UBI applets while flash access is read-only (issue #5)
+# UBI: attach our part of the flash and make the data volume (issue #29, docs/flash.md).
+# No raw flash applets (nandwrite, flash_eraseall, flashcp): UBI is the only writer.
+CONFIG_UBIATTACH=y
+CONFIG_UBIDETACH=y
+CONFIG_UBIMKVOL=y
+CONFIG_UBIRMVOL=y
+CONFIG_UBIRSVOL=y
+CONFIG_UBIUPDATEVOL=y
 # CONFIG_UBIRENAME is not set
+# runit: every long-running program is supervised (issue #17, docs/boot.md)
+CONFIG_RUNSV=y
+CONFIG_RUNSVDIR=y
+CONFIG_SV=y
+CONFIG_SVC=y
+CONFIG_SVOK=y
+CONFIG_SVLOGD=y
+CONFIG_CHPST=y

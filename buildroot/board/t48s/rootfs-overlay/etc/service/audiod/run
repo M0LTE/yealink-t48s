@@ -1,0 +1,5 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The audio service: the only program that touches the sound hardware (docs/audiod.md)
+exec 2>&1 </dev/null
+exec t48-audiod --backend alsa

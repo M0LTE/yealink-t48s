@@ -3,3 +3,5 @@ export PS1="t48s# "
 TZ=$(t48-config tz 2>/dev/null) && export TZ
 # curl here is built without a default CA bundle
 export CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+# sv status sip, sv restart shell, ... (docs/boot.md)
+export SVDIR=/run/service

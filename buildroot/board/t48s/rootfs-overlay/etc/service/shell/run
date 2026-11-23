@@ -1,0 +1,6 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The screen, keys, hook and touch (docs/shell.md). It finds the audio service
+# and baresip by itself whenever they appear, so it does not wait for them.
+exec 2>&1 </dev/null
+exec t48-shell

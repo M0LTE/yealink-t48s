@@ -4,7 +4,7 @@
 # /data/config/WHAT (docs/settings.md). The shell runs this when a file has
 # been changed on the screen; run it by hand after t48-config set.
 #   network   DHCP, or the fixed address in the file
-#   sip       restart baresip, if it is running
+#   sip       restart baresip
 #   system    nothing to do: the shell follows the time zone by itself
 #   access    SSH on or off (t48-access, docs/access.md); also access-door-open,
 #             access-door-close and access-forget-keys, which the Access page uses
@@ -33,8 +33,11 @@ network)
         udhcpc -b -q -t 10 -i $IF -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 &
     fi ;;
 sip)
-    # only if the phone service is running: this does not start it
-    if pidof baresip >/dev/null; then
+    # baresip reads the account when it starts. Under runit (the phone) the
+    # service is started again; it starts by itself once an account exists
+    if [ -d /run/service/sip ]; then
+        sv -w 8 restart /run/service/sip >/dev/null 2>&1
+    elif pidof baresip >/dev/null; then
         killall baresip
         sleep 1
         t48-sip >>/var/log/t48-sip.log 2>&1 &

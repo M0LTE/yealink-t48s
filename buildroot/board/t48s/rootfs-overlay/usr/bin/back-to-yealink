@@ -1,4 +1,5 @@
 #!/bin/sh
 # reset the board through the SP805 watchdog (2 x 1 s); U-Boot then boots Yealink from flash
 echo "resetting to Yealink..."
+sync; umount -r /data 2>/dev/null
 devmem 0x80017c00 32 0x1ACCE551; devmem 0x80017800 32 25000000; devmem 0x80017808 32 3; devmem 0x80017c00 32 0
