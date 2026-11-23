@@ -48,6 +48,7 @@ sed -i 's/t->u.mem.start = CFG_GLOBAL_RAM_BASE;/t->u.mem.start = 0x00400000; \/*
 grep -q "T48S: to 0x07A00000" arch/arm/mach-bcmring/arch.c
 # drop the UMI and NAND static mappings: they overlap each other and sit inside the
 # 16 MB CHIPC mapping (0x80000000 -> 0xF8000000), and 3.6 BUG()s on overlapping io maps
+# (drivers/t48s_nand.c maps the registers itself)
 sed -i '/IO_DESC(MM_IO_BASE_NAND, SZ_64K)/d; /IO_DESC(MM_IO_BASE_UMI, SZ_64K)/d' arch/arm/mach-bcmring/mm.c
 ! grep -q "MM_IO_BASE_NAND\|MM_IO_BASE_UMI" arch/arm/mach-bcmring/mm.c
 # the UART clocks are registered for "uarta"/"uartb" but the AMBA devices are named
@@ -132,6 +133,9 @@ grep -q "t48s_touch.o" drivers/input/Makefile || echo 'obj-$(CONFIG_INPUT) += t4
 cp ../kernel/drivers/t48s_audio.c sound/arm/t48s_audio.c
 grep -q "SND_T48S" sound/arm/Kconfig || printf '\nconfig SND_T48S\n\tbool "Yealink T48S audio (BCM11188 APM codecs)"\n\tdepends on SND = y\n\tselect SND_PCM\n' >> sound/arm/Kconfig
 grep -q "t48s_audio.o" sound/arm/Makefile || echo 'obj-$(CONFIG_SND_T48S) += t48s_audio.o' >> sound/arm/Makefile
+# the flash, read-only (issue #5): our driver instead of mainline's bcm_umi_nand
+cp ../kernel/drivers/t48s_nand.c drivers/mtd/nand/t48s_nand.c
+grep -q "t48s_nand.o" drivers/mtd/nand/Makefile || echo 'obj-$(CONFIG_MTD_NAND) += t48s_nand.o' >> drivers/mtd/nand/Makefile
 # put the delay loop on an 8-byte boundary. On this ARM1176 the two-instruction loop
 # takes 2 cycles per pass there and 3 at the other word alignment, and where it lands is
 # an accident of the link: unaligned, 3.6 measured 331.77 BogoMIPS against the 498.07
@@ -160,6 +164,14 @@ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- bcmring_defconfig
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kexec-initramfs.config >/dev/null
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig >/dev/null 2>&1 || make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- oldnoconfig >/dev/null
 for o in CONFIG_LEDS_CLASS= CONFIG_LEDS_TRIGGER_TIMER= CONFIG_SND_T48S CONFIG_SND_PCM= CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
+# the flash must stay read-only (issue #5): stop if the configuration holds anything
+# that could write it, or lacks our driver's layer
+for o in MTD_NAND_BCM_UMI MTD_NAND_VERIFY_WRITE MTD_BLOCK MTD_BLOCK_RO MTD_CMDLINE_PARTS \
+         MTD_CONCAT MTD_CFI MTD_UBI MTD_OOPS MTD_SWAP MTD_TESTS FTL NFTL INFTL RFD_FTL SSFDC SM_FTL \
+         JFFS2_FS UBIFS_FS YAFFS_FS MTD_NAND_NANDSIM; do
+    if grep -q "^CONFIG_$o=" .config; then echo "CONFIG_$o is set: the flash must stay read-only" >&2; exit 1; fi
+done
+grep -q "^CONFIG_MTD_NAND=y" .config
 if [ "$VARIANT" = kexec ]; then
     make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j12 Image 2>&1 | tail -n 3
     cp arch/arm/boot/Image ../Image-kexec

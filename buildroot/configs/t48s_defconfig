@@ -17,17 +17,8 @@ BR2_TARGET_GENERIC_ISSUE="Yealink T48S open firmware"
 BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_T48S_PATH)/board/t48s/rootfs-overlay"
 BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_T48S_PATH)/board/t48s/post-build.sh"
 BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_T48S_PATH)/board/t48s/busybox.fragment"
-BR2_PACKAGE_MTD=y
-# BR2_PACKAGE_MTD_FLASHCP is not set
-# BR2_PACKAGE_MTD_FLASH_LOCK is not set
-# BR2_PACKAGE_MTD_FLASH_UNLOCK is not set
-# BR2_PACKAGE_MTD_MTD_DEBUG is not set
-# BR2_PACKAGE_MTD_NANDTEST is not set
-# BR2_PACKAGE_MTD_UBICRC32 is not set
-# BR2_PACKAGE_MTD_UBINIZE is not set
-# BR2_PACKAGE_MTD_UBIRENAME is not set
-# BR2_PACKAGE_MTD_UBIRSVOL is not set
-# BR2_PACKAGE_MTD_UBIBLOCK is not set
+# No mtd-utils while flash access is read-only (issue #5): nothing in the image can
+# erase or write the NAND. native/nandread does the dumps.
 BR2_PACKAGE_CA_CERTIFICATES=y
 BR2_PACKAGE_MBEDTLS=y
 BR2_PACKAGE_LIBCURL=y

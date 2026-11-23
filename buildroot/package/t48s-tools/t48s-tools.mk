@@ -9,7 +9,7 @@ T48S_TOOLS_VERSION = local
 T48S_TOOLS_SITE = $(BR2_EXTERNAL_T48S_PATH)/../native
 T48S_TOOLS_SITE_METHOD = local
 T48S_TOOLS_LICENSE = AGPL-3.0-or-later
-T48S_TOOLS_PROGRAMS = keytest touchtest membanner cpubench waterfall t48rec t48mix
+T48S_TOOLS_PROGRAMS = keytest touchtest membanner cpubench waterfall t48rec t48mix nandread
 
 # -B: the local rsync can carry binaries left in a developer's native/
 define T48S_TOOLS_BUILD_CMDS
