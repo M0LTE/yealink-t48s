@@ -1,0 +1,104 @@
+From: Yealink T48S open firmware <noreply@example.invalid>
+Subject: [PATCH] watchdog: sp805: lock register at 0x400 on the BCM11107 family
+
+Broadcom's BCM11107 family (BCM11188 in the Yealink T48S) has an SP805
+whose block decodes only 11 address bits, so the lock register is at
+offset 0x400, not 0xC00. Select that with the compatible string
+"brcm,bcm11107-wdt".
+
+---
+--- a/drivers/watchdog/sp805_wdt.c
++++ b/drivers/watchdog/sp805_wdt.c
+@@ -23,6 +23,7 @@
+ #include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
++#include <linux/of.h>
+ #include <linux/pm.h>
+ #include <linux/property.h>
+ #include <linux/reset.h>
+@@ -59,6 +60,7 @@
+  * @wdd: instance of struct watchdog_device
+  * @lock: spin lock protecting dev structure and io access
+  * @base: base address of wdt
++ * @lock_reg: offset of the lock register
+  * @clk: (optional) clock structure of wdt
+  * @rate: (optional) clock rate when provided via properties
+  * @adev: amba device structure of wdt
+@@ -68,6 +70,7 @@
+ 	struct watchdog_device		wdd;
+ 	spinlock_t			lock;
+ 	void __iomem			*base;
++	u32				lock_reg;
+ 	struct clk			*clk;
+ 	u64				rate;
+ 	struct amba_device		*adev;
+@@ -138,13 +141,13 @@
+ {
+ 	struct sp805_wdt *wdt = watchdog_get_drvdata(wdd);
+ 
+-	writel_relaxed(UNLOCK, wdt->base + WDTLOCK);
++	writel_relaxed(UNLOCK, wdt->base + wdt->lock_reg);
+ 	writel_relaxed(0, wdt->base + WDTCONTROL);
+ 	writel_relaxed(0, wdt->base + WDTLOAD);
+ 	writel_relaxed(INT_ENABLE | RESET_ENABLE, wdt->base + WDTCONTROL);
+ 
+ 	/* Flush posted writes. */
+-	readl_relaxed(wdt->base + WDTLOCK);
++	readl_relaxed(wdt->base + wdt->lock_reg);
+ 
+ 	return 0;
+ }
+@@ -165,7 +168,7 @@
+ 
+ 	spin_lock(&wdt->lock);
+ 
+-	writel_relaxed(UNLOCK, wdt->base + WDTLOCK);
++	writel_relaxed(UNLOCK, wdt->base + wdt->lock_reg);
+ 	writel_relaxed(wdt->load_val, wdt->base + WDTLOAD);
+ 	writel_relaxed(INT_MASK, wdt->base + WDTINTCLR);
+ 
+@@ -173,10 +176,10 @@
+ 		writel_relaxed(INT_ENABLE | RESET_ENABLE, wdt->base +
+ 				WDTCONTROL);
+ 
+-	writel_relaxed(LOCK, wdt->base + WDTLOCK);
++	writel_relaxed(LOCK, wdt->base + wdt->lock_reg);
+ 
+ 	/* Flush posted writes. */
+-	readl_relaxed(wdt->base + WDTLOCK);
++	readl_relaxed(wdt->base + wdt->lock_reg);
+ 	spin_unlock(&wdt->lock);
+ 
+ 	return 0;
+@@ -200,12 +203,12 @@
+ 
+ 	spin_lock(&wdt->lock);
+ 
+-	writel_relaxed(UNLOCK, wdt->base + WDTLOCK);
++	writel_relaxed(UNLOCK, wdt->base + wdt->lock_reg);
+ 	writel_relaxed(0, wdt->base + WDTCONTROL);
+-	writel_relaxed(LOCK, wdt->base + WDTLOCK);
++	writel_relaxed(LOCK, wdt->base + wdt->lock_reg);
+ 
+ 	/* Flush posted writes. */
+-	readl_relaxed(wdt->base + WDTLOCK);
++	readl_relaxed(wdt->base + wdt->lock_reg);
+ 	spin_unlock(&wdt->lock);
+ 
+ 	clk_disable_unprepare(wdt->clk);
+@@ -247,6 +250,14 @@
+ 		return PTR_ERR(wdt->base);
+ 
+ 	/*
++	 * Broadcom's BCM11107 family decodes only 11 address bits for the
++	 * watchdog, which puts the lock register at 0x400.
++	 */
++	wdt->lock_reg = WDTLOCK;
++	if (of_device_is_compatible(adev->dev.of_node, "brcm,bcm11107-wdt"))
++		wdt->lock_reg = 0x400;
++
++	/*
+ 	 * When driver probe with ACPI device, clock devices
+ 	 * are not available, so watchdog rate get from
+ 	 * clock-frequency property given in _DSD object.

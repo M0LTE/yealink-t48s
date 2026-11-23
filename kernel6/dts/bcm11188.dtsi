@@ -86,6 +86,60 @@
 			clock-names = "timer1", "timer2", "apb_pclk";
 		};
 
+		/*
+		 * Two GPIO banks: a data register and a direction register
+		 * (1 = output) each, no set or clear registers. Pins 0 to 31
+		 * and 32 to 61. Their interrupts are not described yet.
+		 * Which function a pin has is set in the chip control block
+		 * (0x80000118 on, 4 bits per pin); the boot loader does it.
+		 */
+		gpio0: gpio@80004000 {
+			compatible = "brcm,bcm6345-gpio";
+			reg = <0x80004000 4>, <0x80004400 4>;
+			reg-names = "dat", "dirout";
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+		};
+
+		gpio1: gpio@80004800 {
+			compatible = "brcm,bcm6345-gpio";
+			reg = <0x80004800 4>, <0x80004c00 4>;
+			reg-names = "dat", "dirout";
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <30>;
+		};
+
+		/*
+		 * An SP805 whose lock register is at 0x400 (the block decodes
+		 * 11 address bits). Counts the 25 MHz crystal.
+		 */
+		watchdog: watchdog@80017800 {
+			compatible = "brcm,bcm11107-wdt", "arm,sp805", "arm,primecell";
+			arm,primecell-periphid = <0x00141805>;
+			reg = <0x80017800 0x800>;
+			interrupt-parent = <&intc1>;
+			interrupts = <13>;
+			clocks = <&clk_xtal>, <&clk_bus>;
+			clock-names = "wdog_clk", "apb_pclk";
+			status = "disabled";
+		};
+
+		/*
+		 * The CPU port of the on-chip Ethernet switch. Frames move
+		 * through channels 2 (receive) and 3 (transmit) of DMA
+		 * controller 1, a Synopsys DW AHB DMAC at 0x30300000 that the
+		 * driver programs itself.
+		 */
+		ethernet: ethernet@30400000 {
+			compatible = "brcm,bcm11107-esw-cpu";
+			reg = <0x30400000 0xb0000>;
+			interrupts = <10>, <11>;
+			interrupt-names = "rx", "tx";
+			status = "disabled";
+		};
+
 		uarta: serial@80012000 {
 			compatible = "arm,pl011", "arm,primecell";
 			reg = <0x80012000 0x1000>;

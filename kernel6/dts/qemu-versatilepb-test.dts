@@ -3,8 +3,9 @@
  * Not a phone: QEMU's "versatilepb" machine with an ARM1176, described just
  * far enough to smoke-test the T48S kernel configuration and root filesystem
  * on a PC (kernel6/qemu-test.sh). It has the same kinds of parts as the
- * BCM11188 (a VIC, SP804 timers, a PL011) at other addresses, and its RAM
- * starts at 0.
+ * BCM11188 (a VIC, SP804 timers, a PL011) at other addresses. Its RAM starts
+ * at 0, but only what the phone has is declared (from 0x00400000), so the
+ * kernel is placed as on the phone.
  */
 /dts-v1/;
 
@@ -35,9 +36,9 @@
 		};
 	};
 
-	memory@0 {
+	memory@400000 {
 		device_type = "memory";
-		reg = <0x0 0x08000000>;
+		reg = <0x00400000 0x07c00000>;
 	};
 
 	clk_1m: clk-1m {

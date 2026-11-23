@@ -4,6 +4,7 @@
  */
 /dts-v1/;
 
+#include <dt-bindings/gpio/gpio.h>
 #include "bcm11188.dtsi"
 
 / {
@@ -29,6 +30,43 @@
 		reg = <0x00400000 0x07c00000>;
 	};
 
+	/*
+	 * The screen: the boot loader leaves the SoC's PL111 showing 800x480,
+	 * 32 bits per pixel, from the first of the frame buffers below. We
+	 * only draw into it.
+	 */
+	framebuffer {
+		compatible = "simple-framebuffer";
+		memory-region = <&fb_mem>;
+		width = <800>;
+		height = <480>;
+		stride = <3200>;
+		format = "x8r8g8b8";
+	};
+
+	/* the lamps inside three keys; the message lamp is on the Holtek chip */
+	leds {
+		compatible = "gpio-leds";
+
+		led-headset {
+			label = "t48s:green:headset";
+			gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
+			default-state = "off";
+		};
+
+		led-mute {
+			label = "t48s:red:mute";
+			gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
+			default-state = "off";
+		};
+
+		led-speaker {
+			label = "t48s:green:speaker";
+			gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;
+			default-state = "off";
+		};
+	};
+
 	reserved-memory {
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -42,5 +80,14 @@
 };
 
 &uarta {
+	status = "okay";
+};
+
+&watchdog {
+	status = "okay";
+	timeout-sec = <30>;
+};
+
+&ethernet {
 	status = "okay";
 };
