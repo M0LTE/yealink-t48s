@@ -1,7 +1,7 @@
 #!/bin/sh
 # /sbin/init of the rescue ramdisk (tools/mkrescue.sh). Booted with Yealink's own
 # kernel through U-Boot's recovery mode, so Yealink's NAND and yaffs2 drivers are
-# available. Puts our boot hook, SSH and t48ui back on the phone, clears BOOTMODE,
+# available. Puts our boot hook and SSH back on the phone, clears BOOTMODE,
 # then resets the board through the watchdog. Output goes to the serial port.
 export PATH=/bin:/usr/sbin
 /bin/busybox --install -s /bin
