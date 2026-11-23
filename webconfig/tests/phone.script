@@ -1,0 +1,199 @@
+# The web setup page and the phone's own screens (issue 37): the page is off
+# until it is turned on here, a browser pairs with a code this screen shows,
+# and what one side changes the other shows. Run by with-phone.sh: $B is the
+# browser (browser.py), and the real t48-web is started by apply.sh.
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/1/index.json
+run sh $T48_TESTS/apply.sh access
+wait 300
+expect idle
+
+# ---- off until the owner turns it on at the screen ----
+run ! curl -s -m 2 -o /dev/null http://127.0.0.1:$WEB_PORT/
+touch 700 420
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Access
+key ok
+expectstate settings.page access
+# under SSH's own rows
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Web_setup_page
+expectstate settings.value off
+shot shots/web-phone-off.png
+key ok
+expectstate overlay confirm
+expectstate overlay.title Turn_the_web_page_on?
+shot shots/web-phone-confirm.png
+key x
+expectstate cfg.access.web (unset)
+key ok
+key ok
+expectstate overlay none
+expectstate cfg.access.web on
+wait 1500
+run $B expect / "Show a code on the phone"
+run $B expect / "plain HTTP"
+# nothing else without pairing
+run $B absent /accounts "Account 1"
+expectstate settings.value on
+expectstate web.paired 0
+shot shots/web-phone-on.png
+
+# ---- a browser asks: the code is on the screen, and X refuses it ----
+expectstate web.pairing none
+run $B start
+waitstate web.pairing shown 3000
+shot shots/web-phone-code.png
+run grep pair_code= simdata/web/status | cut -d= -f2 > simdata/code.refused
+key x
+expectstate web.pairing none
+expectstate settings.page access
+wait 1500
+run ! grep -q pair_code simdata/web/status
+run $B finish-refused - "$(cat simdata/code.refused)"
+
+# ---- again, and this time the code is typed into the page ----
+wait 2000
+run $B start
+waitstate web.pairing shown 3000
+run $B finish simdata/web/status
+waitstate web.pairing none 3000
+waitstate web.paired 1 3000
+run $B expect / "Overview"
+shot shots/web-phone-paired.png
+key x
+key x
+expect idle
+
+# ---- changed on the web, shown on the phone ----
+# the time zone: the idle clock follows
+expectstate tz UTC0
+run $B post /time zone=Europe/Berlin
+waitstate tz CET-1CEST,M3.5.0,M10.5.0/3 3000
+# an account: the phone has one, and Settings names it
+expectstate accounts 0
+run $B post /accounts/save n=1 user=1001 domain=pbx.example.org password=hunter2 transport=udp enabled=on label=Home
+waitstate accounts 1 3000
+shot shots/web-phone-idle-account.png
+touch 700 420
+expectstate settings.row Phone_accounts
+expectstate settings.value 1001@pbx.example.org
+# while Settings is showing: the ringer level and the brightness follow under the owner's eyes
+key down
+key down
+key down
+key ok
+expectstate settings.page sound
+expectstate settings.row Ringer
+expectstate settings.value 10
+run $B post /sound ringer=3 handset=9 speaker=12 headset=7
+waitstate settings.value 3 3000
+shot shots/web-phone-sound.png
+key x
+run $B post /screen brightness=4 dim_seconds=120 off_seconds=1800
+waitstate backlight.level 4 3000
+key x
+expect idle
+# a contact
+expectstate contacts 0
+run $B post /contacts/save name=Zoe number=1003
+waitstate contacts 1 3000
+key left
+expect contacts
+expectstate contacts.sel Zoe
+expectstate contacts.number 1003
+shot shots/web-phone-contact.png
+key x
+# the call history: a missed call (written here as the phone writes one), then cleared from the page
+run printf 'seen 0\n%s|m|0|1003|Zoe|1\n' "$(date +%s)" > simdata/state/history.new && mv simdata/state/history.new simdata/state/history
+waitstate history 1 3000
+expectstate missed 1
+run $B expect /history "1 call"
+run $B post /history/clear sure=yes
+waitstate history 0 3000
+expectstate missed 0
+# an app from the feed, and its settings
+expectstate installed.demo no
+run $B post /apps/install id=demo
+waitstate installed.demo 1.0.0 3000
+run $B post /apps/settings id=demo s_title=Kitchen s_seconds=true s_pin=pin-4711
+expectstate cfg.apps:demo.title Kitchen
+key ok
+expect launcher
+shot shots/web-phone-launcher.png
+key x
+
+# ---- changed on the phone, shown on the web ----
+# the volume key
+key volup
+wait 300
+run $B expect /sound "name='ringer' min='0' max='15' value='4'"
+# the time zone, on the Settings screens: the one above Berlin in the list
+touch 700 420
+key down
+key down
+key ok
+expectstate settings.page time
+key ok
+expectstate settings.page timezone
+key up
+key ok
+run test "$(./t48-config --config simdata/config get system timezone)" != Europe/Berlin
+run $B expect /time "<option selected>$(./t48-config --config simdata/config get system timezone)</option>"
+key x
+# SSH turned on at the screen
+key down
+key down
+key down
+expectstate settings.row Access
+key ok
+expectstate settings.row SSH
+key ok
+expectstate overlay confirm
+key ok
+expectstate cfg.access.ssh on
+wait 1500
+run $B expect /access "Turn SSH off"
+# a key added on the page shows on the phone's Access page
+run $B post /access/key-add "keys=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOeStCLCiE0njMGEkRNUHaNmd+dNxoLC9NECKxV/wLQ9 tom@desk"
+wait 1500
+run grep -qx keys=1 simdata/access/status
+run grep -q "key=ssh-ed25519 tom@desk" simdata/access/status
+shot shots/web-phone-key.png
+# and SSH turned off on the page is off on the phone
+run $B post /access/ssh to=off
+waitstate settings.value off 3000
+
+# ---- off at the screen: the page is gone, and every browser forgotten ----
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Web_setup_page
+expectstate settings.value on
+key ok
+expectstate overlay none
+expectstate cfg.access.web off
+wait 2500
+run ! curl -s -m 2 -o /dev/null http://127.0.0.1:$WEB_PORT/
+run test ! -f simdata/web/status
+expectstate web.paired 0
+expectstate settings.value off
+# on again: the browser that was paired is a stranger
+key ok
+key ok
+expectstate cfg.access.web on
+wait 1500
+run $B expect / "Show a code on the phone"
+key ok
+wait 2000
+run ! curl -s -m 2 -o /dev/null http://127.0.0.1:$WEB_PORT/
