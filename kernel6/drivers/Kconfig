@@ -27,4 +27,8 @@ config T48S_AUDIO
 	depends on SND = y
 	select SND_PCM
 
+config T48S_NAND
+	bool "T48S NAND flash, read-only"
+	depends on MTD_RAW_NAND = y
+
 endmenu

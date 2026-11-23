@@ -95,3 +95,7 @@
 &audio {
 	status = "okay";
 };
+
+&nand {
+	status = "okay";
+};

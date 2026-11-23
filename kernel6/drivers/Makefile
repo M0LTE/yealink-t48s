@@ -5,3 +5,4 @@ obj-$(CONFIG_T48S_BACKLIGHT)	+= t48s_backlight.o
 obj-$(CONFIG_T48S_TOUCH)	+= t48s_touch.o
 obj-$(CONFIG_T48S_ETH)		+= t48s_eth.o
 obj-$(CONFIG_T48S_AUDIO)	+= t48s_audio.o
+obj-$(CONFIG_T48S_NAND)		+= t48s_nand.o

@@ -153,6 +153,13 @@
 			status = "disabled";
 		};
 
+		/* the UMI block: NAND controller with a hardware BCH engine */
+		nand: nand-controller@80001000 {
+			compatible = "brcm,bcm11107-umi-nand";
+			reg = <0x80001000 0x1000>;
+			status = "disabled";
+		};
+
 		uarta: serial@80012000 {
 			compatible = "arm,pl011", "arm,primecell";
 			reg = <0x80012000 0x1000>;
