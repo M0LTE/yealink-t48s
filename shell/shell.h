@@ -274,6 +274,7 @@ int app_launch(const struct manifest *m);  /* 0, or -1 with a reason in app_erro
 const char *app_error(void);
 enum app_state app_state(void);
 const char *app_id(void);                  /* "" if none */
+int app_folder_changed(void);              /* the running app was removed or replaced */
 void app_pause(void);
 void app_resume(void);
 void app_quit(void);

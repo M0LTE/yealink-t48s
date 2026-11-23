@@ -128,6 +128,15 @@ expectstate cfg.apps:demo.title Kitchen
 key ok
 expect launcher
 shot shots/web-phone-launcher.png
+# removed from the page while it is open on the phone: the phone closes it (found on the real phone)
+touch 495 150
+waitframe 3000
+expect app
+expectstate appid demo
+run $B post /apps/remove id=demo
+waitscreen launcher 4000
+waitstate installed.demo no 3000
+expectstate appid -
 key x
 
 # ---- changed on the phone, shown on the web ----

@@ -27,6 +27,9 @@ static struct {
     int sock;
     uint32_t *buf;
     char id[64], name[64];
+    char dir[256];            /* its folder, and which folder that was when it started */
+    dev_t dir_dev;
+    ino_t dir_ino;
     long long deadline;       /* for STARTING, PAUSING and QUITTING */
     const char *kill_reason;  /* set when the shell kills it for misbehaving */
     unsigned char rx[1024];
@@ -39,6 +42,16 @@ const char *app_error(void) { return errbuf; }
 enum app_state app_state(void) { return app.state; }
 const char *app_id(void) { return app.state == APP_NONE ? "" : app.id; }
 int app_fd(void) { return app.state == APP_NONE ? -1 : app.sock; }
+
+/* Has the running app been removed or replaced (by the web page, or t48-app
+ * from SSH)? Both rename its folder away, so the folder of that name is then
+ * missing or another one. */
+int app_folder_changed(void)
+{
+    struct stat st;
+    if (app.state == APP_NONE) return 0;
+    return stat(app.dir, &st) < 0 || st.st_dev != app.dir_dev || st.st_ino != app.dir_ino;
+}
 const uint32_t *app_pixels(void) { return app.buf; }
 
 /* An unprivileged user for each app, the same one every time: there is no
@@ -168,6 +181,10 @@ int app_launch(const struct manifest *m)
     app.buf = buf;
     snprintf(app.id, sizeof app.id, "%s", m->id);
     snprintf(app.name, sizeof app.name, "%s", m->name);
+    struct stat st;
+    snprintf(app.dir, sizeof app.dir, "%s", m->dir);
+    if (stat(app.dir, &st) == 0) { app.dir_dev = st.st_dev; app.dir_ino = st.st_ino; }
+    else { app.dir_dev = 0; app.dir_ino = 0; }
     app.deadline = t48_now_ms() + START_MS;
     logmsg("app %s started, pid %d%s", m->id, (int)pid, geteuid() == 0 ? " as its own user" : "");
 
