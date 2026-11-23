@@ -56,7 +56,7 @@ Four long-running programs, each replaceable: the shell, baresip, the audio serv
 | Audio hook | audio source and player are small plug-in modules | custom audio device in its media layer | |
 | Use | ready-made program with a control interface | a library: we would write the phone logic inside our process | |
 
-baresip wins on being small, permissive and already a complete program: we add one module of our own rather than building a SIP application around a library. G.711 and G.722 are built in; Opus can be added later. Current release is v4.13.0 (2026-11-04). TLS and SRTP come later through libre's OpenSSL support if wanted; plain UDP SIP and RTP first.
+baresip wins on being small, permissive and already a complete program: we add one module of our own rather than building a SIP application around a library. G.711 is built in and G.722 comes from sippy's small BSD libg722 (see docs/sip.md); Opus can be added later. Current release is v4.13.0 (2026-11-04). TLS and SRTP come later through libre's OpenSSL support if wanted; plain UDP SIP and RTP first.
 
 Our baresip module does two jobs: audio in and out through the audio service, and call control and events for the shell on a Unix socket only root can open (baresip's stock TCP control port would let any app place calls).
 
