@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The phone's SIP account, as /data/config/sip (read by t48-sip at start).
+# key=value, one per line. Only user and domain are required.
+# Values may not contain ; < > " or spaces (display_name may hold spaces).
+
+user=1001
+password=change-me
+domain=sip.example.com
+# auth_user=1001
+# display_name=Front desk
+# transport=udp
+# outbound_proxy=sip:proxy.example.com
+# register_seconds=600

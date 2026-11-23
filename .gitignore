@@ -10,6 +10,7 @@ native/*
 !native/*.c
 !native/*.h
 !native/Makefile
+!native/build-toolchain.sh
 __pycache__/
 # Flash dumps from the phone (vendor code)
 dumps/
