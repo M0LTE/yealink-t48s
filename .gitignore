@@ -26,3 +26,4 @@ kernel/kexec-rootfs/root.authorized_keys
 # libt48, shell: build output
 libt48/build*/
 shell/build*/
+.claude/phone-owner
