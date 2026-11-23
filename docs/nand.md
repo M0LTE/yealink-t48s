@@ -1,6 +1,6 @@
 # The NAND flash from our kernel
 
-Issue [#5](https://github.com/M0LTE/yealink-t48s/issues/5). **Read-only.** Nothing here writes, erases or locks the flash, and the kernel is built so that it cannot. Writing is a later step that needs Tom's go-ahead (architecture.md, open question 4); the last section lists what it will take.
+Issue [#5](https://github.com/M0LTE/yealink-t48s/issues/5). This page is about the chip, its error correction and reading it. **Since 2026-11-23 the driver also writes, but only our own small range**: see [flash.md](flash.md) for that and [backup.md](backup.md) for the backup and the way back. The sections "Our driver" and "What writing safely will need" below describe the read-only driver as it was and what was planned; they are kept as the record.
 
 ## Summary
 

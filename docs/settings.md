@@ -62,7 +62,7 @@ t48-apply network          # make the running phone follow a file changed by han
 
 `t48-config` is the shell's own program under another name, so there is one implementation. `t48-apply` ([the script](../buildroot/board/t48s/rootfs-overlay/usr/bin/t48-apply)) is what the shell runs when a page that needs it is left.
 
-**Saving is atomic**: the new file is written beside the old one, synced, renamed over it, and the folder synced. A power cut leaves the old file or the new one. All reading and writing goes through two functions at the top of `config.c` (load a file, save a file), which is the part to replace when `/data` moves from RAM to flash (#29). Until then `/data` is in RAM and settings are lost at power off.
+**Saving is atomic**: the new file is written beside the old one, synced, renamed over it, and the folder synced. A power cut leaves the old file or the new one. All reading and writing goes through two functions at the top of `config.c` (load a file, save a file), which did not need to change when `/data` moved to flash (#29, [flash.md](flash.md)): once `t48-data format` has been run on a phone, settings survive a restart; before that `/data` is in RAM and they are lost at power off.
 
 ## An app's settings
 
@@ -111,4 +111,4 @@ Not tried on the phone: a fixed network address (it would cut the test connectio
 
 - The network page has no IPv6, VLAN or 802.1X, and a fixed address takes its time from pool.ntp.org.
 - The time zone list is about 55 places with their rules built in (there are no zone files in the image); other zones need a TZ string set over SSH.
-- Settings are in RAM until #29.
+- On a phone where the flash has not been set up (`t48-data format`), settings are in RAM.

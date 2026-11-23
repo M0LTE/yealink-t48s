@@ -104,7 +104,7 @@ The same program is also `t48-app` and `t48-config` when started by those names 
 
 ## Running it on the phone
 
-The kexec image starts `t48-shell` on the screen at boot (`buildroot/board/t48s/rootfs-overlay/etc/inittab`), with the clock app in `/usr/share/t48/apps`. Its log is `/var/log/t48-shell.log` on the phone: the input devices it found, each screen change, each app start and stop. If it is killed, `init` starts it again.
+The kexec image starts `t48-shell` on the screen at boot, as a runit service ([boot.md](boot.md)), with the clock app in `/usr/share/t48/apps`. Its log is `/var/log/t48/shell/current` on the phone: the input devices it found, each screen change, each app start and stop. If it is killed, runit starts it again.
 
 ![the idle screen, read back from the phone's framebuffer](img/shell-on-phone.png)
 

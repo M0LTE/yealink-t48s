@@ -1,9 +1,9 @@
 # Buildroot: the phone's root filesystem
 
-Issue [#16](https://github.com/M0LTE/yealink-t48s/issues/16). A Buildroot external tree that builds the root filesystem built into the kexec kernel image, and the SDK. It is the only root filesystem: the hand-made one it replaced is gone.
+Issue [#16](https://github.com/M0LTE/yealink-t48s/issues/16). A Buildroot external tree that builds the two files a boot is made of, the first stage and the system image ([docs/boot.md](../docs/boot.md)), and the SDK. It is the only root filesystem: the hand-made one it replaced is gone.
 
 ```
-buildroot/build.sh WORKDIR          # root filesystem: WORKDIR/output/images/rootfs.cpio
+buildroot/build.sh WORKDIR          # WORKDIR/output/images: system.img, firststage.cpio (and rootfs.cpio)
 buildroot/build.sh WORKDIR sdk      # Buildroot's SDK tarball, also in output/images
 ```
 
@@ -17,11 +17,11 @@ To boot it, build it into the kernel (`kernel/README.md`), then `tools/ourkernel
 
 musl, ARM1176 soft-float, Linux 3.6 headers, everything static.
 
-- busybox (init, DHCP, NTP from the DHCP servers), dropbear (off until the owner turns it on at the screen, key login only: [docs/access.md](../docs/access.md)), curl with mbedTLS and a CA bundle. No mtd-utils and no flash applets in busybox while flash access is read-only (issue #5): nothing in the image can erase or write the NAND.
+- busybox (init, DHCP, NTP from the DHCP servers), dropbear (off until the owner turns it on at the screen, key login only: [docs/access.md](../docs/access.md)), curl with mbedTLS and a CA bundle. runit from busybox supervises the services. busybox's UBI tools for `/data` in flash ([docs/flash.md](../docs/flash.md)); no mtd-utils and no raw flash applets, and the kernel driver writes only our own range.
 - `t48-shell` on the screen at boot, with the clock app in `/usr/share/t48/apps` (packages `t48-shell`, `libt48`). The same program is `t48-app` ([docs/apps.md](../docs/apps.md)) and `t48-config` ([docs/settings.md](../docs/settings.md)); `t48-apply` makes the running phone follow a changed settings file. libt48's static library and headers are in staging, so the SDK has them.
 - Our tools from `native/` (package `t48s-tools`): keytest, touchtest, membanner, cpubench, t48rec, t48play, t48mix, nandread (read-only flash dumps, `docs/nand.md`). The waterfall is an app now ([M0LTE/yealink-t48s-apps](https://github.com/M0LTE/yealink-t48s-apps)).
-- `t48-audiod` and `t48-audioctl` (package `t48-audiod`). Installed, not started.
-- baresip with `t48-sip`, the config and the `sip.example` settings template in `/usr/share/t48/sip` (packages `libre`, `libg722`, `baresip`, built as `sip/build.sh` builds them). Installed, not started.
+- `t48-audiod` and `t48-audioctl` (package `t48-audiod`), started at boot under runit.
+- baresip with `t48-sip`, the config and the `sip.example` settings template in `/usr/share/t48/sip` (packages `libre`, `libg722`, `baresip`, built as `sip/build.sh` builds them). Started at boot under runit once there is an account.
 
 ## Files
 
@@ -29,7 +29,8 @@ musl, ARM1176 soft-float, Linux 3.6 headers, everything static.
 |---|---|
 | `configs/t48s_defconfig` | the configuration |
 | `package/` | our packages; the local ones build straight from this repo's folders |
-| `board/t48s/rootfs-overlay/` | `/etc/inittab`, `/etc/init.d/rcS` (mounts, watchdog off, network, `t48-access boot`), `/etc/pointercal`, `back-to-yealink`, `t48-apply`, `t48-access` |
+| `board/t48s/rootfs-overlay/` | `/etc/inittab`, `/etc/init.d/rcS` (mounts, `/data`, network, `t48-access boot`), `/etc/service` (the runit services), `/etc/pointercal`, `back-to-yealink`, `t48-apply`, `t48-access`, `t48-services`, `t48-data` |
+| `board/t48s/firststage/`, `mkfirststage.py`, `post-image.sh` | the first stage and how it and `system.img` are made |
 | `board/t48s/post-build.sh` | drops the stock init scripts, makes the `/data` folders, links `/root/.ssh` to `/data/access/ssh` |
 
 The screen fonts for `native/` are committed in `native/gen/`; `make -C native fonts` regenerates them (needs python3-pil and the DejaVu fonts).

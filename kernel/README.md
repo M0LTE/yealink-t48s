@@ -23,7 +23,7 @@ Board changes:
 | RAM | 256 MB from 0 (forced by the platform fixup, which also drops U-Boot's tags and command line) | 0x00400000 to 0x07A20000, stopping below U-Boot's framebuffer at 0x07A24000 |
 | UART clock | 142.857 MHz | 100 MHz, measured from the divider U-Boot programmed |
 | PLL spread spectrum | enabled at boot | left as U-Boot set it |
-| Flash (MTD/NAND) | `bcm_umi_nand`, read and write, 13 ECC bytes per 512 | our `drivers/t48s_nand.c`: read-only, the phone's 7 ECC bytes per 512; no block devices, UBI or flash filesystems (see [docs/nand.md](../docs/nand.md)) |
+| Flash (MTD/NAND) | `bcm_umi_nand`, read and write, 13 ECC bytes per 512 | our `drivers/t48s_nand.c`: the phone's 7 ECC bytes per 512; reads everything, writes only our own range, with UBI and UBIFS on it (see [docs/nand.md](../docs/nand.md), [docs/flash.md](../docs/flash.md)) |
 | Command line | from U-Boot | built in: serial console on ttyAMA0 at 115200, ramdisk at 0x02a80000 |
 | Delay loop | wherever the link puts it | on an 8-byte boundary (see "CPU speed" below) |
 | Early debug output | none for this platform | `mach/debug-macro.S` for UARTA (phys 0x80012000, virt 0xF8012000) |
@@ -32,13 +32,13 @@ Board changes:
 
 Pitfalls found on the way, in boot order: RAM must end on a 1 MB boundary or 3.6 hangs in `paging_init`; overlapping static mappings hit `BUG()` in `vm_area_add_early`; a UART clock gated off during `amba_device_add` leaves the early console spinning on a full FIFO (a silent hang).
 
-Root filesystem (issue #16): Buildroot, from the external tree in `buildroot/` ([its README](../buildroot/README.md)). It is the only root filesystem for the kexec image; the hand-made list it replaced is gone. `buildroot/build.sh WORKDIR` leaves `WORKDIR/output/images/rootfs.cpio`. To build it into the kexec kernel, put `rootfs.cpio` beside `linux-3.6.11/` and run
+Root filesystem (issue #16): Buildroot, from the external tree in `buildroot/` ([its README](../buildroot/README.md)). It is the only root filesystem for the kexec image; the hand-made list it replaced is gone. `buildroot/build.sh WORKDIR` leaves `firststage.cpio` and `system.img` in `WORKDIR/output/images` ([docs/boot.md](../docs/boot.md)). To build them into the kexec kernel, put both beside `linux-3.6.11/` and run
 
 ```
-docker run --rm -u $(id -u):$(id -g) -v $PWD:/w -w /w -e ROOTFS=rootfs.cpio t48s-kbuild:trusty sh kernel/build.sh kexec
+docker run --rm -u $(id -u):$(id -g) -v $PWD:/w -w /w -e ROOTFS=firststage.cpio -e SYSTEM=system.img t48s-kbuild:trusty sh kernel/build.sh kexec
 ```
 
-`kexec-rootfs/root.authorized_keys` (in the build folder, beside `kernel/`) is added as `/etc/t48-dev/authorized_keys` if it exists, which makes the image a development build: SSH is on from boot and takes those keys, so `tools/ourkernel.sh ssh` works with nobody at the phone. It is gitignored and never published. Without it SSH starts off, as on anyone else's phone, until it is turned on at the screen ([docs/access.md](../docs/access.md)). `build.sh` patches a fresh `linux-3.6.11/` each time. CI (`.github/workflows/build.yml`) builds the root filesystem and kernel image on pushes to main and publishes them, with the SDK, on a `v*` tag. The container's recipe is `kernel/Dockerfile`.
+`kexec-rootfs/root.authorized_keys` (in the build folder, beside `kernel/`) is added as `/etc/t48-dev/authorized_keys` if it exists, which makes the image a development build: SSH is on from boot and takes those keys, so `tools/ourkernel.sh ssh` works with nobody at the phone. It is gitignored and never published. Without it SSH starts off, as on anyone else's phone, until it is turned on at the screen ([docs/access.md](../docs/access.md)). `build.sh` needs a fresh `linux-3.6.11/` each time (unpack the tarball again before a rebuild). CI (`.github/workflows/build.yml`) builds the root filesystem and kernel image on pushes to main and publishes them, with the SDK, on a `v*` tag. The container's recipe is `kernel/Dockerfile`.
 
 Userspace for testing: `tools/mkrfs-bb.sh` builds `T48S.rfs` with a static busybox (musl), a shell on the serial console and `native/membanner` drawing on the screen. Boot it with U-Boot's recovery mode, option 1 (TFTP), served by `tools/tftpd.py DIR 69 --rom-once`.
 
@@ -161,9 +161,9 @@ tools/ourkernel.sh ssh t48mix                              # list the controls
 tools/ourkernel.sh ssh 'cat /proc/asound/card0/t48s'       # counters and registers
 ```
 
-## NAND flash, read-only (2026-11-23, issue #5)
+## NAND flash (2026-11-23, issues #5 and #29)
 
-`drivers/t48s_nand.c` (copied into `drivers/mtd/nand/`) gives `/dev/mtd0` to `/dev/mtd12` with Yealink's partition numbers. It can only read: the chip commands it will send are a fixed list with no program or erase in it, the write hooks are stubs, and every partition is registered read-only. `build.sh` refuses to build a configuration with anything that could write the flash. Dumps match Yealink's byte for byte. Details, the ECC layout and what writing will need: [docs/nand.md](../docs/nand.md).
+`drivers/t48s_nand.c` (copied into `drivers/mtd/nand/`) gives `/dev/mtd0` to `/dev/mtd12` with Yealink's partition numbers, all read-only, and `/dev/mtd13`, `t48data`: the one range it will write, compiled in ([docs/flash.md](../docs/flash.md)). `build.sh` refuses to build a configuration with any other way to the flash. Dumps match Yealink's byte for byte. Details, the ECC layout and what writing will need: [docs/nand.md](../docs/nand.md).
 
 ```
 tools/ourkernel.sh ssh 'cat /proc/mtd'
