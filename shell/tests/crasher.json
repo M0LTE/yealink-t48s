@@ -1,0 +1,1 @@
+{ "id": "crasher", "name": "Crasher", "version": "test", "api": 1, "exec": "crasher" }

@@ -1,0 +1,51 @@
+# A tour of the shell: idle, launcher, the clock app, Home, the handset.
+wait 300
+expect idle
+shot shots/idle.png
+key ok
+expect launcher
+shot shots/launcher.png
+# Clock is the first tile, Crasher the second
+key right
+key left
+key ok
+waitframe 3000
+expect app
+wait 200
+key 5
+touch 600 60
+wait 200
+shot shots/clock.png
+# phone keys never reach the app
+key volup
+# a long press on X is Home; the app stays open, frozen
+key x 1000
+expect launcher
+wait 300
+shot shots/launcher-open.png
+# back into it
+key ok
+expect app
+waitframe 2000
+# lifting the handset takes the screen at once
+hook off
+expect call
+shot shots/call.png
+wait 1200
+hook on
+expect app
+waitframe 2000
+# a short X is "back", which closes the clock
+key x
+waitscreen launcher 2000
+# touch works too: the Apps button, then the clock's tile, then idle again
+key x
+expect idle
+touch 400 420
+expect launcher
+touch 100 150
+waitframe 3000
+expect app
+key x
+waitscreen launcher 2000
+quit

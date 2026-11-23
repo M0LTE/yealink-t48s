@@ -1,0 +1,37 @@
+# Apps that die or hang must not take the shell with them.
+key ok
+key right
+key ok
+waitframe 3000
+key 1
+waitscreen message 2000
+shot shots/crashed.png
+key ok
+expect launcher
+# exits with an error
+key ok
+waitframe 3000
+key 2
+waitscreen message 2000
+touch 400 330
+expect launcher
+# hangs: Home still works, and starting another app gets rid of it
+key ok
+waitframe 3000
+key 3
+wait 100
+key x 1000
+expect launcher
+key left
+key ok
+waitframe 4000
+expect app
+shot shots/clock-after-hang.png
+# and the shell is still in one piece
+hook off
+expect call
+hook on
+expect app
+key x
+waitscreen launcher 2000
+quit
