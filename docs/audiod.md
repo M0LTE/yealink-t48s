@@ -6,8 +6,8 @@ Issue [#24](https://github.com/M0LTE/yealink-t48s/issues/24). Design: [architect
 
 - `t48-audiod` is the one program that touches the audio hardware. It carries the call's audio to and from baresip, picks the route (handset, speakerphone, headset), sets the volume, mutes, makes every tone and the ringer in software, and controls echo on the speakerphone. The shell tells it what to do over a small control socket.
 - **Tested off the phone, with nothing played anywhere.** Unit tests, a test of the real daemon over its sockets, and real calls: a sound file as one phone's microphone goes through its audio service, baresip, SIP and RTP to a second baresip and its audio service, and the same back. That passes in G.722 and G.711, and with one side running the phone's own ARM binaries under qemu.
-- **Not yet run on the phone.** The hardware backend is written but has never been started, and the kernel driver cannot play sound yet. What the driver needs is [listed below](#what-the-kernel-driver-must-add). Which input and output is which is still a guess, kept in [one table](#the-route-table) that a text file can override.
-- **Cost:** about 0.1 ms of CPU in each 20 ms at the very worst, estimated; well under 1% of the phone's processor. All integer.
+- **Runs on the phone (2026-11-23).** With the kernel driver's playback it plays tones and call audio through the loudspeaker and the handset, and a real call to an echo service went round the whole loop. [Results below](#on-the-phone). Which input and output is which is settled by the daytime tests and kept in [one table](#the-route-table) that a text file can override. How it sounds still needs an ear.
+- **Cost, measured on the phone:** about 2.6% of the processor while a speakerphone call's audio runs, kernel side included. The sample work alone is 0.4%; the rest is waking up fifty times a second. All integer.
 - **Echo:** nothing for handset and headset. The speakerphone uses voice switching (whoever is talking gets the channel), which costs almost nothing. [Reasons below](#echo).
 
 ## What it does
@@ -101,19 +101,30 @@ Tones are the UK plan (dial 350+440 Hz; ringback 400+450 Hz in the double-ring r
 
 ## The route table
 
-A route is: which codec to record from, which to play to, the echo control, and a list of mixer controls to set. The built-in table (`routes.c`) is "Reading 1" from [audio.md](audio.md): handset microphone on codec A input A, headset on codec A input B, base microphone on codec B input B, loudspeaker on codec B output B. **It is a guess until the daytime test.** Every route says so in the log until marked confirmed.
+A route is: which codec to record from, which to play to, the echo control, and a list of mixer controls to set. The built-in table (`routes.c`) follows the daytime tests in [audio.md](audio.md): the handset is codec B (input B, output B), the headset is codec B (input A, output A), and the speakerphone is codec A (input A, output A) with the amplifier. The gains are the ones Yealink's firmware sets in each mode:
+
+| Route | Microphone | Out |
+|---|---|---|
+| handset | preamp 15 dB, ADC 0 dB | DAC +3 dB, output B -9 dB, sidetone on |
+| headset | preamp 21 dB (Yealink 22; the control moves in 3 dB steps), ADC 0 dB | DAC +3 dB, output A -6 dB, sidetone on |
+| speaker | preamp 21 dB, ADC +12 dB (Yealink +1 dB: the base microphone is quiet at arm's length and Yealink makes it up in its DSP) | DAC -6 dB, output A -3 dB, amplifier on |
+| alert | both off | as speaker |
+
+The sidetone level (-18 dB) is our choice, not Yealink's, and wants setting by ear. The headset row has not been tried with a headset plugged in, and says so in the log until marked confirmed.
+
+Each list is in an order that stays silent: amplifier and the other outputs off first, then gains, then this route's output, then the amplifier. When the service goes idle it switches the amplifier, all outputs, both sidetones and both microphones off.
 
 A routes file replaces any of it without a rebuild; `t48-audiod --print-routes` prints the table in the same form to start from:
 
 ```
 [speaker]
-capture 1              # ALSA device to record from: 0 codec A, 1 codec B
-playback 1
+capture 0              # ALSA device to record from: 0 codec A, 1 codec B
+playback 0
 echo switch            # or: none
-coupling 256           # how loud the loudspeaker is at the microphone, 256 = the same
+coupling 512           # how loud the loudspeaker is at the microphone, 256 = the same
 confirmed 1
-set Codec B Capture Switch = 1
-set Codec B Capture Source = 1
+set Codec A Capture Switch = 1
+set Codec A Capture Source = 0
 ...
 ```
 
@@ -140,7 +151,7 @@ Why this and not an echo canceller:
 | Both talking at once | one side is turned down: the classic speakerphone feel | both heard, when it works |
 | When it goes wrong | someone is hard to interrupt | the far end hears themselves |
 
-The phone has one 500 MHz core with no vector unit, and G.722 and the screen already share it. Voice switching is certain to fit, cannot howl, and could be tested properly off the phone; a canceller is none of those today. It sits behind one function (`echo_process`), so a canceller can replace it later if a measurement on the phone says there is room. The number to set on the phone is `coupling` in the routes file: too low and the far end hears echo, too high and the owner cannot break in.
+The phone has one 500 MHz core with no vector unit, and G.722 and the screen already share it. Voice switching is certain to fit, cannot howl, and could be tested properly off the phone; a canceller is none of those today. It sits behind one function (`echo_process`), so a canceller can replace it later if a measurement on the phone says there is room. The number to set on the phone is `coupling` in the routes file: too low and the far end hears echo, too high and the owner cannot break in. It is 512 (twice, +6 dB): measured on the phone, the base microphone hears a tone from the loudspeaker between 20 dB below and 7 dB above its level in the frame played, loudest at 1.4 kHz ([audio.md](audio.md#playback-2026-11-23-issue-24)).
 
 Measured with a made-up room (the microphone hears the loudspeaker 60 ms late at half level): in the unit test the echo sent back is 35 dB down; in a real G.722 call through both baresips, alice hears herself back 6 dB down with no echo control and 42 dB down on the speakerphone route.
 
@@ -155,11 +166,25 @@ Measured with a made-up room (the microphone hears the loudspeaker 60 ms late at
 | Worst case: speakerphone, a tone and a key sound together | 78 microseconds | 0.4% |
 | Ringing | 17 microseconds | 0.08% |
 
-That is the sample work. Each tick also makes about seven system calls (poll, read, write, the socket both ways, the clock), a few microseconds each on this processor. The scaling is rough, perhaps a factor of two or three either way, so call it **under 1% of the CPU, to be measured**. The same bench builds for ARM (`build-arm/bench`) and prints real figures on the phone. No floating point anywhere in the service; the ARM binary is 133 KB static.
+That was the estimate for the sample work. **Measured on the phone (2026-11-23)** the same bench gives about three times those figures: 74 microseconds a frame for a speakerphone call (0.4%), 240 for the worst case (1.2%).
+
+The whole cost is more than the sample work, because each tick is also an interrupt, a wake-up and about seven system calls. Measured by what a competing low-priority counting loop loses while the service runs:
+
+| Running | Processor taken |
+|---|---|
+| speaker route, service and kernel driver | 2.6% |
+| handset route, service and kernel driver | 2.4% |
+| speaker route with a client on the call stream answering every frame (the client's own work included) | 5.6% |
+
+So **about 2.6% for a speakerphone call's audio**, before baresip and its codec. The kernel's own per-process accounting cannot show this (it reads zero: the service runs between its clock ticks). No floating point anywhere in the service; the ARM binary is 133 KB static.
+
+The service runs at real-time priority on the phone. Without it, one SSH login during a call was enough to make it 40 ms late: the playback ran dry and baresip's answers arrived late. With it, the same call had no late frame.
 
 ## What the kernel driver must add
 
-The service's phone backend (`hw_alsa.c`) uses the same plain ALSA ioctls as `t48rec` and `t48mix`. It works with today's capture-only driver for the microphone half: a missing playback device is reported once and it carries on. For sound out, `kernel/drivers/t48s_audio.c` needs:
+The service's phone backend (`hw_alsa.c`) uses the same plain ALSA ioctls as `t48rec` and `t48mix`. With a capture-only driver it works for the microphone half: a missing playback device is reported once and it carries on. For sound out, `kernel/drivers/t48s_audio.c` needs:
+
+All of this is in the driver since 2026-11-23, except cold start ([audio.md](audio.md#playback-2026-11-23-issue-24)). It also has an analog gain control for each output (`Codec A Output A Playback Volume` and so on), which the routes set.
 
 1. **A playback stream on each codec:** `hw:0,0` and `hw:0,1` gain a playback side (DMA0 channels 2 and 4). S16_LE, mono, 16000 Hz, periods in multiples of 80 frames, like capture. The service asks for 320-frame periods, four of them, writes with ordinary non-blocking `write()`, sets a start threshold of 640 frames, and expects `EPIPE` on underrun (it then prepares and starts again). No mmap needed.
 2. **Silence, not noise, around the edges:** nothing audible on open, start, stop, drop or underrun. That is the ramp-down the vendor driver does (`ApmHw_AmpDacRampDown`) and zeros in the FIFO when the buffer runs dry.
@@ -176,9 +201,9 @@ Nothing else: no rate other than 16 kHz, no volume ramps, no routing logic. Rout
 
 ## Tests and results
 
-Run on 2026-11-23. Nothing below touched the phone or any sound device.
+Run on 2026-11-23. Nothing in this section touched the phone or any sound device; the phone's results follow it.
 
-`make -C audiod check`: 634 checks in six unit tests, and 31 in the socket test, all passing.
+`make -C audiod check`: 635 checks in six unit tests, and 31 in the socket test, all passing.
 
 | Test | What it shows |
 |---|---|
@@ -202,13 +227,29 @@ Run on 2026-11-23. Nothing below touched the phone or any sound device.
 
 The older `sip/test/call-test.sh` still passes; its `t48audio` call now proves the fallback (no audio service running, the call still completes in silence).
 
+## On the phone
+
+Run on 2026-11-23 in the daytime at moderate level, with the phone's base microphone as the listener. `t48-audiod --backend alsa`, the built-in routes, and `calltap` (`audiod/tests/calltap.c`) standing in for baresip on the call stream where there was no call.
+
+| Test | Result |
+|---|---|
+| The service's own tone (the 400 Hz error tone, speaker route, volume 12) out of the loudspeaker and back through the base microphone to the call stream, echo control off for the measurement | played at -24.3 dBFS, arrived at -33.0 dBFS, steady within 1 dB; 350 frames each way, none late, no overruns or underruns |
+| Far-end tone (1 kHz at -30 dBFS, volume 12) with the speaker route as built in | without echo control it comes back at -33.7 dBFS; with it, at -70 dBFS: 36 dB down, as designed |
+| 24 s speaker-route stream | 1200 frames each way, none late, none dropped; tick 131 microseconds on average, 153 at most |
+| Going idle | amplifier, outputs, sidetone and microphones all off, DMA stopped |
+| A real call: registered to the test SIP server ([sip-test-server.md](sip-test-server.md)), called its echo service, speaker route at volume 10, 10 s, G.722 | 493 frames each way, none late, no overruns or underruns. What the microphone sent came back from the echo service 283 ms later at the same level (0.1 dB, correlation 0.98), and was played |
+
+Found and fixed on the way: switching a microphone on makes a thump (14000 counts, gone in 0.4 s) that went to the far end, so the first half second after a route change is now sent as silence; the service left the amplifier and microphone on when idle; and it needed real-time priority (above).
+
+`t48-audiod --record FILE.wav` is a test aid: while a call stream is open it writes a 3-channel WAV (the microphone as sent to baresip, the far end as received, the loudspeaker as played), 120 s at most. It is how the echo call above was measured, and it is what to use for tuning the speakerphone.
+
 ## What needs the phone, and Tom
 
-1. **Daytime test 1 and 2 of audio.md** (which input and output is which): fills in the route table.
-2. **Playback in the kernel driver**, as listed above, with Tom listening.
-3. **First start of `--backend alsa` on the phone, in the daytime.** Even with capture only it writes codec B's microphone controls, and until the driver takes over sidetone that can be faintly heard. Then check the log for overruns and run `build-arm/bench` for the real CPU figure.
-4. **Speakerphone tuning by ear:** microphone gain, then `coupling`, then whether 36 dB and 15 dB feel right.
-5. **Sidetone level** on the handset.
+1. **A listen.** Everything above was measured with microphones. How the loudspeaker and earpiece sound, and whether the levels are right, needs an ear.
+2. **Sidetone level** on the handset (`Codec B Sidetone Volume` in the handset route; -18 dB now).
+3. **Speakerphone tuning by ear:** microphone gain, then `coupling`, then whether 36 dB and 15 dB feel right.
+4. **The headset**, with one plugged in.
+5. **baresip's priority.** The service is real-time now; baresip is not, and a busy phone could still make its side late (#25).
 
 ## Not done
 
