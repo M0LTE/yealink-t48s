@@ -1,0 +1,43 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# t48-apply WHAT: make the running phone follow the settings file
+# /data/config/WHAT (docs/settings.md). The shell runs this when a file has
+# been changed on the screen; run it by hand after t48-config set.
+#   network   DHCP, or the fixed address in the file
+#   sip       restart baresip, if it is running
+#   system    nothing to do: the shell follows the time zone by itself
+#   access    nothing yet (issue 28)
+get() { t48-config get "$1" "$2" 2>/dev/null || echo "$3"; }
+
+case "$1" in
+network)
+    IF=eth0
+    mode=$(get network mode dhcp)
+    addr=$(get network address "")
+    killall udhcpc 2>/dev/null
+    if [ "$mode" = static ] && [ -n "$addr" ]; then
+        ifconfig $IF "$addr" netmask "$(get network netmask 255.255.255.0)" up
+        while route del default dev $IF 2>/dev/null; do :; done
+        gw=$(get network gateway "")
+        [ -n "$gw" ] && route add default gw "$gw" dev $IF
+        dns=$(get network dns "")
+        : > /etc/resolv.conf
+        [ -n "$dns" ] && echo "nameserver $dns" >> /etc/resolv.conf
+        # no DHCP to name a time server: the public pool
+        killall ntpd 2>/dev/null
+        ntpd -p pool.ntp.org
+        echo "network: $IF $addr (fixed)" > /dev/console
+    else
+        udhcpc -b -q -t 10 -i $IF -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 &
+    fi ;;
+sip)
+    # only if the phone service is running: this does not start it
+    if pidof baresip >/dev/null; then
+        killall baresip
+        sleep 1
+        t48-sip >>/var/log/t48-sip.log 2>&1 &
+    fi ;;
+system|access|audio|screen|feed) ;;
+*) echo "usage: t48-apply network | sip | system | access" >&2; exit 2 ;;
+esac
+exit 0

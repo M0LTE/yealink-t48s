@@ -24,7 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/wait.h>
@@ -36,6 +35,7 @@
 #define MAX_UNPACKED (96L * 1024 * 1024)
 #define MAX_FILES 4000
 #define MAX_FEED_APPS 128
+#define CA_BUNDLE "/etc/ssl/certs/ca-certificates.crt"
 
 static int machine;              /* --machine: lines for the shell instead of words for a person */
 static char apps_dir[300];       /* where apps are installed: the first folder of --apps */
@@ -190,6 +190,8 @@ static int fetch(const char *url, const char *dest, long max_bytes, long expect,
     if (pid == 0) {
         int null = open("/dev/null", O_RDWR);
         if (null >= 0) { dup2(null, 0); dup2(null, 1); dup2(null, 2); }
+        /* the phone's curl is built without knowing where the CA bundle is */
+        if (access(CA_BUNDLE, R_OK) == 0) setenv("CURL_CA_BUNDLE", CA_BUNDLE, 0);
         execlp("curl", "curl", "-fsSL", "--proto", "=https,http,file", "--proto-redir", https ? "=https" : "=https,http",
                "--connect-timeout", "20", "--max-time", "600", "--max-filesize", maxs, "-o", dest, "--", url, (char *)NULL);
         _exit(127);
@@ -673,16 +675,31 @@ int pkg_main(int argc, char **argv)
     if (!feed_url[0]) snprintf(feed_url, sizeof feed_url, "%s", pkg_default_feed());
     signal(SIGPIPE, SIG_IGN);
 
-    /* one at a time: a second copy waits for the first */
-    char lock[340];
+    /* One at a time: a second copy waits for the first. The lock is a file
+     * holding the owner's process number (the phone's kernel is built without
+     * flock); one left by a process that has gone is taken over. */
+    char lock[340], pidtxt[24];
     snprintf(lock, sizeof lock, "%s/", apps_dir);
     mkdirs(lock);
     snprintf(lock, sizeof lock, "%s/.lock", apps_dir);
-    int lfd = open(lock, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
-    if (lfd < 0 || flock(lfd, LOCK_EX) < 0) {
-        fprintf(stderr, "t48-app: cannot use %s: %s\n", apps_dir, strerror(errno));
-        if (machine) printf("error cannot use %s\n", apps_dir);
-        return 1;
+    for (int tries = 0;; tries++) {
+        int lfd = open(lock, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+        if (lfd >= 0) {
+            int n = snprintf(pidtxt, sizeof pidtxt, "%d\n", (int)getpid());
+            if (write(lfd, pidtxt, (size_t)n) < 0) {}
+            close(lfd);
+            break;
+        }
+        if (errno != EEXIST) {
+            fprintf(stderr, "t48-app: cannot use %s: %s\n", apps_dir, strerror(errno));
+            if (machine) printf("error cannot write to %s\n", apps_dir);
+            return 1;
+        }
+        FILE *f = fopen(lock, "r");
+        int owner = 0;
+        if (f) { if (fscanf(f, "%d", &owner) != 1) owner = 0; fclose(f); }
+        if ((owner > 0 && kill(owner, 0) < 0 && errno == ESRCH) || (owner <= 0 && tries > 10)) unlink(lock);
+        else usleep(200000);
     }
     clean_leftovers();
     manifests_scan(opt.apps);
@@ -692,9 +709,10 @@ int pkg_main(int argc, char **argv)
     else if (!strcmp(cmd, "update") && arg) r = installed_find(arg) ? cmd_install(arg, 1) : (fail("%s is not installed", arg), -1);
     else if (!strcmp(cmd, "update")) r = cmd_update_all();
     else if (!strcmp(cmd, "remove") && arg) r = cmd_remove(arg);
-    else return usage();
+    else { unlink(lock); return usage(); }
 
     clean_leftovers();
+    unlink(lock);
     if (r < 0) {
         if (machine) printf("error %s\n", errtxt);
         else fprintf(stderr, "t48-app: %s\n", errtxt);

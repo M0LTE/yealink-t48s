@@ -238,15 +238,17 @@ int config_main(int argc, char **argv)
         }
         return 0;
     }
+    if (!strcmp(cmd, "tz") && n == 0) { puts(settings_tz()); return 0; }
     if (!strcmp(cmd, "list") && n == 1) return name_ok(a[0]) && list_file(a[0], 0) ? 0 : 1;
     if (!strcmp(cmd, "list") && n == 0) {
         for (unsigned k = 0; k < sizeof all / sizeof all[0]; k++) list_file(all[k], 1);
         return 0;
     }
     fprintf(stderr,
-        "t48-config [--config DIR] get FILE KEY | set FILE KEY VALUE | unset FILE KEY | list [FILE]\n"
+        "t48-config [--config DIR] get FILE KEY | set FILE KEY VALUE | unset FILE KEY | list [FILE] | tz\n"
         "The phone's settings: key=value text files in %s.\n"
         "Files: sip, network, system, audio, screen, access, feed, and apps/ID for an app's own.\n"
-        "list shows passwords only as (set). Most changes take effect after: t48-apply FILE\n", opt.config);
+        "list shows passwords only as (set). tz prints the time zone as a TZ string.\n"
+        "Most changes take effect after: t48-apply FILE\n", opt.config);
     return 2;
 }

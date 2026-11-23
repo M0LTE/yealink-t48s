@@ -21,7 +21,14 @@ fi
 hostname t48s
 ifconfig lo 127.0.0.1 up
 ifconfig eth0 up
-udhcpc -b -q -t 10 -i eth0 -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 &
+# Linux 3.6's /dev/random waits for entropy this phone never gathers, and curl (mbedTLS) reads it:
+# an HTTPS download would hang for ever. Make it the pool that does not wait, after stirring in
+# what differs between phones and between boots. Weak just after boot; a seed kept across boots
+# needs somewhere to keep it (issue 29).
+{ date; cat /proc/interrupts /proc/uptime /sys/class/net/eth0/address; dmesg; } > /dev/urandom 2>/dev/null
+rm -f /dev/random && mknod -m 666 /dev/random c 1 9
+# DHCP, or the fixed address in /data/config/network (docs/settings.md)
+t48-apply network
 mkdir -p /var/run/dropbear   # /etc/dropbear points here (Buildroot)
 dropbearkey -t ed25519 -f /etc/dropbear/host_ed25519 >/dev/null 2>&1
 dropbear -s -r /etc/dropbear/host_ed25519 -P /var/run/dropbear.pid
