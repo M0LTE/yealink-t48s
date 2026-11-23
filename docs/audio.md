@@ -227,3 +227,30 @@ Not done, and why: playback (out of scope and audible), cold start (above), samp
 - `tools/regsum.py`: lists the register accesses of each function in Yealink's kernel image.
 - `tools/audio-modes.sh`: daytime test 1.
 - `dumps/audio/` (not committed): the six modules, the DSP image, `kallsyms.txt`, the idle register dump, the `ApmHw_*` and `vpmHw_*` register summaries (`apmhw.sum`, `vpmhw.sum`), the `/proc` captures and the oops log.
+
+## Daytime test 1 result (2026-11-23, under Yealink 66.82.0.31)
+
+Register differences between Yealink's modes (`tools/audio-modes.sh`; raw in `dumps/audio/modes.txt`, not committed):
+
+| Register | idle | handset | speaker | headset (none plugged) |
+|---|---|---|---|---|
+| 0x3060002c | 00330000 | 00330000 | 00334027 | 00330000 |
+| 0x30600040 | 03130000 | 03130000 | 03132f0f | 03130000 |
+| 0x30600054 | 00008000 | 00008000 | 00000000 | 00008000 |
+| 0x3060005c | 00345a67 | 00345a67 | 00330000 | 00345a67 |
+| 0x30600070 | 031329f1 | 031329f1 | 03130000 | 031329f1 |
+| 0x30600120 | 00000040 | 00000040 | 00000008 | 00000040 |
+| 0x30600124 | 00000000 | 00000000 | 00a80000 | 00000000 |
+| 0x3060012c | 02780000 | 02780000 | 02000000 | 00b00000 |
+| 0x30600134 | 00053333 | 00053333 | 00033333 | 00063333 |
+| 0x30600138 | fdff3000 | fdff3000 | e7fcf000 | ffafc000 |
+| 0x80004000 (GPIO 0-31) | 6f7bffff | 4f7bffff | ef7bffdf | 6f7bfff7 |
+
+What it settles:
+
+- **Codec B is the handset**, and Yealink keeps it set up at idle; lifting the handset changes no audio register, only GPIO29 (the hook) goes low.
+- **Codec A plus the external amplifier (GPIO31 high) is the speakerphone.** Codec B is switched off in speaker mode (0x3060005c and 0x30600070 drop to their idle-off values, codec B sidetone 0x30600054 off).
+- **Headset uses codec B with a different analog input/output selection** (0x3060012c, 0x30600134, 0x30600138 change; codec B digital registers unchanged).
+- The key lamps show up as expected: GPIO5 low in speaker mode (Speakerphone lamp), GPIO3 low in headset mode (Headset lamp).
+
+So "reading 2" above was right, not reading 1: `audiod`'s compiled-in route table must swap codecs (handset and headset on codec B, speaker on codec A + amp), and the analog values above are Yealink's settings to copy per route.
