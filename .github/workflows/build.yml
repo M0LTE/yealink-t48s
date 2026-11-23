@@ -67,7 +67,7 @@ jobs:
           path: linux-3.6.11.tar.xz
           key: linux-3.6.11
 
-      - name: Kernel (kexec image: first stage and system image built in)
+      - name: "Kernel (kexec image: first stage and system image built in)"
         run: |
           [ -f linux-3.6.11.tar.xz ] || curl -fsSLO https://cdn.kernel.org/pub/linux/kernel/v3.x/linux-3.6.11.tar.xz
           echo "$LINUX_SHA256  linux-3.6.11.tar.xz" | sha256sum -c -
