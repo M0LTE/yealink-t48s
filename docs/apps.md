@@ -56,7 +56,23 @@ t48-app --feed https://example.org/apps/index.json list
 
 - `make -C shell check` runs [`tests/05-apps.script`](../shell/tests/05-apps.script) against two small feeds made on disk by [`tests/mkfeeds.sh`](../shell/tests/mkfeeds.sh): install, open, the app's settings, an update that keeps them, remove; and the refusals (an app for API level 2, a package one byte wrong, a package that climbs out of its folder, one holding a link, a feed address that is not https, removing the clock, a feed that is not there).
 - `make -C shell check-live RUNNER=qemu-arm` uses the real feed: installs hello, links and waterfall from the Apps screen and starts each one (they are the phone's ARM programs, hence qemu).
-- On the phone: see [shell.md](shell.md#what-has-been-checked-on-the-phone-2026-11-23).
+- On the phone: below.
+
+## On the phone (2026-11-23)
+
+Done on the real phone with injected touches and keys (`tools/phone-input.sh`), nobody at it; the pictures are read back from its framebuffer.
+
+- Get apps lists the real feed over HTTPS in under a second.
+- Hello and Node links were installed by touch, Waterfall by keys: about two seconds each, checksum checked. All three then open from the launcher, each as its own user, and the waterfall and the links screen show live data.
+- Hello was removed (it asks first; its data and settings went with it) and installed again. `t48-app update` says everything is up to date.
+
+| | |
+|---|---|
+| ![the list on the phone](img/apps-on-phone-list.png) | ![installing on the phone](img/apps-on-phone-installing.png) |
+| ![the launcher on the phone](img/apps-on-phone-launcher.png) | ![removing on the phone](img/apps-on-phone-remove.png) |
+| ![waterfall, installed from the feed](img/apps-on-phone-waterfall.png) | ![links, installed from the feed](img/apps-on-phone-links.png) |
+
+Two faults in the image showed up only here and are fixed: curl had no CA bundle, and `/dev/random` blocked for ever ([buildroot/README.md](../buildroot/README.md)). The phone's kernel also has no `flock`, so `t48-app` keeps a small lock file instead.
 
 ## Not done
 

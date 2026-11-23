@@ -81,6 +81,22 @@ The app gets each value in a SETTING message when it starts. "Back to the app's 
 
 `make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
 
+## On the phone (2026-11-23)
+
+With injected touches and keys, nobody at it:
+
+- Settings opens from the idle screen; the pages draw and scroll by touch.
+- Hello's "Who to greet" was changed to T48 on the touch keyboard (Del, Shift, the numbers page), and Hello then said "Hello, T48".
+- The time zone was set to Europe/Berlin by touch: the idle clock went from 05:25 to 06:25 at once. It is back on Europe/London.
+- The network came up through `t48-apply network` at boot (DHCP, as before).
+
+| | |
+|---|---|
+| ![settings on the phone](img/settings-on-phone.png) | ![the keyboard on the phone](img/settings-on-phone-keyboard.png) |
+| ![the app with its new setting](img/settings-on-phone-hello.png) | ![the idle clock in Berlin time](img/settings-on-phone-berlin.png) |
+
+Not tried on the phone: a fixed network address (it would cut the test connection; simulator only), the account page against a running baresip, and anything that makes a sound. The keypad multi-tap has only had injected key presses, not fingers.
+
 ## Not done
 
 - Brightness and SSH do nothing yet (#18, #28).
