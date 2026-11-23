@@ -83,6 +83,16 @@ static void save(void)
 
 void contacts_init(void) { load(); }
 
+/* the file has been changed by something else (the web page): read it again,
+ * unless a contact is being typed just now. 1 when it has been read. */
+int contacts_reload(void)
+{
+    if (mode != M_LIST) return 0;
+    load();
+    if (sel >= n) sel = n ? n - 1 : 0;
+    return 1;
+}
+
 const char *contacts_name(const char *number)
 {
     if (!number || !number[0]) return NULL;

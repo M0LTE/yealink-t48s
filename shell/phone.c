@@ -253,6 +253,20 @@ void phone_reload_account(void)
     changed();
 }
 
+/* the settings files have been changed by something else (watch.c): the web
+ * page, or t48-config. Volumes that differ are told to the audio service;
+ * nothing is played. */
+void phone_reload_files(void)
+{
+    int was[T48AC_VOL_COUNT];
+    memcpy(was, P.vol, sizeof was);
+    load_settings();
+    for (int i = 1; i < T48AC_VOL_COUNT; i++)
+        if (P.vol[i] != was[i]) audioc_volume(i, P.vol[i]);
+    update_lamps();
+    changed();
+}
+
 static void save_volumes(void);
 
 int phone_volume(int which) { return which > 0 && which < T48AC_VOL_COUNT ? P.vol[which] : 0; }
@@ -314,6 +328,17 @@ static void history_load(void)
     }
     fclose(f);
     count_missed();
+}
+
+/* the history file has been changed by something else: the web page clearing it */
+void phone_reload_history(void)
+{
+    nhist = 0;
+    history_load();
+    count_missed();
+    if (P.hist_sel >= nhist) P.hist_sel = nhist ? nhist - 1 : 0;
+    update_lamps();
+    changed();
 }
 
 static void history_save(void)

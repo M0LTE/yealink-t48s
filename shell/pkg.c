@@ -362,7 +362,7 @@ static struct feed_app feed[MAX_FEED_APPS];
 static int nfeed;
 static char feed_url[400];
 
-const char *pkg_default_feed(void) { return "https://m0lte.github.io/yealink-t48s-apps/index.json"; }
+const char *pkg_default_feed(void) { return T48_DEFAULT_FEED; }
 
 static void work_dir(char *out, size_t n)
 {

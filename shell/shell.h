@@ -44,6 +44,7 @@ struct options {
     const char *apply;   /* program run with a settings file's name when that file has changed, NULL: none */
     const char *access;  /* folder where t48-access leaves its status file (docs/access.md) */
     const char *notice;  /* a file of one or two lines shown on the idle screen while it exists (t48-live), NULL: none */
+    const char *web;     /* folder where the web setup page leaves its status file (docs/web.md), NULL: none */
     const char *runner;  /* simulator: a program to run apps with, such as qemu-arm for the phone's own builds */
 };
 extern struct options opt;
@@ -116,6 +117,8 @@ void shell_phone_changed(void);              /* something a phone screen or the 
 void shell_show_history(int on);
 
 void phone_reload_account(void);             /* a SIP settings file has changed */
+void phone_reload_files(void);               /* settings changed by another program: accounts, volumes, do not disturb */
+void phone_reload_history(void);             /* the history file changed by another program */
 void phone_prefill(const char *number, int acct);   /* the dialler with a number in it; acct 0 to 5, or -1 for the usual one */
 void phone_dial_from(int acct);              /* the dialler, set to call from that account */
 void phone_toggle_dnd(void);
@@ -127,6 +130,7 @@ int phone_account_line(int k, char *out, size_t n, uint32_t *colour, int *is_def
 /* ---------- contacts (contacts.c): a list of names and numbers ---------- */
 
 void contacts_init(void);
+int contacts_reload(void);                   /* the file changed by another program; 0: busy, ask again */
 const char *contacts_name(const char *number);   /* NULL if the number is not in the list */
 void contacts_open(const char *find);        /* show the list */
 void contacts_open_add(const char *number, const char *name);   /* straight to adding this number */
@@ -145,10 +149,14 @@ void phone_set_volume(int which, int level); /* stores it and tells the audio se
 int cfg_get(const char *file, const char *key, char *out, size_t n);       /* 1 if the key is there */
 const char *cfg_str(const char *file, const char *key, const char *def);   /* good until four calls later */
 int cfg_set(const char *file, const char *key, const char *value);         /* NULL removes; 0, or -1 with errno */
+char *cfg_load_text(const char *file);                                     /* the whole file, malloc'd, or NULL */
+int cfg_save_text(const char *file, const char *text);                     /* the whole file, atomically */
+int cfg_secret(const char *key);                                           /* a password: never shown */
 int config_main(int argc, char **argv);                                    /* the t48-config command */
 
 /* ---------- the app manager (pkg.c): the t48-app command ---------- */
 
+#define T48_DEFAULT_FEED "https://m0lte.github.io/yealink-t48s-apps/index.json"
 int pkg_main(int argc, char **argv);
 const char *pkg_default_feed(void);
 
@@ -167,6 +175,7 @@ void settings_job_readable(void);
 int settings_reaped(pid_t pid, int status);  /* 1 if that was ours */
 const char *settings_state(const char *key);
 const char *settings_tz(void);               /* the TZ string for the zone in the store */
+void settings_reload(void);                  /* the store changed under the screens: time zone, and the page showing */
 /* from settings.c back to the shell */
 void shell_settings_changed(void);           /* redraw, if the settings are showing */
 void shell_settings_closed(int to_launcher);
@@ -202,6 +211,7 @@ void audioc_key(int ch);
 
 #define BL_LEVELS 10
 void backlight_init(void);
+void backlight_reload(void);                 /* the screen settings file changed */
 int backlight_present(void);                 /* is there a backlight device at all */
 int backlight_level(void);                   /* the brightness when bright, 1 to BL_LEVELS */
 void backlight_set_level(int level);
@@ -211,6 +221,17 @@ int backlight_touch(int state);              /* the same for a touch */
 int backlight_timeout(long long now);
 void backlight_tick(long long now);
 const char *backlight_state(const char *key);
+
+/* ---------- what other programs change (watch.c): settings files, contacts, history, apps, web pairing ---------- */
+
+int watch_timeout(long long now);
+void watch_tick(long long now);
+void watch_draw_overlay(void);               /* a browser's pairing code, over the shell's own screens */
+int watch_key(int code, int down);           /* 1: the key was for the pairing box */
+int watch_touch(int state, int x, int y);
+const char *watch_web_url(void);             /* "" until the web page is running */
+int watch_web_paired(void);                  /* browsers paired with it */
+const char *watch_state(const char *key);
 
 /* ---------- lamps (leds.c): a place for the driver of issue #3 ---------- */
 

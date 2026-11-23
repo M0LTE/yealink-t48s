@@ -118,6 +118,9 @@ static void reload(void)
     }
 }
 
+/* the settings file has been changed by another program (watch.c) */
+void backlight_reload(void) { reload(); }
+
 void backlight_init(void)
 {
     last_touched = t48_now_ms();

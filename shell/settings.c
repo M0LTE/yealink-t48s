@@ -38,7 +38,7 @@ static const char *const page_names[] = {"root", "accounts", "sip", "network", "
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
 enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16 };
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
-              A_SSH, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE };
+              A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE };
 
 struct row {
     int kind, flags;
@@ -83,67 +83,7 @@ static struct {
 
 /* ---------- time zones ---------- */
 
-/* musl and a read-only image: no zone files, so the rules are here, in the
- * form the C library takes in TZ. A zone not listed can be set over SSH as
- * that kind of string (t48-config set system timezone 'XYZ-3'). */
-static const struct { const char *name, *tz; } zones[] = {
-    {"UTC", "UTC0"},
-    {"Europe/London", "GMT0BST,M3.5.0/1,M10.5.0"},
-    {"Europe/Dublin", "GMT0IST,M3.5.0/1,M10.5.0"},
-    {"Europe/Lisbon", "WET0WEST,M3.5.0/1,M10.5.0"},
-    {"Atlantic/Reykjavik", "GMT0"},
-    {"Europe/Amsterdam", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Berlin", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Brussels", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Copenhagen", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Madrid", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Oslo", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Paris", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Prague", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Rome", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Stockholm", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Vienna", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Warsaw", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Zurich", "CET-1CEST,M3.5.0,M10.5.0/3"},
-    {"Europe/Athens", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-    {"Europe/Helsinki", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-    {"Europe/Kyiv", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-    {"Europe/Istanbul", "<+03>-3"},
-    {"Europe/Moscow", "MSK-3"},
-    {"Africa/Johannesburg", "SAST-2"},
-    {"Africa/Nairobi", "EAT-3"},
-    {"Asia/Dubai", "<+04>-4"},
-    {"Asia/Karachi", "PKT-5"},
-    {"Asia/Kolkata", "IST-5:30"},
-    {"Asia/Dhaka", "<+06>-6"},
-    {"Asia/Bangkok", "<+07>-7"},
-    {"Asia/Singapore", "<+08>-8"},
-    {"Asia/Hong_Kong", "HKT-8"},
-    {"Asia/Shanghai", "CST-8"},
-    {"Australia/Perth", "AWST-8"},
-    {"Asia/Tokyo", "JST-9"},
-    {"Asia/Seoul", "KST-9"},
-    {"Australia/Adelaide", "ACST-9:30ACDT,M10.1.0,M4.1.0/3"},
-    {"Australia/Brisbane", "AEST-10"},
-    {"Australia/Sydney", "AEST-10AEDT,M10.1.0,M4.1.0/3"},
-    {"Pacific/Auckland", "NZST-12NZDT,M9.5.0,M4.1.0/3"},
-    {"Atlantic/Azores", "<-01>1<+00>,M3.5.0/0,M10.5.0/1"},
-    {"America/Sao_Paulo", "<-03>3"},
-    {"America/Argentina/Buenos_Aires", "<-03>3"},
-    {"America/St_Johns", "NST3:30NDT,M3.2.0,M11.1.0"},
-    {"America/Halifax", "AST4ADT,M3.2.0,M11.1.0"},
-    {"America/New_York", "EST5EDT,M3.2.0,M11.1.0"},
-    {"America/Toronto", "EST5EDT,M3.2.0,M11.1.0"},
-    {"America/Chicago", "CST6CDT,M3.2.0,M11.1.0"},
-    {"America/Mexico_City", "CST6"},
-    {"America/Denver", "MST7MDT,M3.2.0,M11.1.0"},
-    {"America/Phoenix", "MST7"},
-    {"America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0"},
-    {"America/Vancouver", "PST8PDT,M3.2.0,M11.1.0"},
-    {"America/Anchorage", "AKST9AKDT,M3.2.0,M11.1.0"},
-    {"Pacific/Honolulu", "HST10"},
-};
-#define NZONES ((int)(sizeof zones / sizeof zones[0]))
+#include "zones.h"
 
 /* the TZ string for what the store holds: a listed name, or the string itself */
 const char *settings_tz(void)
@@ -191,6 +131,15 @@ static void run_apply(const char *what) { run_apply_with(what, NULL); }
 void settings_init(void)
 {
     apply_tz();
+}
+
+static void rebuild(void);
+
+/* the store has been changed by another program (watch.c): the web page, or t48-config */
+void settings_reload(void)
+{
+    apply_tz();
+    if (depth >= 0 && !kbd_open) rebuild();
 }
 
 /* ---------- access: SSH, the host key, the owner's keys (issue #28) ---------- */
@@ -744,6 +693,27 @@ static void build_access(void)
     if (acc.nkeys) add_action(acc.dev ? "Forget the keys that were added" : "Forget all keys", A_FORGET_KEYS, "")->flags = F_DANGER;
     if (!on) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
                       "SSH gives full control of the phone over the network. It is off until you turn it on here.");
+    /* the web setup page (issue #37, docs/web.md) */
+    int web = !strcmp(cfg_str("access", "web", "off"), "on");
+    r = add_action("Web setup page", A_WEB, "");
+    r->kind = R_TOGGLE;
+    snprintf(r->value, sizeof r->value, "%s", web ? "on" : "off");
+    if (web) {
+        char net[80];
+        ui_network_status(net, sizeof net, &up);
+        const char *ip = strrchr(net, ' ');
+        if (watch_web_url()[0]) snprintf(v, sizeof v, "%s", watch_web_url());
+        else if (up && ip) snprintf(v, sizeof v, "http://%s/", ip + 1);
+        else snprintf(v, sizeof v, "this phone's address");
+        add_info("Open in a browser", v);
+        snprintf(v, sizeof v, "%d", watch_web_paired());
+        add_info("Browsers paired", v);
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
+                 "A new browser must type a code that is shown on this screen. Off and on again forgets every browser.");
+    } else {
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value,
+                 "Set the phone up from a computer's browser. It is off until you turn it on here.");
+    }
 }
 
 static void build_about(void)
@@ -1075,6 +1045,21 @@ static void do_action(const struct row *r)
             snprintf(ov.extra, sizeof ov.extra, "Host key: %s", acc.host_key[0] ? acc.host_key : "not known yet");
         }
         break;
+    case A_WEB:
+        if (!strcmp(r->value, "on")) {
+            cfg_set("access", "web", "off");
+            run_apply("access");
+        } else {
+            memset(&ov, 0, sizeof ov);
+            ov.kind = O_CONFIRM;
+            ov.act = A_WEB;
+            ov.yes = "Turn on";
+            ov.no = "Keep off";
+            snprintf(ov.title, sizeof ov.title, "Turn the web page on?");
+            snprintf(ov.text, sizeof ov.text, "Anyone on your network can open it, but only a browser that types a code shown on this screen gets in.");
+            snprintf(ov.extra, sizeof ov.extra, "It is plain HTTP: use it on a network you trust.");
+        }
+        break;
     case A_DOOR_OPEN:
         memset(&ov, 0, sizeof ov);
         ov.kind = O_CONFIRM;
@@ -1123,6 +1108,10 @@ static void confirmed(enum action act, const char *arg)
     case A_REMOVE: change_app(act, arg); break;
     case A_SSH:
         cfg_set("access", "ssh", "on");
+        run_apply("access");
+        break;
+    case A_WEB:
+        cfg_set("access", "web", "on");
         run_apply("access");
         break;
     case A_DOOR_OPEN:

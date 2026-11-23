@@ -1,7 +1,7 @@
 # Yealink firmware images: vendor copyright and large; record their sources in docs instead
 rom-*/
 # Pages and scripts dumped from the phone's web UI (vendor code)
-web/
+/web/
 # Raw framebuffer dumps
 shots/*.raw
 frames/*.bgra
@@ -27,3 +27,6 @@ kernel/kexec-rootfs/root.authorized_keys
 libt48/build*/
 shell/build*/
 .claude/phone-owner
+
+# webconfig: build output
+webconfig/build*/

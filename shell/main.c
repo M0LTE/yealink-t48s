@@ -39,6 +39,7 @@ struct options opt = {
     .apply = "/usr/bin/t48-apply",
     .access = "/run/t48-access",
     .notice = "/run/t48-notice",
+    .web = "/run/t48-web",
 };
 
 enum screen { SCR_IDLE, SCR_LAUNCHER, SCR_APP, SCR_CALL, SCR_MESSAGE, SCR_HISTORY, SCR_SETTINGS, SCR_CONTACTS };
@@ -394,6 +395,7 @@ static void redraw(void)
     case SCR_CONTACTS: contacts_draw(); break;
     }
     phone_draw_overlay();
+    if (scr != SCR_CALL) watch_draw_overlay();
     be->flush(ui_px, SW, 0, 0, SW, SH);
 }
 
@@ -561,6 +563,7 @@ void shell_key(int code, int down)
         phone_key(code, down);
         return;
     }
+    if (scr != SCR_APP && scr != SCR_CALL && watch_key(code, down)) return;   /* X on a browser's pairing code */
     switch (scr) {
     case SCR_APP:
         if (code == T48_KEY_BACK) {
@@ -617,6 +620,7 @@ void shell_touch(int state, int x, int y)
 {
     if (backlight_touch(state)) return;
     if (scr == SCR_APP) { app_touch(state, x, y); return; }
+    if (scr != SCR_CALL && watch_touch(state, x, y)) return;
     if (scr == SCR_SETTINGS) { settings_touch(state, x, y); return; }
     if (scr == SCR_CONTACTS) { contacts_touch(state, x, y); return; }
     if (state != T48_TOUCH_DOWN) return;
@@ -725,6 +729,7 @@ const char *shell_state(const char *key)
         snprintf(n, sizeof n, "%d", idle_notices);
         return n;
     }
+    if (!v) v = watch_state(key);
     if (!v) v = settings_state(key);
     if (!v) v = backlight_state(key);
     return v ? v : phone_state(key);
@@ -758,6 +763,7 @@ static void usage(void)
         "  --apply PROGRAM  run with a settings file's name when it has changed (%s)\n"
         "  --access DIR     where t48-access leaves its status file (%s)\n"
         "  --notice FILE    one or two lines to show on the idle screen while it exists (%s)\n"
+        "  --web DIR        where the web setup page leaves its status file (%s)\n"
         "  --app ID         start this app straight away\n"
         "simulator only:\n"
         "  --script FILE    input script, - for standard input (see docs/shell.md)\n"
@@ -765,7 +771,8 @@ static void usage(void)
         "  --runner PROGRAM run apps with this, such as qemu-arm for apps built for the phone\n"
         "also: t48-app (install, update and remove apps) and t48-config (settings), each with its own help\n",
         opt.apps, opt.data, opt.config, opt.state, opt.sip ? opt.sip : "none", opt.audio ? opt.audio : "none", opt.fb,
-        opt.apply ? opt.apply : "none", opt.access, opt.notice ? opt.notice : "none");
+        opt.apply ? opt.apply : "none", opt.access, opt.notice ? opt.notice : "none",
+        opt.web ? opt.web : "none");
 }
 
 int main(int argc, char **argv)
@@ -782,7 +789,7 @@ int main(int argc, char **argv)
     }
 
     for (int i = 1; i < argc; i++) sim |= !strcmp(argv[i], "--sim");
-    if (sim) opt.sip = opt.audio = opt.apply = opt.notice = NULL;   /* a PC's own services stay out of it unless asked */
+    if (sim) opt.sip = opt.audio = opt.apply = opt.notice = opt.web = NULL;   /* a PC's own services stay out of it unless asked */
     for (int i = 1; i < argc; i++) {
         const char **dst = NULL;
         if (!strcmp(argv[i], "--sim")) continue;
@@ -800,6 +807,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--runner")) dst = &opt.runner;
         else if (!strcmp(argv[i], "--access")) dst = &opt.access;
         else if (!strcmp(argv[i], "--notice")) dst = &opt.notice;
+        else if (!strcmp(argv[i], "--web")) dst = &opt.web;
         if (!dst || i + 1 >= argc) { usage(); return 2; }
         *dst = argv[++i];
     }
@@ -863,6 +871,7 @@ int main(int argc, char **argv)
         if (scr == SCR_SETTINGS && (t = settings_timeout(now)) >= 0 && t < wait) wait = t;
         if (scr == SCR_CONTACTS && (t = contacts_timeout(now)) >= 0 && t < wait) wait = t;
         if ((t = backlight_timeout(now)) >= 0 && t < wait) wait = t;
+        if ((t = watch_timeout(now)) < wait) wait = t;
         if (x_deadline && x_deadline - now < wait) wait = (int)(x_deadline > now ? x_deadline - now : 0);
 
         pf[n].fd = chld_pipe[0]; pf[n++].events = POLLIN;
@@ -905,6 +914,7 @@ int main(int argc, char **argv)
         if (scr == SCR_CONTACTS) contacts_tick(now);
         be->tick(now);
         backlight_tick(now);
+        watch_tick(now);
         if (x_deadline && now >= x_deadline && scr == SCR_APP) go_home();
         if (now >= next_clock) {
             next_clock = now + 1000;

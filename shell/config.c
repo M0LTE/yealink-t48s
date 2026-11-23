@@ -113,6 +113,16 @@ static int name_ok(const char *name)
     return word_ok(name, "-._") && name[0] != '.';
 }
 
+/* a whole file, for the web page's backup and restore (webconfig/): malloc'd text or
+ * NULL; and 0, or -1 with errno */
+char *cfg_load_text(const char *file) { return name_ok(file) ? storage->load(file) : NULL; }
+
+int cfg_save_text(const char *file, const char *text)
+{
+    if (!name_ok(file) || strlen(text) > CFG_MAX) { errno = EINVAL; return -1; }
+    return storage->save(file, text);
+}
+
 /* ---------- get and set ---------- */
 
 /* the line for key: where it starts and where its value starts; the last one in the text */
@@ -191,7 +201,8 @@ int cfg_set(const char *file, const char *key, const char *value)
 
 /* ---------- t48-config ---------- */
 
-static int secret(const char *key) { return strstr(key, "password") || strstr(key, "secret") || strstr(key, "token"); }
+/* a key whose value is never shown */
+int cfg_secret(const char *key) { return strstr(key, "password") || strstr(key, "secret") || strstr(key, "token"); }
 
 static int list_file(const char *name, int with_name)
 {
@@ -206,7 +217,7 @@ static int list_file(const char *name, int with_name)
         if (*p != '#' && eq) {
             *eq = 0;
             if (with_name) printf("%s ", name);
-            printf("%s=%s\n", p, secret(p) ? (eq[1] ? "(set)" : "") : eq + 1);
+            printf("%s=%s\n", p, cfg_secret(p) ? (eq[1] ? "(set)" : "") : eq + 1);
         }
         p = next;
     }
