@@ -10,7 +10,8 @@
 #                   this PC (for the simulator) in build/host/APP
 #   make package    build/APP-VERSION.t48app, from the phone's folder
 #   make shot       start the app in the simulator, save build/shot.png
-#   make check      run each tests/*.script in the simulator (from this folder)
+#   make check      run each tests/*.script in the simulator, from this folder,
+#                   with the app started (settings: tests/APP.conf if there is one)
 #   make clean
 #
 # Optional: EXTRA (more files for the app folder), LDLIBS, CFLAGS, O (build folder).
@@ -42,17 +43,19 @@ $(O)/host/$(APP)/$(APP): $(DEPS) $(HOST_LIB)
 	cp $(FILES) $(@D)/
 
 $(HOST_LIB):
-	$(MAKE) -C $(T48_SHARE)/libt48 CC=$(HOST_CC) O=$(dir $(HOST_LIB)) $(HOST_LIB)
+	$(MAKE) -C $(T48_SHARE)/libt48 CC=$(HOST_CC) O=$(patsubst %/,%,$(dir $(HOST_LIB))) $(HOST_LIB)
 
 package: $(O)/arm/$(APP)/$(APP)
 	$(T48_SDK)/bin/t48-pack $(O)/arm/$(APP) $(O)
 
 shot: $(O)/host/$(APP)/$(APP)
-	rm -rf $(O)/sim && $(SIM) --app $(APP) --shot $(O)/shot.png
+	rm -rf $(O)/sim && mkdir -p $(O)/sim/apps && if [ -f tests/$(APP).conf ]; then cp tests/$(APP).conf $(O)/sim/apps/; fi
+	$(SIM) --app $(APP) --shot $(O)/shot.png
 
 check: $(O)/host/$(APP)/$(APP)
 	@for t in tests/*.script; do [ -f "$$t" ] || continue; echo "== $$t"; rm -rf $(O)/sim; \
-		$(SIM) --script $$t || exit 1; done
+		mkdir -p $(O)/sim/apps; if [ -f tests/$(APP).conf ]; then cp tests/$(APP).conf $(O)/sim/apps/; fi; \
+		$(SIM) --app $(APP) --script $$t || exit 1; done
 
 clean:
 	rm -rf $(O)

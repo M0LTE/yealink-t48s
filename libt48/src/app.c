@@ -225,11 +225,7 @@ int t48_poll(t48_event *ev, int timeout_ms)
             }
             if (wake < 0 || timers[i].next < wake) wake = timers[i].next;
         }
-        if (deadline >= 0 && now >= deadline) {
-            memset(ev, 0, sizeof *ev);
-            return 0;
-        }
-
+        /* past the deadline still looks once, so t48_poll(ev, 0) reads the socket */
         struct pollfd pf[1 + NWATCH];
         pf[0].fd = sock;
         pf[0].events = POLLIN;
@@ -237,8 +233,14 @@ int t48_poll(t48_event *ev, int timeout_ms)
             pf[1 + i].fd = watch[i].fd;
             pf[1 + i].events = POLLIN;
         }
-        int r = poll(pf, (nfds_t)(1 + nwatch), wake < 0 ? -1 : (int)(wake - now));
-        if (r <= 0) continue;
+        int r = poll(pf, (nfds_t)(1 + nwatch), wake < 0 ? -1 : wake > now ? (int)(wake - now) : 0);
+        if (r <= 0) {
+            if (deadline >= 0 && t48_now_ms() >= deadline) {
+                memset(ev, 0, sizeof *ev);
+                return 0;
+            }
+            continue;
+        }
         if (pf[0].revents) {
             fill_rx();
             continue;
