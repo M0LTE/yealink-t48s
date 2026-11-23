@@ -18,6 +18,7 @@ gpl-src/
 # Built binaries copied in for the kexec initramfs
 kernel/kexec-rootfs/bin/busybox
 kernel/kexec-rootfs/usr/bin/
+kernel/kexec-rootfs/usr/share/t48/
 kernel/kexec-rootfs/root.authorized_keys
 .claude/worktrees/
 

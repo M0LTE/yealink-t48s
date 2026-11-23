@@ -53,14 +53,53 @@ The screen is kept in memory; there is no window yet. Apps are the real programs
 
 ## Running it on the phone
 
-Not done yet: the phone was busy when this was written, so the phone side (framebuffer, grabbed input devices, touch calibration, dropping to an app user) is built but untested. To try it under our kernel:
+The kexec image starts `t48-shell` on the screen at boot (`kernel/kexec-rootfs/etc/inittab`), with the clock app in `/usr/share/t48/apps`. Its log is `/var/log/t48-shell.log` on the phone: the input devices it found, each screen change, each app start and stop. If it is killed, `init` starts it again.
+
+![the idle screen, read back from the phone's framebuffer](img/shell-on-phone.png)
+
+To put a new build into the image, copy the programs into the kernel build folder before building (the paths are the ones `kernel/kexec-rootfs.list` names):
 
 ```
 make -C shell CC=$HOME/src-build/t48s/bin/armcc O=build-arm all build-arm/apps
-tar -C shell/build-arm -cf - t48-shell apps | tools/ourkernel.sh ssh 'mkdir -p /tmp/t48 && tar -C /tmp/t48 -xf -'
-tools/ourkernel.sh ssh '/tmp/t48/t48-shell --apps /tmp/t48/apps --data /tmp/t48/data --config /tmp/t48/config'
+cp shell/build-arm/t48-shell                 BUILD/kexec-rootfs/usr/bin/
+cp -r shell/build-arm/apps/clock             BUILD/kexec-rootfs/usr/share/t48/apps/
 ```
 
-It logs to the terminal: the input devices it found, each screen change, each app start and stop. Ctrl-C gives the screen back to the text console. Things to check, in order: the idle screen appears; OK opens the launcher; the clock starts and shows key names and a dot under the finger; holding X returns; lifting the handset shows the call screen; the Crasher app's three keys each end in a message, not a dead screen. If phone keys log as "key code N has no meaning yet", the key table in `shell/be_fb.c` needs that code.
+To try a build without a new image, copy it over and restart the shell; extra apps can go in `/data/apps` (in RAM for now, so gone at the next boot):
 
-To make it the phone's screen for good, replace the `tty1` line in `kernel/kexec-rootfs/etc/inittab` with `::respawn:/usr/bin/t48-shell` (or the equivalent runit service in the Buildroot image, #16) and put apps in `/usr/share/t48/apps`.
+```
+tools/ourkernel.sh ssh 'cat > /usr/bin/t48-shell.new && chmod +x /usr/bin/t48-shell.new && mv /usr/bin/t48-shell.new /usr/bin/t48-shell && killall t48-shell' < shell/build-arm/t48-shell
+tar -C shell/build-arm/apps -cf - crasher | tools/ourkernel.sh ssh 'tar -C /data/apps -xf -'
+```
+
+### Testing without being there
+
+`tools/phone-input.sh` presses keys, touches the screen and lifts the handset from a PC, and saves the phone's real screen as a PNG. It uses test hooks in our keypad and touch drivers (`kernel/README.md`), so the events travel through the real input devices and the shell cannot tell them from a finger. The names are the simulator's:
+
+```
+tools/phone-input.sh key ok -- shot launcher.png
+tools/phone-input.sh key x 1000          # hold X for a second: Home
+tools/phone-input.sh touch 400 420       # screen pixels
+tools/phone-input.sh hook off -- shot call.png -- hook on
+tools/phone-input.sh log
+```
+
+### What has been checked on the phone (2026-11-23)
+
+All with injected input, nobody at the phone:
+
+- The idle screen draws at boot, and the clock on it follows NTP.
+- OK, or a touch on Apps, opens the launcher; OK or a touch on its tile starts the clock, as its own user (uid 23373), with its own folder in `/data/appdata`.
+- The clock shows key names and puts a dot under a touch. A touch asked for at 600, 60 arrives as 599, 59, so the calibration is applied; with a changed `/etc/pointercal` the same touch lands elsewhere, so the file is read.
+- Holding X goes Home, the app is frozen (process state T), its tile says "open", and picking it resumes it. A short X closes it. Volume and the other phone keys are logged and do not reach the app.
+- Hook off shows the call screen and freezes the app; hook on brings it back. A shell started with the handset already lifted goes straight to the call screen.
+- The devices are grabbed: a second program reading `/dev/input/event0` sees nothing while keys are pressed, and nothing is typed on the text console underneath.
+- `kill -9` on the app gives "Clock has stopped", no process or buffer left behind. The Crasher test app's three cases (crash, error exit, hang) all end the same way as in the simulator. Killing the shell takes its app with it, and `init` restarts the shell.
+
+### Still needs fingers
+
+1. Press each key on the idle screen, in the launcher and in the clock: digits, `*`, `#`, arrows, OK, X. The clock should name each one.
+2. Hold X in the clock for a second: Home. Tap its tile: back in the clock.
+3. Tap Apps, tap the clock, drag a finger around: the dot should follow under the finger, to the edges.
+4. Lift the handset in the clock: the call screen at once. Put it down: the clock again.
+5. Press Volume, Mute, Headset, Speakerphone, Hold, Transfer, Redial, Message in the clock: nothing happens on the screen, and `tools/phone-input.sh log` has a "phone key" line for each.

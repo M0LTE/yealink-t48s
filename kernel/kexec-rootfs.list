@@ -43,3 +43,16 @@ slink /usr/bin/dbclient dropbearmulti 0777 0 0
 file /usr/bin/keytest /w/kexec-rootfs/usr/bin/keytest 0755 0 0
 file /usr/bin/t48rec /w/kexec-rootfs/usr/bin/t48rec 0755 0 0
 file /usr/bin/t48mix /w/kexec-rootfs/usr/bin/t48mix 0755 0 0
+# t48-shell and its example app (docs/shell.md says how they are built and copied in)
+dir /var/log 0755 0 0
+dir /data 0755 0 0
+dir /data/apps 0755 0 0
+dir /data/appdata 0755 0 0
+dir /data/config 0755 0 0
+dir /usr/share/t48 0755 0 0
+dir /usr/share/t48/apps 0755 0 0
+dir /usr/share/t48/apps/clock 0755 0 0
+file /usr/bin/t48-shell /w/kexec-rootfs/usr/bin/t48-shell 0755 0 0
+file /usr/share/t48/apps/clock/clock /w/kexec-rootfs/usr/share/t48/apps/clock/clock 0755 0 0
+file /usr/share/t48/apps/clock/manifest.json /w/kexec-rootfs/usr/share/t48/apps/clock/manifest.json 0644 0 0
+file /usr/share/t48/apps/clock/icon.ppm /w/kexec-rootfs/usr/share/t48/apps/clock/icon.ppm 0644 0 0

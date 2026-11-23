@@ -352,6 +352,37 @@ static int diag_get(char *buf, const struct kernel_param *kp)
 		n_readings, n_rejected, n_touches, n_spi_errors);
 }
 
+/*
+ * Test hook: echo "X Y" > /sys/module/t48s_touch/parameters/inject reports a
+ * touch at raw position X Y (0 to 4095, as the chip gives them), "up" lifts
+ * it. For testing programs without a finger; a real touch still works and
+ * simply takes over.
+ */
+static int inject_set(const char *val, const struct kernel_param *kp)
+{
+	unsigned int x, y;
+
+	if (!touch_dev)
+		return -ENODEV;
+	if (!strncmp(val, "up", 2)) {
+		input_report_key(touch_dev, BTN_TOUCH, 0);
+		input_report_abs(touch_dev, ABS_PRESSURE, 0);
+	} else if (sscanf(val, "%u %u", &x, &y) == 2 && x <= TSC_MAX && y <= TSC_MAX) {
+		input_report_key(touch_dev, BTN_TOUCH, 1);
+		input_report_abs(touch_dev, ABS_X, x);
+		input_report_abs(touch_dev, ABS_Y, y);
+		input_report_abs(touch_dev, ABS_PRESSURE, TSC_MAX / 2);
+	} else {
+		return -EINVAL;
+	}
+	input_sync(touch_dev);
+	return 0;
+}
+
+static const struct kernel_param_ops inject_ops = { .set = inject_set };
+module_param_cb(inject, &inject_ops, NULL, 0200);
+MODULE_PARM_DESC(inject, "\"X Y\" (raw, 0 to 4095): report a touch there; \"up\": lift it. For tests");
+
 static const struct kernel_param_ops diag_ops = { .get = diag_get };
 module_param_cb(diag, &diag_ops, NULL, 0444);
 MODULE_PARM_DESC(diag, "read the chip's temperature, battery and aux inputs, the pen pin and the counters");

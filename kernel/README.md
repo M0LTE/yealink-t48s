@@ -56,6 +56,8 @@ The driver assumes the switch is already set up (it is, after a kexec from Yeali
 
 The key table is in the driver, all confirmed by pressing every key (2026-11-22): digits, `*` (`KEY_KPASTERISK`), `#` (`KEY_NUMERIC_POUND`, which the console does not type), arrows, OK (`KEY_ENTER`), X (`KEY_BACKSPACE`), Volume -/+ (`KEY_VOLUMEDOWN`/`KEY_VOLUMEUP`), Headset (`KEY_PROG1`), Mute (`KEY_MUTE`), Message (`KEY_MESSENGER`), Hold (`KEY_PAUSE`), Redial (`KEY_AGAIN`), Transfer (`KEY_FORWARD`), Speakerphone (`KEY_PROG2`). `native/keytest` names each key on the screen. The table can be changed at run time with the usual `EVIOCSKEYCODE`.
 
+For tests without anyone at the phone, `echo "CODE VALUE" > /sys/module/t48s_keypad/parameters/inject` reports a Linux key code as pressed (1) or released (0) through the real device: `KEY_PHONE` (169) on the hook switch, any key in the table on the keypad. `tools/phone-input.sh` wraps it with key names (`key ok`, `hook off`). Unlike writing to `/dev/input/event0`, this reaches a program that has grabbed the device.
+
 `drivers/t48s_holtek.c` (copied into `drivers/misc/`) bit-bangs the Holtek chip on GPIO36/11/10. At boot it reads the version block and, if the chip answers as a protocol 2.0 one, turns its watchdog off; the kexec loader has already done that, so this is for boot paths that have not. `echo N > /sys/module/t48s_holtek/parameters/watchdog` arms it for N seconds (nothing feeds it: the phone resets, which is a handy way to prove it works), 0 turns it off. The chip's LED and the other LEDs are not driven yet.
 
 Not tested yet: an actual key press. To test:
@@ -71,6 +73,8 @@ then press each key once. Every press and release prints a line on the screen an
 `drivers/t48s_touch.c` (copied into `drivers/input/`) gives the input device "T48S touchscreen" (`/dev/input/event2`): `BTN_TOUCH`, `ABS_X`, `ABS_Y`, `ABS_PRESSURE`, all raw 12-bit values (0 to 4095), the same as Yealink's own driver reports. The chip is a TI TSC2046 on the SoC's SPI host (an ARM PL022). The driver talks to the PL022 directly and polls: about 50 times a second (it asks for 10 ms, the 100 Hz tick makes that 20) it reads the pen-down pin (GPIO26), and only while that is low does it clock the chip (X ten times, Y ten times, pressure, in one quarter-millisecond transfer). No SPI core, no GPIO interrupts, nothing to configure.
 
 Raw values become pixels in userspace, with a tslib-style `/etc/pointercal`. The kexec root filesystem carries the phone's factory calibration (from U-Boot's `calparam`): `14798 13 -4134128 53 10207 -5441552 65536`, meaning x = (14798 * rawx + 13 * rawy - 4134128) / 65536 and y = (53 * rawx + 10207 * rawy - 5441552) / 65536. To recalibrate later, replace those seven numbers.
+
+To touch the screen from a PC, `echo "X Y" > /sys/module/t48s_touch/parameters/inject` reports a touch at a raw position and `echo up` lifts it; `tools/phone-input.sh touch 400 240` works in screen pixels.
 
 Checks without touching anything:
 

@@ -122,6 +122,33 @@ static u16 last_col[COLS];	/* 1 bit = pressed */
 static int hook_level = -1;	/* last reported GPIO level */
 static int hook_seen = -1;	/* level at the previous poll, for debounce */
 
+/*
+ * Test hook: echo "CODE VALUE" > /sys/module/t48s_keypad/parameters/inject
+ * reports a Linux key code (VALUE 1 down, 0 up) as if the key had been
+ * pressed: KEY_PHONE (169) on the hook switch device, anything in the key
+ * table on the keypad. It goes through the real input devices, so it reaches
+ * whatever has them open (and grabbed), which writing to /dev/input/eventN
+ * from another program does not when a device is grabbed.
+ */
+static int inject_set(const char *val, const struct kernel_param *kp)
+{
+	unsigned int code, value;
+	struct input_dev *dev;
+
+	if (sscanf(val, "%u %u", &code, &value) != 2 || code > KEY_MAX || value > 1)
+		return -EINVAL;
+	dev = code == KEY_PHONE ? hook_dev : keys_dev;
+	if (!dev || !test_bit(code, dev->keybit))
+		return -EINVAL;
+	input_report_key(dev, code, value);
+	input_sync(dev);
+	return 0;
+}
+
+static const struct kernel_param_ops inject_ops = { .set = inject_set };
+module_param_cb(inject, &inject_ops, NULL, 0200);
+MODULE_PARM_DESC(inject, "\"CODE VALUE\": report a key (or KEY_PHONE, the hook) as pressed (1) or released (0), for tests");
+
 static void t48s_keypad_read(u16 *col)
 {
 	u32 ctrl, w[5];

@@ -45,6 +45,16 @@
 #define ESW_PAGE(p, o)		((((p) << 8) + (o)) * 8)
 #define ESW_PORTCTRL(port)	ESW_PAGE(0x00, (port))
 #define ESW_PORTCTRL_DISABLE	0x03		/* MAC TX and RX disable */
+/* the IMP port's control register: which frames without an ARL entry reach the CPU */
+#define ESW_IMPCTRL		ESW_PORTCTRL(ESW_PORT_IMP)
+#define ESW_IMPCTRL_RX_UCAST	0x10
+#define ESW_IMPCTRL_RX_MCAST	0x08
+#define ESW_IMPCTRL_RX_BCAST	0x04
+#define ESW_MIB(port, o)	ESW_PAGE(0x20 + (port), (o))
+#define ESW_MIB_TX_DROP		0x08
+#define ESW_MIB_TX_BCAST	0x10
+#define ESW_MIB_TX_MCAST	0x14
+#define ESW_MIB_TX_UCAST	0x18
 #define ESW_GBLMGMT		ESW_PAGE(0x02, 0x00)
 #define ESW_GBLMGMT_IMP_EN	0x80
 #define ESW_IMPENABLE		ESW_PAGE(0x34, 0x06)
@@ -461,10 +471,49 @@ static void esw_imp_enable(struct t48s_eth *p, int on)
 	v = on ? (v | 1) : (v & ~1);
 	esw_wr(p, ESW_IMPENABLE, v);
 
-	v = esw_rd(p, ESW_PORTCTRL(ESW_PORT_IMP));
-	v = on ? (v & ~ESW_PORTCTRL_DISABLE) : (v | ESW_PORTCTRL_DISABLE);
-	esw_wr(p, ESW_PORTCTRL(ESW_PORT_IMP), v);
+	v = esw_rd(p, ESW_IMPCTRL);
+	if (on) {
+		v &= ~ESW_PORTCTRL_DISABLE;
+		/* broadcasts (ARP requests) and unlearned multicast must reach us */
+		v |= ESW_IMPCTRL_RX_BCAST | ESW_IMPCTRL_RX_MCAST;
+	} else {
+		v |= ESW_PORTCTRL_DISABLE;
+	}
+	esw_wr(p, ESW_IMPCTRL, v);
 }
+
+/*
+ * cat /sys/module/t48s_eth/parameters/diag: the switch's CPU port settings,
+ * what it has sent our way, and where the receive ring and the DMA stand.
+ */
+static struct t48s_eth *the_eth;
+
+static int diag_get(char *buf, const struct kernel_param *kp)
+{
+	struct t48s_eth *p = the_eth;
+	u32 llp;
+
+	if (!p)
+		return sprintf(buf, "no device\n");
+	llp = dmac_rd(p, DMAC_CH(CH_RX) + DMAC_LLP);
+	return sprintf(buf,
+		"imp ctrl 0x%02x (bcast %s), gblmgmt 0x%02x, imp enable 0x%02x, link 0x%04x\n"
+		"to cpu: bcast %u mcast %u ucast %u dropped %u\n"
+		"rx ring: driver at %d, dma at %d, channels on 0x%x\n",
+		esw_rd(p, ESW_IMPCTRL),
+		(esw_rd(p, ESW_IMPCTRL) & ESW_IMPCTRL_RX_BCAST) ? "on" : "OFF",
+		esw_rd(p, ESW_GBLMGMT), esw_rd(p, ESW_IMPENABLE), esw_rd(p, ESW_LINK),
+		esw_rd(p, ESW_MIB(ESW_PORT_IMP, ESW_MIB_TX_BCAST)),
+		esw_rd(p, ESW_MIB(ESW_PORT_IMP, ESW_MIB_TX_MCAST)),
+		esw_rd(p, ESW_MIB(ESW_PORT_IMP, ESW_MIB_TX_UCAST)),
+		esw_rd(p, ESW_MIB(ESW_PORT_IMP, ESW_MIB_TX_DROP)),
+		p->rx_next,
+		llp ? (int)((llp - p->rx_lli_dma) / sizeof(struct lli)) : -1,
+		dmac_rd(p, DMAC_CHEN) & 0xff);
+}
+
+static const struct kernel_param_ops diag_ops = { .get = diag_get };
+module_param_cb(diag, &diag_ops, NULL, 0444);
 
 static int t48s_open(struct net_device *dev)
 {
@@ -501,6 +550,8 @@ static int t48s_open(struct net_device *dev)
 	dmac_chbit(p, DMAC_MASK_BLOCK, CH_RX, 1);
 	dmac_chbit(p, DMAC_MASK_ERR, CH_RX, 1);
 	dmac_start(p, CH_RX, p->rx_lli_dma);
+	netdev_info(dev, "switch: imp ctrl now 0x%02x, gblmgmt 0x%02x\n",
+		    esw_rd(p, ESW_IMPCTRL), esw_rd(p, ESW_GBLMGMT));
 	netif_carrier_on(dev);
 	netif_start_queue(dev);
 	return 0;
@@ -566,6 +617,7 @@ static int __init t48s_eth_init(void)
 	rc = register_netdev(dev);
 	if (rc)
 		goto fail;
+	the_eth = p;
 	netdev_info(dev, "T48S switch ethernet, MAC %pM\n", dev->dev_addr);
 	return 0;
 
