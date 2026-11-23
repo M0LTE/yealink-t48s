@@ -11,8 +11,8 @@ References are `function+offset` in the module (`arm-linux-gnueabihf-objdump -dr
 | Keypad matrix | SoC keypad controller (KEYC) at 0x8000D000, IRQ 48 | on-chip, pins GPIO43-58 |
 | Hook switch | GPIO29, both edges, IRQ 129 (GPIO IRQ) | plain GPIO |
 | Touch | TI TSC2046 (ADS7846 type) resistive controller | SoC SPI host (PL022 type) at 0x80015000, CS on GPIO25, pen IRQ on GPIO26 |
-| Watchdog, one LED, hw version, anti-clone check | Holtek MCU | bit-banged 3-wire serial on GPIO36 (CS), GPIO11 (CLK), GPIO10 (data) |
-| Other LEDs | GPIO3, GPIO4, GPIO5, active low (if hw id is 35, see below) | plain GPIO |
+| Watchdog, power lamp, hw version, anti-clone check | Holtek MCU | bit-banged 3-wire serial on GPIO36 (CS), GPIO11 (CLK), GPIO10 (data) |
+| Headset, Mute, Speakerphone key lamps | GPIO3, GPIO4, GPIO5, active low | plain GPIO |
 | LCD backlight | SoC PWM at 0x80002040 on GPIO35, enable on GPIO18 | on-chip |
 
 The keypad is **not** read through the Holtek chip. The Holtek event interrupt is configured as "none" in this build, so the MCU never reports keys; U-Boot's "scan key" also reads KEYC directly.
@@ -20,7 +20,7 @@ The keypad is **not** read through the Holtek chip. The Holtek event interrupt i
 ## Checked on the phone (2026-11-22, issue #3)
 
 - **Hardware id is 65**, not 35: `holtek_hw=65.0.0.2.0.0.0`, `holtek_sw=0.2`, and `hwversion=65.0.0.2.0.0.0` on Yealink's command line. Our own driver reads the same version block (protocol 2.0, byte 6 = 2).
-- **LEDs are unresolved.** The offline reading says id 65 uses the SoC LED matrix on GPIO16-21 and GPIO0-9 (mux function 5), but live those pins are all muxed as plain GPIO (GpioMux 0x80000118 = 0, 0x8000011C = 0x00440000, 0x80000120 = 0x33000000). Nothing drives the LEDs in our kernel yet.
+- **LEDs:** settled on 2026-11-23, see "Checked on the phone (2026-11-23, LEDs)" below. The offline reading that id 65 uses the SoC LED matrix was a misread jump table; the pins it named are all plain GPIO live (GpioMux 0x80000118 = 0, 0x8000011C = 0x00440000, 0x80000120 = 0x33000000).
 - **Keypad controller registers as Yealink leaves them** (and as our kernel finds them after kexec): status words 0x01FF01FF x4 then 0x01FF0000 with no key pressed, prescaler 0x808, +0x18 = 200, control 0x13. Pin mux for GPIO43-58 is function 1, bus clock gate bit 15 set.
 - **Key positions: the U-Boot table is right**, and the old note in status.md was one row off. Settled by Yealink's own Qt keymap, `/phone/resource/device-res/keymap/T48.qmap` (table below).
 - **Hook:** GPIO29 read 1 and Yealink said `hook_sta=1` with the handset (as far as we know) on the cradle. Lifting it has not been tried.
@@ -37,6 +37,22 @@ The keypad is **not** read through the Holtek chip. The Holtek event interrupt i
 - **Calibration:** the factory numbers are in U-Boot's environment, `calparam=14798 13 -4134128 53 10207 -5441552 65536` (tslib order). Yealink's `/phone/scripts/calibrate.sh` copies them to `/config/data/pointercal` and links `/etc/pointercal` to that at startup. They mean screen x = 0.2258 * raw x - 63 and screen y = 0.1557 * raw y - 83: raw x 280 to 3822 spans the 800 pixels, raw y 533 to 3615 the 480, no axis swapped or reversed.
 - **Touch test with our driver (Tom, 2026-11-22):** corner taps read raw (367, 687) top left, (3685, 658) top right, (3719, 3450) bottom right, (336, 3479) bottom left, which the factory calibration puts at pixels (19, 23), (769, 19), (777, 454) and (12, 458). Dots drew under the finger; the calibration needs no change. Samples within one reading agree to within 4 counts; a 1.2 s drag gave about 50 positions a second with no jumps. Pressure channels: z1 about 400 to 2500 and z2 about 3100 to 4000 while touched. One reading in 91 was thrown out (the first one of a tap, still settling: spread 204).
 - Linux 3.6 trap: `input_set_abs_params()` does not set `EV_ABS` on the device; without setting it by hand every position event is silently dropped.
+
+## Checked on the phone (2026-11-23, issue #3, LEDs)
+
+The phone has four lamps and id 65 drives them exactly as id 35 does:
+
+| Yealink LED bit | Lamp | Driven by |
+|---|---|---|
+| 0 | power: the red lamp at the top right of the case (Yealink blinks it for ringing, missed calls, voicemail) | Holtek command 4, 32-bit value 1 or 0 |
+| 1 | Headset key | GPIO3, low = lit |
+| 2 | Mute key | GPIO4, low = lit |
+| 3 | Speakerphone key | GPIO5, low = lit |
+
+- **From keypad.ko:** `led_init` switches on id - 28 through a jump table at 0x8bb8; entry 37 (id 65) is 0x8d70, the same code as ids 35 and 41: request GPIO3, 4, 5, mux them to GPIO, outputs, high; three LEDs, mask 0x0E. `led_hw_set` sends bit 0 to the Holtek chip and, for id 65, bits 1 to 3 inverted to the GPIOs in `gpio_led_map` (+0x464). The LED matrix code (0x8e54) is for other ids.
+- **Which lamp is which** comes from Yealink's userspace, `/phone/resource/device-res/ledLamp/LedLamp.xml`, section "T48 T48S": lamp 0 is the power lamp (events InCall 300 ms on / 300 off, Hold 500/500, MissCall and VoiceMail 1000/1000, PowerSaving 500/3000), lamp 1 headset, lamp 2 Mute, lamp 3 speaker. There is no message lamp and there are no line-key lamps.
+- **Under Yealink:** `echo "0 N 0x1" > /proc/keypad/led` (N = LED bit, then `0x0` for off). With GPIO data at 0x6F7BFFFF, led1 on gave 0x6F7BFFF7, led2 0x6F7BFFEF, led3 0x6F7BFFDF, and back each time; direction 0x920C4C38 throughout (bits 3 to 5 outputs). led0 showed in the driver's debug log as a Holtek LED write of 1 then 0.
+- **Under our kernel:** `kernel/drivers/t48s_leds.c` makes the same register changes (read back from the same register) and sends the same Holtek command. The chip has no command to read its lamp back, so the power lamp is the one that only eyes can confirm; so are the colours.
 
 ### Key table from Yealink's T48.qmap
 
@@ -79,7 +95,7 @@ The six unknown ones are Headset, Mute, Message, Hold, Redial and Transfer in so
 
 `keypad.ko` reads 7 bytes of hardware version from the Holtek MCU at load and copies them into the kernel symbol `phone_hwversion` (`init_module+0xb4..0xcc`). Byte 6 is the product id; `keypad_dev_init`, `led_init`, `bklight_init`, `misc_init` and `tsc.ko` all switch on it. U-Boot also passes it on the command line as `hwversion=`.
 
-`tsc_dev_identfy+0x2c..0x84` accepts only ids 0x23 (35), 0x33 (51), 0x37 (55) and 0x41 (65), so the T48S is one of those. **Guess: 35.** Reason: for id 65, `led_init` puts an LED matrix on GPIO16-21, which collides with the touch controller's GPIO21 and 16; for id 35 everything is consistent. Keypad, hook, backlight and touch are the same for 35 and 65; only the LEDs differ. First live check: `cat /proc/keypad/holtek_hw` (or the boot line `Hardware version:`, printed byte 6 first).
+`tsc_dev_identfy+0x2c..0x84` accepts only ids 0x23 (35), 0x33 (51), 0x37 (55) and 0x41 (65), so the T48S is one of those. It is 65 (read live). Keypad, hook, backlight, touch and LEDs are the same for 35 and 65. (An earlier version of this page guessed 35 because it misread `led_init` as giving id 65 an LED matrix.)
 
 ## Keypad: SoC keypad controller (KEYC)
 
@@ -130,10 +146,10 @@ Source: `led_init` (0x8b90), `led_hw_set` (0x8474), `led_set` (0x8980).
 
 The driver keeps a 64-bit LED word (`/proc/keypad/led`, ioctl). `led_hw_set`:
 
-1. Bit 0 goes to the Holtek MCU (`holtek_set_led`, see protocol below: command 4, 32-bit value 0 or 1). **Guess**: power/message LED.
+1. Bit 0 goes to the Holtek MCU (`holtek_set_led`, see protocol below: command 4, 32-bit value 0 or 1): the power lamp.
 2. The word is shifted right by one. For ids 35, 41, 37 and 65 (`+0xbc..0xd4` -> `+0x464`): bit i goes to GPIO `gpio_led_map[i]` (.data 0x3c0 = GPIO3, 4, 5, 6), written as the inverse, so **active low**, for i < mcu_led_num.
-3. For id 35, `led_init+0x1e0..0x2c0` requests GPIO3 (`led1_gpio`), GPIO4 (`led2_gpio`), GPIO5 (`led3_gpio`), sets them as outputs, unmuxes them to GPIO and drives them high (off); mcu_led_num = 3. So LED word bits 1, 2, 3 = GPIO3, 4, 5. Which physical key LED each one is: **unknown**.
-4. For id 65 instead, `led_init+0x2c4` sets up the SoC LED matrix (`ledmHw_Init`, 0x80002000): rows GPIO16-21, columns GPIO0-9, mux function 5, LED clock enabled. Only relevant if the phone turns out to be id 65.
+3. For ids 35, 41 and 65 (jump table at `led_init+0x28`, index id - 28, target 0x8d70), `led_init+0x1e0..0x2c0` requests GPIO3 (`led1_gpio`), GPIO4 (`led2_gpio`), GPIO5 (`led3_gpio`), sets them as outputs, unmuxes them to GPIO and drives them high (off); mcu_led_num = 3. So LED word bits 1, 2, 3 = GPIO3, 4, 5: Headset, Mute, Speakerphone (see "Checked on the phone (2026-11-23, issue #3, LEDs)").
+4. Other ids (28, 29, 36, 42, 45, 46, 57, 66 to 70, 74) get the SoC LED matrix at `led_init+0x2c4` (`ledmHw_Init`, 0x80002000): rows GPIO16-21, columns GPIO0-9, mux function 5, LED clock enabled. Not this phone.
 
 `led_flick` (blinking) is pure software timers on top of this.
 
@@ -172,7 +188,7 @@ Protocol 2.0 (4-bit command), from the `proto_20_*` functions:
 | 1 | read | 16 | get encrypt response |
 | 2 | write | 16 | backlight (low byte max-v, high byte v; not used for the LCD on id 35) |
 | 3 | write | 8 | **watchdog**, value in seconds, 0 = off (`proto_20_set_watchdog` 0x512c) |
-| 4 | write | 32 | LED bits (only bit 0 is ever set, see LEDs) |
+| 4 | write | 32 | LED bits (only bit 0 is ever set: the power lamp, see LEDs) |
 | 5 | write | 8 | "spanspeed" |
 | 12 | write | 8 | PSTN control; init sends 0x10 |
 | 14 | read | 64 | version block. Detect: byte 6 == 2. hw version: hw[0..3] = bytes 0..3, hw[4] = byte 7, hw[5] = byte 4 nibble-swapped, hw[6] = byte 5. sw version = bytes 6, 7. |
@@ -252,7 +268,7 @@ tsc.ko:
 1. Hardware id byte 6 (35 or 65) and Holtek protocol version: `/proc/keypad/holtek_hw`, `/proc/keypad/holtek_sw`, `/proc/cmdline`.
 2. The keycode row offset: does digit 1 give 57 or 65?
 3. Hook polarity: GPIO29 level on-hook and off-hook.
-4. Which physical LEDs are LED word bits 0-3 (Holtek, GPIO3, GPIO4, GPIO5).
+4. Which physical LEDs are LED word bits 0-3 (Holtek, GPIO3, GPIO4, GPIO5). Answered 2026-11-23: power, Headset, Mute, Speakerphone.
 5. SPI pin roles on GPIO22/23/24 (only matters for a bit-banged fallback; the PL022 block handles it).
 6. Touch axis orientation and Yealink's calibration constants.
 7. Meaning of KEYC +0x18 and the CTRL bits 3 and 4, and whether clearing and setting CTRL bit 1 is the interrupt ack (a register dump of 0xF800D000-0xF800D01C under Yealink would show the live values).

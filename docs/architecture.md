@@ -191,7 +191,7 @@ Each milestone ends with something that can be shown. M1 and M2 do not need audi
 **M0. Foundations** (now)
 - [#16](https://github.com/M0LTE/yealink-t48s/issues/16) Buildroot root filesystem, built in CI, with releases
 - [#17](https://github.com/M0LTE/yealink-t48s/issues/17) Boot flow: first stage plus one system image
-- [#3](https://github.com/M0LTE/yealink-t48s/issues/3) LEDs (the last part of that issue)
+- [#3](https://github.com/M0LTE/yealink-t48s/issues/3) LEDs (the last part of that issue; driver done 2026-11-23, waiting for someone to look at the lamps)
 - [#18](https://github.com/M0LTE/yealink-t48s/issues/18) Backlight and screen blanking
 - [#6](https://github.com/M0LTE/yealink-t48s/issues/6) Audio research (in progress, separate)
 - [#5](https://github.com/M0LTE/yealink-t48s/issues/5) NAND access, read-only first (needed by M5, can start any time)

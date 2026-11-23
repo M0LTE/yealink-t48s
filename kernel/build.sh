@@ -120,6 +120,10 @@ cp ../kernel/drivers/t48s_keypad.c drivers/input/t48s_keypad.c
 grep -q "t48s_keypad.o" drivers/input/Makefile || echo 'obj-$(CONFIG_INPUT) += t48s_keypad.o' >> drivers/input/Makefile
 cp ../kernel/drivers/t48s_holtek.c drivers/misc/t48s_holtek.c
 grep -q "t48s_holtek.o" drivers/misc/Makefile || echo "obj-y += t48s_holtek.o" >> drivers/misc/Makefile
+# the lamps (LED class; the power lamp goes through the Holtek driver)
+cp ../kernel/drivers/t48s_holtek.h include/linux/t48s_holtek.h
+cp ../kernel/drivers/t48s_leds.c drivers/leds/t48s_leds.c
+grep -q "t48s_leds.o" drivers/leds/Makefile || echo 'obj-$(CONFIG_LEDS_CLASS) += t48s_leds.o' >> drivers/leds/Makefile
 # our touchscreen driver (TSC2046 on the PL022 SPI host, polled)
 cp ../kernel/drivers/t48s_touch.c drivers/input/t48s_touch.c
 grep -q "t48s_touch.o" drivers/input/Makefile || echo 'obj-$(CONFIG_INPUT) += t48s_touch.o' >> drivers/input/Makefile
@@ -155,7 +159,7 @@ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- bcmring_defconfig
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kernel/kexec.config >/dev/null
 [ "$VARIANT" = kexec ] && ./scripts/kconfig/merge_config.sh -m .config ../kexec-initramfs.config >/dev/null
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- olddefconfig >/dev/null 2>&1 || make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- oldnoconfig >/dev/null
-for o in CONFIG_SND_T48S CONFIG_SND_PCM= CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
+for o in CONFIG_LEDS_CLASS= CONFIG_LEDS_TRIGGER_TIMER= CONFIG_SND_T48S CONFIG_SND_PCM= CONFIG_DEBUG_LL= CONFIG_EARLY_PRINTK CONFIG_PHYS_OFFSET CONFIG_BCM_ZRELADDR CONFIG_CMDLINE= CONFIG_CMDLINE_FORCE CONFIG_MTD CONFIG_ARM_PATCH_PHYS_VIRT CONFIG_BLK_DEV_RAM= CONFIG_DEVTMPFS=; do grep "^$o\|# $o" .config || echo "MISSING $o"; done
 if [ "$VARIANT" = kexec ]; then
     make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j12 Image 2>&1 | tail -n 3
     cp arch/arm/boot/Image ../Image-kexec

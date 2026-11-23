@@ -57,14 +57,14 @@ The dot beside the account is green when registered, amber while trying, red whe
 
 ## Lamps
 
-The LED driver is not written yet ([#3](https://github.com/M0LTE/yealink-t48s/issues/3)). The phone already decides what each lamp should do, and [`shell/leds.c`](../shell/leds.c) has one empty function, `leds_apply()`, for the driver to fill in:
+The phone decides what each lamp should do, and [`shell/leds.c`](../shell/leds.c) passes that to the kernel's LED driver ([#3](https://github.com/M0LTE/yealink-t48s/issues/3), [kernel/README.md](../kernel/README.md)) through `/sys/class/leds`:
 
 | Lamp | When |
 |---|---|
-| power (the big one) | blinks while ringing; on while there are missed calls |
-| speaker, headset | on while the sound is there |
-| mute | on while muted |
-| message | off (voicemail, #27) |
+| power (top right of the case) | blinks while ringing (0.3 s on, 0.3 s off, as Yealink does); on while there are missed calls |
+| speaker, headset (in those keys) | on while the sound is there |
+| mute (in the Mute key) | on while muted |
+| message | the phone has no such lamp; kept for voicemail (#27), which will have to use the power lamp as Yealink does |
 
 ## How it fits together
 
@@ -112,5 +112,5 @@ Also checked by hand in the container, with baresip running as root: root can co
 1. **Sound.** Everything here asks the audio service for the right thing; whether the right thing comes out waits on the kernel's playback driver and the daytime audio tests ([audiod.md](audiod.md#what-needs-the-phone-and-tom)).
 2. **A real account.** Put one in `/data/config/sip`, start `t48-audiod`, `t48-sip` and the shell, and make a call each way with fingers. The key meanings above are what a desk phone does, but only using it will say if any feel wrong.
 3. **Six function keys still need their labels matched** (kernel/README.md): if Hold, Transfer or Redial turn out to be different keys, the fix is in the kernel's key table, not here.
-4. **Lamps**, once #3 has a driver.
+4. **Lamps:** the driver is in; someone has to look at them once (the list is in issue #3).
 5. **Being transferred by the other end** will fail today: baresip makes the new call before dropping the old one, and `t48audio` carries one call at a time. The shell's side of it is written but could not be tested for that reason.

@@ -15,7 +15,7 @@
 - An app that crashes, exits with an error, never starts or stops reading its events is cleaned up and the owner is told. Phone keys are never passed to apps.
 - Apps run as their own unprivileged user when the shell runs as root (user number 20000 to 29999, worked out from the app id), with their own data folder under `/data/appdata`.
 
-Not yet: settings screens (#23), installing apps (#22), backlight (#18), LEDs (#3; the shell already says what each lamp should do).
+Not yet: settings screens (#23), installing apps (#22), backlight (#18).
 
 ## Build
 

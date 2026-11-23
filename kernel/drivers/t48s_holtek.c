@@ -3,7 +3,8 @@
  * t48s_holtek: the Holtek companion chip of the Yealink SIP-T48S.
  *
  * The chip holds a watchdog that resets the phone (Yealink's software arms it
- * with 11 seconds and keeps feeding it), one LED, and the hardware version.
+ * with 11 seconds and keeps feeding it), one LED (the power lamp, driven for
+ * t48s_leds.c through t48s_holtek_set_led()), and the hardware version.
  * It hangs off three GPIOs, bit-banged: GPIO36 chip select (active low),
  * GPIO11 clock (idle high), GPIO10 data (one pin, both directions).
  *
@@ -30,6 +31,7 @@
 #include <linux/mutex.h>
 #include <linux/irqflags.h>
 #include <linux/moduleparam.h>
+#include <linux/t48s_holtek.h>
 
 #define DRV_NAME	"t48s_holtek"
 
@@ -47,6 +49,7 @@
 
 #define CMD_BITS	4
 #define CMD_WATCHDOG	3		/* write 8 bits: seconds, 0 = off */
+#define CMD_LED		4		/* write 32 bits: 1 = the power lamp on, 0 = off */
 #define CMD_VERSION	14		/* read 64 bits */
 
 static void __iomem *gpio0;
@@ -129,6 +132,16 @@ static u64 holtek_read(int cmd, int bits)
 	mutex_unlock(&holtek_lock);
 	return val;
 }
+
+/* the chip's one LED, for t48s_leds */
+int t48s_holtek_set_led(bool on)
+{
+	if (!holtek_ok)
+		return -ENODEV;
+	holtek_write(CMD_LED, on ? 1 : 0, 32);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(t48s_holtek_set_led);
 
 static int watchdog_param_set(const char *val, const struct kernel_param *kp)
 {

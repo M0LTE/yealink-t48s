@@ -68,7 +68,7 @@ The key table is in the driver, all confirmed by pressing every key (2026-11-22)
 
 For tests without anyone at the phone, `echo "CODE VALUE" > /sys/module/t48s_keypad/parameters/inject` reports a Linux key code as pressed (1) or released (0) through the real device: `KEY_PHONE` (169) on the hook switch, any key in the table on the keypad. `tools/phone-input.sh` wraps it with key names (`key ok`, `hook off`). Unlike writing to `/dev/input/event0`, this reaches a program that has grabbed the device.
 
-`drivers/t48s_holtek.c` (copied into `drivers/misc/`) bit-bangs the Holtek chip on GPIO36/11/10. At boot it reads the version block and, if the chip answers as a protocol 2.0 one, turns its watchdog off; the kexec loader has already done that, so this is for boot paths that have not. `echo N > /sys/module/t48s_holtek/parameters/watchdog` arms it for N seconds (nothing feeds it: the phone resets, which is a handy way to prove it works), 0 turns it off. The chip's LED and the other LEDs are not driven yet.
+`drivers/t48s_holtek.c` (copied into `drivers/misc/`) bit-bangs the Holtek chip on GPIO36/11/10. At boot it reads the version block and, if the chip answers as a protocol 2.0 one, turns its watchdog off; the kexec loader has already done that, so this is for boot paths that have not. `echo N > /sys/module/t48s_holtek/parameters/watchdog` arms it for N seconds (nothing feeds it: the phone resets, which is a handy way to prove it works), 0 turns it off. The chip also drives the power lamp (next section).
 
 Not tested yet: an actual key press. To test:
 
@@ -77,6 +77,29 @@ tools/ourkernel.sh ssh 'echo 1 > /sys/module/t48s_keypad/parameters/debug'
 ```
 
 then press each key once. Every press and release prints a line on the screen and in `dmesg`, such as `t48s_keypad: row 8 col 0 code 65 down -> key 2` (key 2 is `KEY_1`; `key 0` means the position is not in the table). Lift and replace the handset: expect `hook GPIO29 = 0 (off hook)` then `= 1 (on hook)`; if it is the other way round, flip `HOOK_OFF_LEVEL` in the driver. Note the code printed for Headset, Mute, Message, Hold, Redial, Transfer and each volume key so the table can be finished. With debug off (`echo 0`), digits typed at the `login:` prompt on the screen should appear there.
+
+## Lamps (2026-11-23, issue #3)
+
+`drivers/t48s_leds.c` (copied into `drivers/leds/`) gives the phone's four lamps as ordinary Linux LEDs:
+
+| LED | Lamp | Wiring |
+|---|---|---|
+| `t48s:red:power` | top right of the case | the Holtek chip, command 4 |
+| `t48s:green:headset` | in the Headset key | GPIO3, low = lit |
+| `t48s:red:mute` | in the Mute key | GPIO4, low = lit |
+| `t48s:green:speaker` | in the Speakerphone key | GPIO5, low = lit |
+
+That is all of them: the Message key has no lamp and there are no line keys. How this was found is in `docs/keypad-touch-hw.md`. All four are off after boot.
+
+```
+cd /sys/class/leds/t48s:red:mute
+echo 1 > brightness                 # on; 0 is off
+echo timer > trigger                # blink (then delay_on and delay_off, in ms)
+echo none > trigger                 # stop blinking
+cat brightness                      # for the three key lamps this reads the pin itself
+```
+
+The colours in the names are what we expect (the Headset and Speakerphone keys light green on these phones, Mute and the power lamp red), not yet checked by eye; nor is the power lamp, which the chip gives no way to read back. `t48-shell` drives the lamps while it runs, so stop it before playing with them by hand, or it will put them back.
 
 ## Touchscreen (2026-11-22, issue #4)
 
