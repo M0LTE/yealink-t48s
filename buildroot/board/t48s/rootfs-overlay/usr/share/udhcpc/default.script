@@ -4,6 +4,7 @@ case "$1" in
 deconfig)
     ifconfig "$interface" 0.0.0.0 ;;
 bound|renew)
+    was=$(ifconfig "$interface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p')
     ifconfig "$interface" "$ip" netmask "${subnet:-255.255.255.0}"
     if [ -n "$router" ]; then
         while route del default gw 0.0.0.0 dev "$interface" 2>/dev/null; do :; done
@@ -15,6 +16,9 @@ bound|renew)
     killall ntpd 2>/dev/null
     srv=""; for n in ${ntpsrv:-pool.ntp.org}; do srv="$srv -p $n"; done
     ntpd $srv
+    # baresip listens on the address it found when it started: on another
+    # address it can neither register nor be called, so it starts again
+    [ "$was" = "$ip" ] || t48-apply sip >/dev/null 2>&1 &
     echo "dhcp: $interface $ip" > /dev/console; [ -e /dev/tty1 ] && echo "  network: $ip" > /dev/tty1 ;;
 esac
 exit 0

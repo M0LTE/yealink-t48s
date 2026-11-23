@@ -19,6 +19,7 @@ network)
     addr=$(get network address "")
     killall udhcpc 2>/dev/null
     if [ "$mode" = static ] && [ -n "$addr" ]; then
+        was=$(ifconfig $IF 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p')
         ifconfig $IF "$addr" netmask "$(get network netmask 255.255.255.0)" up
         while route del default dev $IF 2>/dev/null; do :; done
         gw=$(get network gateway "")
@@ -30,6 +31,9 @@ network)
         killall ntpd 2>/dev/null
         ntpd -p pool.ntp.org
         echo "network: $IF $addr (fixed)" > /dev/console
+        # baresip listens on the address it found when it started (with DHCP
+        # the udhcpc script does this, when the lease brings another address)
+        [ "$was" = "$addr" ] || "$0" sip
     else
         udhcpc -b -q -t 10 -i $IF -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 &
     fi ;;
