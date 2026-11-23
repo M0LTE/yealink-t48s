@@ -38,6 +38,7 @@ struct options opt = {
     .audio = T48AC_SOCKET,
     .apply = "/usr/bin/t48-apply",
     .access = "/run/t48-access",
+    .notice = "/run/t48-notice",
 };
 
 enum screen { SCR_IDLE, SCR_LAUNCHER, SCR_APP, SCR_CALL, SCR_MESSAGE, SCR_HISTORY, SCR_SETTINGS, SCR_CONTACTS };
@@ -56,7 +57,8 @@ static int sel;                      /* launcher: selected app */
 static char pending_id[64];          /* app to start once the old one has gone */
 static char msg_title[96], msg_text[200];
 static long long x_deadline;         /* in an app: when a held X becomes Home; 0 if X is up */
-static char idle_shown[700];         /* time, date, network and account as last drawn, to redraw only on a change */
+static int idle_notices;             /* how many notices the idle screen's row had room for */
+static char idle_shown[900];         /* time, date, network, accounts and notices as last drawn, to redraw only on a change */
 static volatile sig_atomic_t stopping;
 static int exit_status;
 static int chld_pipe[2];
@@ -155,6 +157,22 @@ enum { IB_APPS, IB_CALLS, IB_CONTACTS, IB_DND, IB_SETTINGS };
 #define ACC_H 36
 #define ACC_MAX 6
 
+/* The standing notice: up to two short lines that something else wants on the idle
+ * screen for as long as its file exists. The first leads the row of notices, the second
+ * takes the bottom line. t48-live uses it to say that the phone was started from a USB
+ * stick and nothing is installed, and how to go back (docs/live-image.md). */
+static void notice_read(char line[2][96])
+{
+    FILE *f = opt.notice ? fopen(opt.notice, "r") : NULL;
+    line[0][0] = line[1][0] = 0;
+    if (!f) return;
+    for (int i = 0; i < 2 && fgets(line[i], 96, f); i++) {
+        line[i][strcspn(line[i], "\r\n")] = 0;
+        for (char *p = line[i]; *p; p++) if ((unsigned char)*p < 32 || (unsigned char)*p > 126) *p = '?';
+    }
+    fclose(f);
+}
+
 static void idle_text(char *out, size_t n)
 {
     char net[80], acc[120];
@@ -173,6 +191,9 @@ static void idle_text(char *out, size_t n)
         if (!phone_account_line(i, line, sizeof line, &c, &def)) break;
         k += (size_t)snprintf(out + k, n - k, "|%s %x %d", line, (unsigned)c, def);
     }
+    char file[2][96];
+    notice_read(file);
+    if (k < n) snprintf(out + k, n - k, "|%s|%s", file[0], file[1]);
 }
 
 /* where the k-th of n account lines goes: a row of up to three, or two rows */
@@ -185,7 +206,7 @@ static void acc_box(int k, int n, int *x, int *y, int *w)
 }
 
 /* a rounded label in the middle of the idle screen's row of notices; returns the x after it */
-static int notice(int x, int y, const char *text, uint32_t fill)
+static int notice_pill(int x, int y, const char *text, uint32_t fill)
 {
     int w = t48_text_width(&t48_font_bold, text) + 44;
     t48_round_fill(&ui, x, y, w, 42, 21, fill);
@@ -219,10 +240,19 @@ static void draw_idle(void)
         t48_text_fit(&ui, x + 30, y + (ACC_H - t48_font_normal.height) / 2, w - (def ? 96 : 40), &t48_font_normal, C_TEXT, line);
         if (def) t48_text_right(&ui, x + w - 10, y + (ACC_H - t48_font_small.height) / 2, &t48_font_small, C_ACCENT, "usual");
     }
-    /* notices: missed calls, voice messages, do not disturb */
-    char note[3][48];
-    uint32_t fill[3];
+    /* One row of notices, the most important first: the standing notice from a file
+     * (t48-live: nothing is installed, which the owner must not lose sight of), missed
+     * calls, voice messages, do not disturb. What does not fit the row is left out from
+     * the end: do not disturb shows on its button too, and messages on the lamp. */
+    char note[4][96], file[2][96];
+    uint32_t fill[4];
     int nn = 0, total = 0, ny = several ? 336 : 312;
+    notice_read(file);
+    if (file[0][0]) {
+        snprintf(note[nn], sizeof note[0], "%s", file[0]);
+        for (size_t l = strlen(note[0]); l && t48_text_width(&t48_font_bold, note[0]) + 44 > SW - 24; ) note[0][--l] = 0;
+        fill[nn++] = C_TEXT;
+    }
     if (phone_missed()) {
         snprintf(note[nn], sizeof note[0], "%d missed call%s", phone_missed(), phone_missed() == 1 ? "" : "s");
         fill[nn++] = C_BAD;
@@ -235,13 +265,22 @@ static void draw_idle(void)
         snprintf(note[nn], sizeof note[0], "Do not disturb");
         fill[nn++] = C_BAD;
     }
-    for (int i = 0; i < nn; i++) total += t48_text_width(&t48_font_bold, note[i]) + 44 + (i ? 12 : 0);
-    for (int i = 0, x = (SW - total) / 2; i < nn; i++) x = notice(x, ny, note[i], fill[i]);
+    idle_notices = 0;
+    for (int i = 0; i < nn; i++) {
+        int w = t48_text_width(&t48_font_bold, note[i]) + 44 + (i ? 12 : 0);
+        if (total + w > SW - 24) break;
+        total += w;
+        idle_notices++;
+    }
+    for (int i = 0, x = (SW - total) / 2; i < idle_notices; i++) x = notice_pill(x, ny, note[i], fill[i]);
     static const char *const labels[5] = {"Apps", "Calls", "Contacts", "DND", "Settings"};
     for (int i = 0; i < 5; i++)
         ui_button(IDLE_BTN_X(i), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, i == IB_DND && phone_dnd() ? "DND on" : labels[i],
                   i == IB_DND && phone_dnd() ? C_BAD : C_PANEL);
-    t48_text_centre(&ui, SW / 2, 456, &t48_font_small, C_FAINT, "OK apps, Up calls, Left contacts, Right do not disturb, Down settings, or just dial");
+    /* the bottom line: the notice's second line (how to go back to Yealink) when there is one, else the keys */
+    if (file[1][0] && t48_text_width(&t48_font_small, file[1]) > SW - 20) t48_text_fit(&ui, 10, 456, SW - 20, &t48_font_small, C_DIM, file[1]);
+    else if (file[1][0]) t48_text_centre(&ui, SW / 2, 456, &t48_font_small, C_DIM, file[1]);
+    else t48_text_centre(&ui, SW / 2, 456, &t48_font_small, C_FAINT, "OK apps, Up calls, Left contacts, Right do not disturb, Down settings, or just dial");
 }
 
 /* launcher grid: 4 across, 2 down, a page at a time */
@@ -675,6 +714,17 @@ const char *shell_state(const char *key)
     if (!strcmp(key, "app")) return app_states[app_state()];
     if (!strcmp(key, "appid")) return app_id()[0] ? app_id() : "-";
     const char *v = contacts_state(key);
+    if (!strcmp(key, "notice")) {
+        static char note[2][96];
+        notice_read(note);
+        for (char *p = note[0]; *p; p++) if (*p == ' ') *p = '_';
+        return note[0][0] ? note[0] : "-";
+    }
+    if (!strcmp(key, "notices")) {
+        static char n[4];
+        snprintf(n, sizeof n, "%d", idle_notices);
+        return n;
+    }
     if (!v) v = settings_state(key);
     if (!v) v = backlight_state(key);
     return v ? v : phone_state(key);
@@ -707,6 +757,7 @@ static void usage(void)
         "  --fb DEVICE      framebuffer (%s)\n"
         "  --apply PROGRAM  run with a settings file's name when it has changed (%s)\n"
         "  --access DIR     where t48-access leaves its status file (%s)\n"
+        "  --notice FILE    one or two lines to show on the idle screen while it exists (%s)\n"
         "  --app ID         start this app straight away\n"
         "simulator only:\n"
         "  --script FILE    input script, - for standard input (see docs/shell.md)\n"
@@ -714,7 +765,7 @@ static void usage(void)
         "  --runner PROGRAM run apps with this, such as qemu-arm for apps built for the phone\n"
         "also: t48-app (install, update and remove apps) and t48-config (settings), each with its own help\n",
         opt.apps, opt.data, opt.config, opt.state, opt.sip ? opt.sip : "none", opt.audio ? opt.audio : "none", opt.fb,
-        opt.apply ? opt.apply : "none", opt.access);
+        opt.apply ? opt.apply : "none", opt.access, opt.notice ? opt.notice : "none");
 }
 
 int main(int argc, char **argv)
@@ -731,7 +782,7 @@ int main(int argc, char **argv)
     }
 
     for (int i = 1; i < argc; i++) sim |= !strcmp(argv[i], "--sim");
-    if (sim) opt.sip = opt.audio = opt.apply = NULL;   /* a PC's own services stay out of it unless asked */
+    if (sim) opt.sip = opt.audio = opt.apply = opt.notice = NULL;   /* a PC's own services stay out of it unless asked */
     for (int i = 1; i < argc; i++) {
         const char **dst = NULL;
         if (!strcmp(argv[i], "--sim")) continue;
@@ -748,6 +799,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--apply")) dst = &opt.apply;
         else if (!strcmp(argv[i], "--runner")) dst = &opt.runner;
         else if (!strcmp(argv[i], "--access")) dst = &opt.access;
+        else if (!strcmp(argv[i], "--notice")) dst = &opt.notice;
         if (!dst || i + 1 >= argc) { usage(); return 2; }
         *dst = argv[++i];
     }

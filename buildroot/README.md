@@ -29,7 +29,8 @@ musl, ARM1176 soft-float, Linux 3.6 headers, everything static.
 |---|---|
 | `configs/t48s_defconfig` | the configuration |
 | `package/` | our packages; the local ones build straight from this repo's folders |
-| `board/t48s/rootfs-overlay/` | `/etc/inittab`, `/etc/init.d/rcS` (mounts, `/data`, network, `t48-access boot`), `/etc/service` (the runit services), `/etc/pointercal`, `back-to-yealink`, `t48-apply`, `t48-access`, `t48-services`, `t48-data` |
+| `board/t48s/rootfs-overlay/` | `/etc/inittab`, `/etc/init.d/rcS` (mounts, `/data`, network, `t48-access boot`, `t48-live boot`), `/etc/service` (the runit services), `/etc/pointercal`, `back-to-yealink`, `t48-apply`, `t48-access`, `t48-services`, `t48-data` |
+| `board/t48s/rootfs-overlay/usr/bin/t48-live` | run by `rcS`; acts only when the phone was started from a USB stick or TFTP: clears U-Boot's flag through the kernel and leaves the "nothing is installed" note for the idle screen ([docs/live-image.md](../docs/live-image.md)) |
 | `board/t48s/firststage/`, `mkfirststage.py`, `post-image.sh` | the first stage and how it and `system.img` are made |
 | `board/t48s/post-build.sh` | drops the stock init scripts, makes the `/data` folders, links `/root/.ssh` to `/data/access/ssh` |
 

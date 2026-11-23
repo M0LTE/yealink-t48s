@@ -23,7 +23,7 @@ t48-data format        # once: set the flash up (only onto erased flash) and cop
 t48-data release       # stop using the flash; /data carries on in RAM
 ```
 
-At boot `rcS` runs `t48-data mount`: if our blocks hold UBI, `/data` comes from flash; if not (a phone that has not been set up, or a kernel without our partition) it is in RAM as before, and the console says so. Nothing is ever formatted by itself.
+At boot `rcS` runs `t48-data mount`: if our blocks hold UBI, `/data` comes from flash; if not (a phone that has not been set up, or a kernel without our partition) it is in RAM as before, and the console says so. Nothing is ever formatted by itself. On a live boot (a USB stick or TFTP, [live-image.md](live-image.md)) `/data` is in RAM whatever the flash holds, and `format` refuses.
 
 ## What the driver will write, and what it will not
 

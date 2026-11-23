@@ -16,6 +16,7 @@ mtdnum() { sed -n 's/^mtd\([0-9]*\):.*"t48data"$/\1/p' /proc/mtd; }
 has_ubi() { [ "$(dd if=/dev/mtd$1 bs=4 count=1 2>/dev/null)" = "UBI#" ]; }
 attach() { [ -e /sys/class/ubi/ubi0 ] || ubiattach -m "$1" -d 0 /dev/ubi_ctrl >/dev/null; }
 volume() { grep -qx data /sys/class/ubi/ubi0_*/name 2>/dev/null; }
+live() { grep -qw t48boot=live "${T48_CMDLINE:-/proc/cmdline}"; }
 ram() {
     mountpoint -q /data || mount -t tmpfs -o mode=755 tmpfs /data
     say "in RAM, lost at power off ($1)"
@@ -24,12 +25,15 @@ ram() {
 case "$1" in
 mount)
     mountpoint -q /data && exit 0
+    # a live boot (a USB stick or TFTP, docs/live-image.md) promises to write nothing
+    live && { ram "started without installing: nothing is written to the phone"; exit 0; }
     M=$(mtdnum)
     [ -n "$M" ] || { ram "this kernel has no flash of ours"; exit 0; }
     has_ubi "$M" || { ram "the flash is not set up: t48-data format"; exit 0; }
     attach "$M" && volume && mount -t ubifs ubi0:data /data || { ram "the flash did not mount; see dmesg"; exit 1; }
     say "in flash" ;;
 format)
+    live && { echo "started without installing (a USB stick or the network): the flash is left alone" >&2; exit 1; }
     M=$(mtdnum)
     [ -n "$M" ] || { echo "this kernel has no flash of ours" >&2; exit 1; }
     if ! has_ubi "$M"; then

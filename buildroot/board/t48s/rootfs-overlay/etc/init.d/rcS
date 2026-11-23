@@ -43,5 +43,9 @@ t48-apply network
 # SSH: off unless the owner has turned it on at the screen, or this is one of our own
 # test builds (docs/access.md)
 t48-access boot
+# started through U-Boot's recovery mode (a USB stick or TFTP)? Then take U-Boot's
+# BOOTMODE flag out again and leave the "nothing is installed" note for the idle
+# screen (issue 7). Before the services, so the shell's first screen has the note
+t48-live boot
 # the services runsvdir is about to start (inittab)
 t48-services
