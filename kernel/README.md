@@ -38,7 +38,7 @@ Root filesystem (issue #16): Buildroot, from the external tree in `buildroot/` (
 docker run --rm -u $(id -u):$(id -g) -v $PWD:/w -w /w -e ROOTFS=rootfs.cpio t48s-kbuild:trusty sh kernel/build.sh kexec
 ```
 
-`kexec-rootfs/root.authorized_keys` (in the build folder, beside `kernel/`) is added as root's SSH keys if it exists; it is gitignored and never published. Without it there is no SSH, only the serial console. `build.sh` patches a fresh `linux-3.6.11/` each time. CI (`.github/workflows/build.yml`) builds the root filesystem and kernel image on pushes to main and publishes them, with the SDK, on a `v*` tag. The container's recipe is `kernel/Dockerfile`.
+`kexec-rootfs/root.authorized_keys` (in the build folder, beside `kernel/`) is added as `/etc/t48-dev/authorized_keys` if it exists, which makes the image a development build: SSH is on from boot and takes those keys, so `tools/ourkernel.sh ssh` works with nobody at the phone. It is gitignored and never published. Without it SSH starts off, as on anyone else's phone, until it is turned on at the screen ([docs/access.md](../docs/access.md)). `build.sh` patches a fresh `linux-3.6.11/` each time. CI (`.github/workflows/build.yml`) builds the root filesystem and kernel image on pushes to main and publishes them, with the SDK, on a `v*` tag. The container's recipe is `kernel/Dockerfile`.
 
 Userspace for testing: `tools/mkrfs-bb.sh` builds `T48S.rfs` with a static busybox (musl), a shell on the serial console and `native/membanner` drawing on the screen. Boot it with U-Boot's recovery mode, option 1 (TFTP), served by `tools/tftpd.py DIR 69 --rom-once`.
 
@@ -47,6 +47,34 @@ Userspace for testing: `tools/mkrfs-bb.sh` builds `T48S.rfs` with a static busyb
 Yealink's page tables (`kmod/pgdprobe.c`, output in `dumps/yealink-iomap.txt`) confirm mainline's `mm_addr.h`: AXI blocks at 0x30100000 (ARAM), 0x30200000 (DMA0), 0x30300000 (DMA1), 0x30400000 (Ethernet switch), 0x30500000 (LCD), 0x30600000 (APM), 0x30700000 (SPUM), 0x30800000/0x30A00000 (VPM); chip control at 0x80000000 (ChipId reads 0x111880B0, BCM11188 rev B0). Ignore the addresses in the comments in mainline's `mm.c` (0x32000000 etc.), they are stale.
 
 DMA0 (Synopsys DW AHB DMAC, ID 0x44571110) carries audio: Yealink's firmware runs four of its channels between RAM and the APM codecs (the kexec loader stops them before the jump). Our kernel's DMA framework neither initialises its channels nor takes their interrupts; `drivers/t48s_audio.c` programs the two it uses (3 and 5) directly and touches no other. DMA1 carries the Ethernet switch (channel 2 RX, channel 3 TX); its channels are stopped before being reset.
+
+## Backlight (2026-11-23)
+
+`drivers/t48s_backlight.c` (issue #18) is an ordinary backlight device, `/sys/class/backlight/t48s`: `brightness` 0 to 10, `bl_power` 0 (on) or 4 (off), `actual_brightness` read back from the hardware.
+
+| | |
+|---|---|
+| Enable | GPIO18, low is on. Data register 0x80004000 bit 18 |
+| Level | PWM register 0x80002040, output on GPIO35 (pin function 13). Bits 0 to 2 set once to run it; bits 3 to 7 the level, smaller is brighter |
+| Clocks | chip control 0x8000005C bit 16 and 0x8000004C bit 17, already on from U-Boot |
+
+Brightness n writes 30 - 3n to the level field: the ten values Yealink's `keypad.ko` uses and no others. 0 only raises GPIO18 and leaves the PWM alone, as Yealink does. U-Boot leaves the lamp on at 8, and the driver starts from whatever it finds, so loading it changes nothing on the screen.
+
+Read on the phone under Yealink's firmware, writing its `/proc/keypad/lcd_bklight` and reading the two registers with `kmod/regprobe.c`:
+
+| Yealink level | PWM register | GPIO data |
+|---|---|---|
+| 100 (also 91 to 99) | 0x07 | 0x6f7bffff |
+| 90 | 0x1f | |
+| 80 (as U-Boot leaves it) | 0x37 | |
+| 60 | 0x67 | |
+| 50 | 0x7f | |
+| 30 | 0xaf | |
+| 20 | 0xc7 | |
+| 10 (also 1 to 9) | 0xdf | |
+| 0 | 0xdf, unchanged | 0x6f7fffff: bit 18 high |
+
+The shell decides when to dim and switch off ([docs/shell.md](../docs/shell.md#the-backlight)). By hand: `echo 3 > /sys/class/backlight/t48s/brightness`.
 
 ## Ethernet (2026-11-22)
 

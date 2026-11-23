@@ -16,7 +16,50 @@
 - An app that crashes, exits with an error, never starts or stops reading its events is cleaned up and the owner is told. Phone keys are never passed to apps.
 - Apps run as their own unprivileged user when the shell runs as root (user number 20000 to 29999, worked out from the app id), with their own data folder under `/data/appdata`.
 
-Not yet: backlight (#18).
+- The backlight: dims, then goes off, when nothing is touched (below).
+
+## The backlight
+
+Issue [#18](https://github.com/M0LTE/yealink-t48s/issues/18). Source: [`shell/backlight.c`](../shell/backlight.c); the driver is [`kernel/drivers/t48s_backlight.c`](../kernel/drivers/t48s_backlight.c) ([kernel/README.md](../kernel/README.md#backlight-2026-11-23)).
+
+| State | When | What the screen does |
+|---|---|---|
+| bright | something was touched in the last two minutes, or the phone is in use | the brightness from Settings, Screen |
+| dimmed | nothing touched for two minutes | the lowest level; still readable |
+| off | nothing touched for thirty minutes | lamp off |
+
+- A key, a touch, the handset, or a call arriving brings it back to bright.
+- **From off, the key or touch that wakes the screen does nothing else.** Nobody can see what it would have pressed. The whole press is swallowed, down and up, and the next one works as usual.
+- Lifting the handset, and the Speakerphone and Headset keys, wake the screen and also do their job: they ask for a line whatever is showing.
+- From dimmed nothing is swallowed, as the screen can still be read.
+- The screen stays bright while the phone is dialling, ringing or in a call.
+- While an app is showing the screen dims but does not go off: an app is often something to watch. Back in the launcher or on the idle screen it goes off in the end.
+
+The two times are `dim_seconds` and `off_seconds` in `/data/config/screen` ([settings.md](settings.md#the-files)); they are not on the screen. The shell's log has a line for each change (`backlight: dim (nothing touched)`).
+
+`shell/tests/06-backlight.script` checks all of the above in the simulator, with a folder of files standing in for `/sys/class/backlight`.
+
+![the Screen page](img/settings-screen.png)
+
+On the phone (2026-11-23), with injected input and the two times set to 15 and 30 seconds, reading the hardware's registers at each step:
+
+| | PWM register 0x80002040 | GPIO18 (0x80004000 bit 18) |
+|---|---|---|
+| bright, brightness 7 | 0x4f | low: lit |
+| dimmed | 0xdf (level 1) | low |
+| off | 0xdf | high: lamp off |
+| after a key, a touch or the handset | 0x4f | low |
+
+The key and the touch that woke it did nothing else (the touch was on the Settings button; Settings did not open). Lifting the handset woke it and showed the call screen, and it stayed bright for the 35 seconds the handset was off. Brightness from the Screen page, by touch and by the arrow keys, reached the register each time.
+
+**Needs eyes**, as registers are all that could be read:
+
+1. Settings, Screen: step the brightness from 10 down to 1. Each step should be visibly dimmer, with no flicker, and 1 should still be readable.
+2. Leave the phone alone: after two minutes it dims, after thirty the screen goes dark (lamp off, not just a black picture).
+3. Dark screen: press OK. The screen lights and stays on the idle screen. Press OK again: the launcher.
+4. Dark screen: touch where the Settings button is. The screen lights, Settings does not open.
+5. Dark screen: lift the handset. The screen lights on the call screen.
+6. Open the clock app and leave it: it dims after two minutes but is still lit half an hour later.
 
 ## Build
 
@@ -47,15 +90,15 @@ The screen is kept in memory; there is no window yet. Apps are the real programs
 | `waitframe [MS]` | until the app has drawn since the last input (fails after MS, default 3000) |
 | `waitscreen NAME [MS]` | until the shell shows `idle`, `launcher`, `app`, `call`, `message`, `history` or `settings` |
 | `expect NAME` | fail unless that screen is showing now |
-| `expectstate KEY VALUE` | fail unless that is so now (spaces in a value are written `_`). Settings and apps: `settings.page`, `settings.row` and `settings.value` (the selected row), `settings.rows`, `kbd` (`open`, `closed`), `kbd.text`, `overlay` (`none`, `busy`, `message`, `confirm`), `overlay.title`, `store` (`loading`, `loaded`, `error`), `store.ID` (`available`, `installed`, `update`, `unsupported`, `builtin`), `installed.ID` (its version, or `no`), `cfg.FILE.KEY` (from the settings store; `apps:ID` for an app's file), `tz`, `appid`. The phone: `phone` (`idle`, `dial`, `outgoing`, `incoming`, `incall`, `ended`), `route` (`none`, `handset`, `speaker`, `headset`), `mute`, `hold`, `number`, `peer`, `dtmf`, `ended`, `reg`, `missed`, `history`, `last`, `vol.ringer` (and the others), `led.speaker` (and the others), `app`, `sip`, `audio`; and what the audio service itself reports: `audio.route`, `audio.mute`, `audio.tone`, `audio.ring`, `audio.call`, `audio.vol.handset` |
+| `expectstate KEY VALUE` | fail unless that is so now (spaces in a value are written `_`). Settings and apps: `settings.page`, `settings.row` and `settings.value` (the selected row), `settings.rows`, `kbd` (`open`, `closed`), `kbd.text`, `overlay` (`none`, `busy`, `message`, `confirm`, `door`: the password screen of [access.md](access.md)), `door.password` (`(shown)` or `(none)`, never the password), `backlight` (`on`, `dim`, `off`), `backlight.level` (0 to 10, as last told to the hardware), `overlay.title`, `store` (`loading`, `loaded`, `error`), `store.ID` (`available`, `installed`, `update`, `unsupported`, `builtin`), `installed.ID` (its version, or `no`), `cfg.FILE.KEY` (from the settings store; `apps:ID` for an app's file), `tz`, `appid`. The phone: `phone` (`idle`, `dial`, `outgoing`, `incoming`, `incall`, `ended`), `route` (`none`, `handset`, `speaker`, `headset`), `mute`, `hold`, `number`, `peer`, `dtmf`, `ended`, `reg`, `missed`, `history`, `last`, `vol.ringer` (and the others), `led.speaker` (and the others), `app`, `sip`, `audio`; and what the audio service itself reports: `audio.route`, `audio.mute`, `audio.tone`, `audio.ring`, `audio.call`, `audio.vol.handset` |
 | `waitstate KEY VALUE [MS]` | until that is so (fails after MS, default 3000) |
 | `run COMMAND` | run a command on the PC and fail if it does; used to make the far end of a test call do things |
 | `shot FILE` | save the screen as `.png` or `.ppm` |
 | `quit` | |
 
-`shell/tests/` has five scripts, run by `make check`: a tour, apps that crash and hang, the phone screens with no services behind them, the settings screens and keyboard, and the app manager against feeds made on disk. `make check-live` does the app manager against the real feed ([apps.md](apps.md#testing)). The call scenarios in `shell/tests/phone/` need baresip and the audio service and are run by `sip/test/phone-test.sh` ([phone.md](phone.md#testing)).
+`shell/tests/` has seven scripts, run by `make check`: a tour, apps that crash and hang, the phone screens with no services behind them, the settings screens and keyboard, the app manager against feeds made on disk, the backlight, and the Access page ([access.md](access.md#testing)). `make check-live` does the app manager against the real feed ([apps.md](apps.md#testing)). The call scenarios in `shell/tests/phone/` need baresip and the audio service and are run by `sip/test/phone-test.sh` ([phone.md](phone.md#testing)).
 
-With `--sip SOCKET` and `--audio SOCKET` the simulator talks to a real baresip and audio service; without them it has neither, so nothing on a PC is touched by accident. For the same reason it runs no `t48-apply` when a setting changes unless `--apply PROGRAM` names one. `--runner qemu-arm` starts apps through that program, for apps built for the phone.
+With `--sip SOCKET` and `--audio SOCKET` the simulator talks to a real baresip and audio service; without them it has neither, so nothing on a PC is touched by accident. For the same reason it runs no `t48-apply` when a setting changes unless `--apply PROGRAM` names one (`make check` names `shell/tests/access/apply.sh`, which only plays the access part). `--access DIR` is where the Access page looks for `t48-access`'s status file, and the environment variable `T48_BACKLIGHT` names a folder to use in place of `/sys/class/backlight`. `--runner qemu-arm` starts apps through that program, for apps built for the phone.
 
 The same program is also `t48-app` and `t48-config` when started by those names ([apps.md](apps.md#on-the-command-line), [settings.md](settings.md#the-files)).
 

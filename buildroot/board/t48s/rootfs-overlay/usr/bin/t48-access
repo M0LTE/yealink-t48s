@@ -80,6 +80,9 @@ start_listener() {
     # -s: no password logins, unless the door is open
     if door_open; then s=; else s=-s; fi
     dropbear $s -r "$HOSTKEY" -P "$PIDFILE"
+    # it goes into the background first and writes its pid file a moment later
+    n=0
+    while ! running && [ $n -lt 30 ]; do sleep 0.1; n=$((n + 1)); done
 }
 
 set_password() {   # $1: a crypt(3) hash, or * for none

@@ -17,7 +17,7 @@ To boot it, build it into the kernel (`kernel/README.md`), then `tools/ourkernel
 
 musl, ARM1176 soft-float, Linux 3.6 headers, everything static.
 
-- busybox (init, DHCP, NTP from the DHCP servers), dropbear (key login only), curl with mbedTLS and a CA bundle. No mtd-utils and no flash applets in busybox while flash access is read-only (issue #5): nothing in the image can erase or write the NAND.
+- busybox (init, DHCP, NTP from the DHCP servers), dropbear (off until the owner turns it on at the screen, key login only: [docs/access.md](../docs/access.md)), curl with mbedTLS and a CA bundle. No mtd-utils and no flash applets in busybox while flash access is read-only (issue #5): nothing in the image can erase or write the NAND.
 - `t48-shell` on the screen at boot, with the clock app in `/usr/share/t48/apps` (packages `t48-shell`, `libt48`). The same program is `t48-app` ([docs/apps.md](../docs/apps.md)) and `t48-config` ([docs/settings.md](../docs/settings.md)); `t48-apply` makes the running phone follow a changed settings file. libt48's static library and headers are in staging, so the SDK has them.
 - Our tools from `native/` (package `t48s-tools`): keytest, touchtest, membanner, cpubench, t48rec, t48mix, nandread (read-only flash dumps, `docs/nand.md`). The waterfall is an app now ([M0LTE/yealink-t48s-apps](https://github.com/M0LTE/yealink-t48s-apps)).
 - `t48-audiod` and `t48-audioctl` (package `t48-audiod`). Installed, not started.
@@ -29,11 +29,11 @@ musl, ARM1176 soft-float, Linux 3.6 headers, everything static.
 |---|---|
 | `configs/t48s_defconfig` | the configuration |
 | `package/` | our packages; the local ones build straight from this repo's folders |
-| `board/t48s/rootfs-overlay/` | `/etc/inittab`, `/etc/init.d/rcS` (mounts, watchdog off, network, SSH), `/etc/pointercal`, `back-to-yealink`, `t48-apply` |
-| `board/t48s/post-build.sh` | drops the stock init scripts, makes the `/data` folders |
+| `board/t48s/rootfs-overlay/` | `/etc/inittab`, `/etc/init.d/rcS` (mounts, watchdog off, network, `t48-access boot`), `/etc/pointercal`, `back-to-yealink`, `t48-apply`, `t48-access` |
+| `board/t48s/post-build.sh` | drops the stock init scripts, makes the `/data` folders, links `/root/.ssh` to `/data/access/ssh` |
 
 The screen fonts for `native/` are committed in `native/gen/`; `make -C native fonts` regenerates them (needs python3-pil and the DejaVu fonts).
 
-SSH keys never go into this output. `kernel/build.sh` adds them, for our own test builds only.
+SSH keys never go into this output, and an image made from it alone starts with SSH off. `kernel/build.sh` adds our keys for our own test builds only, which also turns SSH on in them ([docs/access.md](../docs/access.md#our-own-test-builds)).
 
 Two things about HTTPS on this image, both found when the app manager first tried it (2026-11-23). curl is built with no default CA bundle, so `t48-app` and `/etc/profile` point it at `/etc/ssl/certs/ca-certificates.crt`. And Linux 3.6's `/dev/random` blocks for want of entropy, which hung curl for ever, so `rcS` replaces it with the non-blocking pool after stirring in what differs between phones and boots; that is weak just after boot, and a seed kept across boots needs issue #29.

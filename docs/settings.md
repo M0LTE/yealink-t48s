@@ -18,8 +18,8 @@ Press **Down** on the idle screen, or touch **Settings**. Arrows and OK, or touc
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server | on leaving the page |
 | Date and time | time zone, from a list | at once, in the shell and in apps started afterwards |
 | Sound | ringer, handset, speakerphone and headset levels, 0 to 15 | at once, through the audio service. Nothing is played. The volume keys change the same levels |
-| Screen | brightness | not yet: there is no backlight driver (#18). The page says so and stores nothing. When a driver registers a standard Linux backlight device the same row starts working |
-| Access | SSH on or off | not yet: stored only (#28). Today's test image always runs SSH |
+| Screen | brightness, 1 to 10 | at once ([shell.md](shell.md#the-backlight)). The page also says when the screen dims and goes off |
+| Access | SSH on or off, the phone's host key, the keys that can log in, adding a first key | at once ([access.md](access.md)). SSH is off until turned on here |
 | Apps | the app manager ([apps.md](apps.md)) | |
 | App settings | each installed app's own settings, from its manifest | the next time the app is opened (an open app is closed) |
 | About | firmware and shell version, app API level, kernel, address, MAC, memory, storage | |
@@ -45,8 +45,8 @@ Plain text in `/data/config`, one file per subject, `key=value` a line, `#` for 
 | `network` | `mode` (dhcp or static), `address`, `netmask`, `gateway`, `dns` |
 | `system` | `timezone`: a name from the list (`Europe/London`), or any POSIX TZ string (`XYZ-3`) for a zone the list lacks |
 | `audio` | `ringer`, `handset`, `speaker`, `headset`: 0 to 15 |
-| `screen` | `brightness`: 0 to 10 |
-| `access` | `ssh`: on or off |
+| `screen` | `brightness`: 1 to 10. Not on the screen: `dim_seconds` (120) and `off_seconds` (1800), how long nothing is touched before the screen dims and goes off; 0 is never. The shell picks changes to this file up within five seconds |
+| `access` | `ssh`: on or off (off when missing); `t48-apply access` makes it so |
 | `feed` | `url`: the app feed, if not the standard one |
 | `apps/ID.conf` | that app's settings, by the keys in its manifest |
 
@@ -79,7 +79,7 @@ The app gets each value in a SETTING message when it starts. "Back to the app's 
 
 ## Testing
 
-`make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
+Brightness is tested in `06-backlight.script` and the Access page in `07-access.script` ([shell.md](shell.md#the-backlight), [access.md](access.md#testing)). `make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
 
 ## On the phone (2026-11-23)
 
@@ -99,7 +99,6 @@ Not tried on the phone: a fixed network address (it would cut the test connectio
 
 ## Not done
 
-- Brightness and SSH do nothing yet (#18, #28).
 - The network page has no IPv6, VLAN or 802.1X, and a fixed address takes its time from pool.ntp.org.
 - The time zone list is about 55 places with their rules built in (there are no zone files in the image); other zones need a TZ string set over SSH.
 - Settings are in RAM until #29.

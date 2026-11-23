@@ -207,7 +207,9 @@ Anti-clone check (`holtek_verify` 0x3c2c, called from `init_module` up to 3 time
 
 Whether the MCU needs this before it obeys other commands: **unknown** (probably not, it is a check on the MCU, not by it).
 
-## LCD backlight (for reference)
+## LCD backlight
+
+Checked on the phone 2026-11-23 and now a driver: see [kernel/README.md](../kernel/README.md#backlight-2026-11-23). The offline reading below was right.
 
 `bklight_init` (0x81d0) for ids 35 and 65: control GPIO18 (`bklight_ctl`), then `bklight_init_pwm` (0x7fac): skip if GPIO35 is already muxed to MISC (U-Boot did it), else mux GPIO35 to function 13, BusIntfClock |= 0x10000, chipc LEDClock (0x8000004C) |= 0x20000, PWM register 0x80002040: |= 6, clear bits 3-7, |= 1. `bklight_set` (0x7898, case at 0x7d0c): level 0 drives GPIO18 high (off); otherwise PWM bits 3-7 = 30 - 3*ceil(level/10) (smaller is brighter) and GPIO18 low.
 

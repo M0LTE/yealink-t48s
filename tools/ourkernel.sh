@@ -1,7 +1,8 @@
 #!/bin/sh
 # ourkernel.sh boot [IMAGE]   : start our kernel from Yealink and wait for its shell prompt
 # ourkernel.sh cmd "COMMAND" [SECONDS] : run a command in its serial shell, print the output
-# ourkernel.sh ssh ["COMMAND"] : SSH into our kernel (DHCP + dropbear, key login; fresh host key each boot)
+# ourkernel.sh ssh ["COMMAND"] : SSH into our kernel (DHCP + dropbear, key login; fresh host key each boot).
+#                              Needs a development build, the only kind with SSH on from boot (docs/access.md)
 # ourkernel.sh back           : reset to Yealink and wait until SSH answers again
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd); PHONE=${PHONE:-10.45.0.214}

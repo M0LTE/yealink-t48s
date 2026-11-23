@@ -86,6 +86,8 @@ Until #6 reports, a null backend and a file backend let SIP and the phone UI go 
 - The call state lives in baresip, the audio state in the audio service; the shell is the glue and the face. That is why a separate "phone daemon" is not needed.
 - Settings are plain text files in `/data/config`, edited on the screen (with an on-screen keyboard) or over SSH. No web interface for now.
 
+(2026-11-23: the backlight has a driver and the shell dims and blanks the screen, see [shell.md](shell.md#the-backlight).)
+
 (2026-11-23: settings, the keyboard and the app manager exist, see [settings.md](settings.md) and [apps.md](apps.md). The tool is `t48-config get/set`, and `t48-app` installs from one feed, checked by SHA-256.)
 
 (2026-11-23: the phone UI exists and is tested in the simulator against baresip and the audio service, see [phone.md](phone.md). baresip's control is our own module on a root-only socket, see [sip.md](sip.md#control-interface).)
@@ -175,6 +177,8 @@ Issue [#29](https://github.com/M0LTE/yealink-t48s/issues/29), needs NAND access 
 ### Access
 
 Issue [#28](https://github.com/M0LTE/yealink-t48s/issues/28). SSH (dropbear) is off on a fresh phone and has no built-in password or key. The owner turns it on at the phone's own screen: being at the phone is the proof. A live image can also take keys from the settings file beside it. The serial console stays open.
+
+(2026-11-23: done, see [access.md](access.md). A first key gets onto the phone through password login that the screen opens for ten minutes, with a password it makes up and shows; it closes when the key arrives. Our own test builds, the only ones with keys in them, always run SSH. Keys from the live image's settings file wait for #7.)
 
 ### Updates
 
