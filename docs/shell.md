@@ -9,13 +9,14 @@
 ## What it does
 
 - Idle screen: time, date, network address, the SIP account and whether it is registered, missed calls.
-- Launcher: a tile for each installed app (see [the manifest](app-protocol.md#the-manifest)). Arrows and OK, or touch. X goes back to idle.
+- Launcher: a tile for each installed app (see [the manifest](app-protocol.md#the-manifest)), then **Get apps**, the app manager ([apps.md](apps.md)). Arrows and OK, or touch. X goes back to idle.
+- Settings, with an on-screen keyboard ([settings.md](settings.md)): Down on the idle screen, or its Settings button.
 - In an app: a short press on X goes to the app as "back"; holding X for 0.8 s is Home. The app is paused and frozen, and its tile says "open"; picking it again brings it back where it was. Picking a different app closes it.
 - A call, or lifting the handset, takes the screen at once, from anything. When the call is over, what was there comes back. The phone side is described in [phone.md](phone.md).
 - An app that crashes, exits with an error, never starts or stops reading its events is cleaned up and the owner is told. Phone keys are never passed to apps.
 - Apps run as their own unprivileged user when the shell runs as root (user number 20000 to 29999, worked out from the app id), with their own data folder under `/data/appdata`.
 
-Not yet: settings screens (#23), installing apps (#22), backlight (#18).
+Not yet: backlight (#18).
 
 ## Build
 
@@ -44,17 +45,19 @@ The screen is kept in memory; there is no window yet. Apps are the real programs
 | `hook off`, `hook on` | lift and replace the handset |
 | `wait MS` | |
 | `waitframe [MS]` | until the app has drawn since the last input (fails after MS, default 3000) |
-| `waitscreen NAME [MS]` | until the shell shows `idle`, `launcher`, `app`, `call`, `message` or `history` |
+| `waitscreen NAME [MS]` | until the shell shows `idle`, `launcher`, `app`, `call`, `message`, `history` or `settings` |
 | `expect NAME` | fail unless that screen is showing now |
-| `expectstate KEY VALUE` | fail unless that is so now. Keys: `phone` (`idle`, `dial`, `outgoing`, `incoming`, `incall`, `ended`), `route` (`none`, `handset`, `speaker`, `headset`), `mute`, `hold`, `number`, `peer`, `dtmf`, `ended`, `reg`, `missed`, `history`, `last`, `vol.ringer` (and the others), `led.speaker` (and the others), `app`, `sip`, `audio`; and what the audio service itself reports: `audio.route`, `audio.mute`, `audio.tone`, `audio.ring`, `audio.call`, `audio.vol.handset` |
+| `expectstate KEY VALUE` | fail unless that is so now (spaces in a value are written `_`). Settings and apps: `settings.page`, `settings.row` and `settings.value` (the selected row), `settings.rows`, `kbd` (`open`, `closed`), `kbd.text`, `overlay` (`none`, `busy`, `message`, `confirm`), `overlay.title`, `store` (`loading`, `loaded`, `error`), `store.ID` (`available`, `installed`, `update`, `unsupported`, `builtin`), `installed.ID` (its version, or `no`), `cfg.FILE.KEY` (from the settings store; `apps:ID` for an app's file), `tz`, `appid`. The phone: `phone` (`idle`, `dial`, `outgoing`, `incoming`, `incall`, `ended`), `route` (`none`, `handset`, `speaker`, `headset`), `mute`, `hold`, `number`, `peer`, `dtmf`, `ended`, `reg`, `missed`, `history`, `last`, `vol.ringer` (and the others), `led.speaker` (and the others), `app`, `sip`, `audio`; and what the audio service itself reports: `audio.route`, `audio.mute`, `audio.tone`, `audio.ring`, `audio.call`, `audio.vol.handset` |
 | `waitstate KEY VALUE [MS]` | until that is so (fails after MS, default 3000) |
 | `run COMMAND` | run a command on the PC and fail if it does; used to make the far end of a test call do things |
 | `shot FILE` | save the screen as `.png` or `.ppm` |
 | `quit` | |
 
-`shell/tests/` has three scripts, run by `make check`: a tour, apps that crash and hang, and the phone screens with no services behind them. The call scenarios in `shell/tests/phone/` need baresip and the audio service and are run by `sip/test/phone-test.sh` ([phone.md](phone.md#testing)).
+`shell/tests/` has five scripts, run by `make check`: a tour, apps that crash and hang, the phone screens with no services behind them, the settings screens and keyboard, and the app manager against feeds made on disk. `make check-live` does the app manager against the real feed ([apps.md](apps.md#testing)). The call scenarios in `shell/tests/phone/` need baresip and the audio service and are run by `sip/test/phone-test.sh` ([phone.md](phone.md#testing)).
 
-With `--sip SOCKET` and `--audio SOCKET` the simulator talks to a real baresip and audio service; without them it has neither, so nothing on a PC is touched by accident.
+With `--sip SOCKET` and `--audio SOCKET` the simulator talks to a real baresip and audio service; without them it has neither, so nothing on a PC is touched by accident. For the same reason it runs no `t48-apply` when a setting changes unless `--apply PROGRAM` names one. `--runner qemu-arm` starts apps through that program, for apps built for the phone.
+
+The same program is also `t48-app` and `t48-config` when started by those names ([apps.md](apps.md#on-the-command-line), [settings.md](settings.md#the-files)).
 
 ## Running it on the phone
 

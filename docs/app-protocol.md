@@ -87,5 +87,5 @@ An installed app is a folder holding `manifest.json`, the program and an icon. T
 - `id` (a-z, 0-9, `-`, `.`, `_`), `exec` (a path inside the folder) and `api` are required. An app asking for a higher API level than the shell speaks is not listed.
 - `name`, `version` and `description` are shown to the owner; `t48-pack` (in the SDK) needs `name` and `version`, and copies `description` into the feed.
 - `icon` is a binary PPM (P6) up to 96 x 96 for now; without one the launcher shows the name's first letter. PNG will follow when libt48 can read it.
-- `permissions` is read and kept but nothing acts on it yet (there is no audio service or app manager yet).
-- `settings`: each one reaches the app as a SETTING message. The value is the manifest's default unless `/data/config/apps/<id>.conf` has a `key=value` line for it. Screens for changing them come with issue #23.
+- `permissions` is shown to the owner by the app manager ([apps.md](apps.md)); nothing enforces it yet.
+- `settings`: each has a `key`, a `label`, a `type` (`text`, `number`, `bool` or `password`) and a `default`, and reaches the app as a SETTING message. The value is the manifest's default unless the owner has changed it in Settings, App settings ([settings.md](settings.md#an-apps-settings)), which keeps it in `/data/config/apps/<id>.conf`.

@@ -53,7 +53,8 @@ SIM = ./t48-sim --apps simdata/installed:apps --data simdata/appdata --config si
 check: all $(O)/apps $(O)/feeds
 	@mkdir -p $(O)/shots
 	cd $(O) && for t in ../tests/*.script; do echo "== $$t"; rm -rf simdata; \
-		$(SIM) --script $$t || exit 1; done
+		$(SIM) --script $$t 2>sim.log || { cat sim.log; exit 1; }; cat sim.log; \
+		if grep -q 7355719 sim.log; then echo "the password typed in 04-settings is in the log"; exit 1; fi; done
 	@echo "all simulator tests passed"
 
 # the same against the real feed on the internet: installs hello, links and

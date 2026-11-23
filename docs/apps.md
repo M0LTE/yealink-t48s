@@ -1,0 +1,66 @@
+# The app manager
+
+Issue [#22](https://github.com/M0LTE/yealink-t48s/issues/22). Design: [architecture.md](architecture.md#the-apps-repository). Source: [`shell/pkg.c`](../shell/pkg.c) (`t48-app`), [`shell/settings.c`](../shell/settings.c) (the screens).
+
+Open **Apps**, then the last tile, **Get apps** (also Settings, Apps). It lists what is installed and what the feed offers; pick one to install, update, open, change its settings or remove it.
+
+| | |
+|---|---|
+| ![the list](img/apps-list-live.png) | ![installing](img/apps-installing.png) |
+| ![an installed app](img/apps-detail.png) | ![removing](img/apps-remove.png) |
+| ![a package that fails its check](img/apps-checksum.png) | ![the launcher afterwards](img/apps-launcher.png) |
+
+- Each app's page shows its version, its size (download, and on the phone once installed) and what it may use (its manifest's permissions).
+- Remove asks first, and takes the app's own data and settings with it. Update keeps them.
+- Apps that are part of the firmware (the clock) cannot be removed.
+- Installing, updating or removing the app that is open closes it first.
+- The feed address is a setting on the same screen (`/data/config/feed`, [settings.md](settings.md#the-files)). The standard one is `https://m0lte.github.io/yealink-t48s-apps/index.json`, published by [M0LTE/yealink-t48s-apps](https://github.com/M0LTE/yealink-t48s-apps).
+
+## What is checked before an app is installed
+
+1. The feed's address must be `https://`. curl does the download, with mbedTLS and the image's CA bundle.
+2. The app's `api` in the feed must not be higher than the level this shell speaks (1 today). A newer app is listed as "needs newer firmware" and has no Install button.
+3. The package must have exactly the `size` and `sha256` the feed gives. If not it is thrown away and the owner is told.
+4. The package must hold one folder, named with a proper app id, with only plain files and folders inside it: no links, no devices, nothing that climbs out with `..`. The shell unpacks the tar itself rather than trusting a tar program with that.
+5. The manifest inside must read properly, have the id the feed said, an API level this shell speaks, and a program to run.
+
+Only then is the app moved into `/data/apps` with a rename, so a half-installed app is never visible, and a failed update leaves the old version in place.
+
+## The feed
+
+`index.json`, as `t48-pack --index` writes it ([sdk/README.md](../sdk/README.md#packages-and-feeds)). Nothing had to change: `size` and `sha256` were already there. What the phone reads:
+
+| | |
+|---|---|
+| `feed` | must be 1 |
+| `apps[].id`, `url` | needed. `url` is relative to the index, or a full address |
+| `apps[].size`, `sha256` | needed to install: an entry without them is listed but refused |
+| `apps[].api` | refused if higher than the shell's |
+| `apps[].name`, `version`, `description`, `permissions` | shown to the owner |
+
+## On the command line
+
+```
+t48-app list                  # installed, and what the feed has
+t48-app install hello         # from the feed
+t48-app install /tmp/my-0.1.0.t48app    # a file copied to the phone: no checksum to check it against
+t48-app update                # everything the feed has a newer version of
+t48-app update hello
+t48-app remove hello
+t48-app --feed https://example.org/apps/index.json list
+```
+
+`t48-app` is the shell's own program under another name. The Apps screen runs it as a separate process and reads its progress, so a slow download never holds up the screen or a call.
+
+## Testing
+
+- `make -C shell check` runs [`tests/05-apps.script`](../shell/tests/05-apps.script) against two small feeds made on disk by [`tests/mkfeeds.sh`](../shell/tests/mkfeeds.sh): install, open, the app's settings, an update that keeps them, remove; and the refusals (an app for API level 2, a package one byte wrong, a package that climbs out of its folder, one holding a link, a feed address that is not https, removing the clock, a feed that is not there).
+- `make -C shell check-live RUNNER=qemu-arm` uses the real feed: installs hello, links and waterfall from the Apps screen and starts each one (they are the phone's ARM programs, hence qemu).
+- On the phone: see [shell.md](shell.md#what-has-been-checked-on-the-phone-2026-11-23).
+
+## Not done
+
+- One feed at a time. Several feeds, and signed feeds, are for later.
+- While `/data` is in RAM (#29), installed apps are lost at power off. Fetching a list of apps again at boot is not written.
+- No automatic check for updates: open the screen (or run `t48-app update`).
+- The image's `/dev/random` is pointed at the non-blocking pool so that HTTPS works at all on this kernel (see `rcS`); its randomness just after boot is weak until a seed can be kept across boots (#29).
