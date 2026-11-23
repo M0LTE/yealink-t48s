@@ -254,3 +254,17 @@ What it settles:
 - The key lamps show up as expected: GPIO5 low in speaker mode (Speakerphone lamp), GPIO3 low in headset mode (Headset lamp).
 
 So "reading 2" above was right, not reading 1: `audiod`'s compiled-in route table must swap codecs (handset and headset on codec B, speaker on codec A + amp), and the analog values above are Yealink's settings to copy per route.
+
+## Daytime test 2 result (2026-11-23, our kernel, `t48rec`)
+
+Tom counted aloud into the handset, then at the phone from about 50 cm (8 s each, both codecs recording at once; files in `dumps/audio/test2/`, not committed):
+
+| Recording | Loudest 1 s | Quietest 1 s | Verdict |
+|---|---|---|---|
+| handset, codec B input B (as Yealink left it: preamp 5, digital 36) | -30.9 dBFS | -68.7 dBFS | handset microphone |
+| handset, codec A input A | -60.0 | -69.1 | faint pickup only |
+| at the phone, codec A input A (preamp 5, digital 36) | -51.5 | -68.1 | base (speakerphone) microphone; needs more gain |
+| at the phone, codec A input B | -84.4 | -90.3 | nothing connected |
+| at the phone, codec B input B | -46.8 | -52.8 | handset mic hearing the room from the cradle |
+
+So: handset microphone = codec B input B; speakerphone microphone = codec A input A (about 20 dB more gain wanted for speech at 50 cm); codec A input B is unused (probably the headset mic is codec B's other input, selected by 0x3060012c/134/138 in headset mode, untested without a headset).
