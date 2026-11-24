@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Yealink SIP-T48S started by U-Boot from the phone's own flash: the kernel
+ * image the installer writes into the "kernel" partition (kernel6/build.sh
+ * with FLASH=1; issues 8 and 29, docs/install.md).
+ *
+ * U-Boot's ordinary boot command reads it to 0x02680000 (nboot), copies it to
+ * the load address and enters it with a tag list holding Yealink's command
+ * line. As on a live start, none of that is read: memory and the command line
+ * are here. There is no ramdisk: the first stage is inside the kernel and it
+ * finds the system image in a flash slot.
+ *
+ * t48boot=flash says how the phone was started. The flash driver opens the app
+ * partition for writing only when it sees it (drivers/t48s_nand.c), and the
+ * first stage looks for the system slots only then.
+ */
+#include "bcm11188-yealink-t48s.dts"
+
+/ {
+	chosen {
+		bootargs = "console=tty0 console=ttyAMA0,115200 earlycon t48boot=flash loglevel=8";
+	};
+};

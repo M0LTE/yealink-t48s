@@ -25,8 +25,14 @@
 #                    stage; the system image is not in it (it comes in T48S.rfs,
 #                    which tools/mkliveimage.py makes); keys go in only if
 #                    AUTHORIZED_KEYS names a file. See "Started by U-Boot" below.
-#   LOADADDR         LIVE=1: where U-Boot is told to copy and enter the kernel
-#                    (default 0x00408000)
+#   FLASH=1          build T48S-kernel.uimg, the file the installer writes into the
+#                    phone's kernel partition (issues 8 and 29, docs/install.md):
+#                    the same U-Boot image as LIVE=1, with the device tree that
+#                    says t48boot=flash and names no ramdisk. ROOTFS is the first
+#                    stage. It must fit the 2.5 MB partition. Keys go in only if
+#                    AUTHORIZED_KEYS names a file.
+#   LOADADDR         LIVE=1, FLASH=1: where U-Boot is told to copy and enter the
+#                    kernel (default 0x00408000)
 set -e
 KVER=6.18.65
 KSHA=c92606f956f09dc50b5a0e2af9e86763fce27ada1647de97f8d1ac8cfc95801d
@@ -42,15 +48,25 @@ if [ "$LIVE" = 1 ]; then
     KEYS=${AUTHORIZED_KEYS:-}
     LOADADDR=${LOADADDR:-0x00408000}
 fi
+FLASH=${FLASH:-0}
+if [ "$FLASH" = 1 ]; then
+    [ "$LIVE" != 1 ] || { echo "FLASH=1 and LIVE=1 are two different files" >&2; exit 2; }
+    [ -z "$SYSTEM" ] || { echo "FLASH=1: the system image goes in a flash slot, not in the kernel" >&2; exit 2; }
+    DTS=${DTS:-bcm11188-yealink-t48s-flash}
+    OUT=${OUT:-T48S-kernel.uimg}
+    KEYS=${AUTHORIZED_KEYS:-}
+    LOADADDR=${LOADADDR:-0x00408000}
+fi
 DTS=${DTS:-bcm11188-yealink-t48s}
 OUT=${OUT:-zImage-t48s}
-[ "$LIVE" = 1 ] || KEYS=${AUTHORIZED_KEYS:-$WORK/root.authorized_keys}
+[ "$LIVE" = 1 ] || [ "$FLASH" = 1 ] || KEYS=${AUTHORIZED_KEYS:-$WORK/root.authorized_keys}
 CROSS=${CROSS_COMPILE:-arm-linux-gnueabi-}
 [ -n "$ROOTFS" ] || { echo "set ROOTFS to Buildroot's rootfs.cpio(.gz) or firststage.cpio" >&2; exit 2; }
 SRC="$WORK/linux-$KVER"
 # a live build differs from the ordinary one in its device tree and built-in
 # files only, so it shares that build directory and costs a relink
-BUILD="$WORK/build-${DTS%-live}"
+BUILD=${DTS%-live}
+BUILD="$WORK/build-${BUILD%-flash}"
 
 # the source: the pinned release, checked, with our patches. Unpacked afresh
 # whenever the patches change.
@@ -148,6 +164,20 @@ if [ "$LIVE" = 1 ]; then
     rm -f "$WORK/$OUT.zimage"
     ls -l "$BUILD/arch/arm/boot/Image" "$BUILD/arch/arm/boot/zImage" "$WORK/$OUT" | awk '{print $5, $9}'
     python3 "$HERE/../tools/mkliveimage.py" checkbin "$WORK/$OUT" kernel=6.18
+    exit 0
+fi
+if [ "$FLASH" = 1 ]; then
+    # Started by U-Boot from flash: "nboot 0x02680000 0 0x015A0000" reads the size
+    # from this file's header, then bootm checks both CRCs, copies the kernel to
+    # the load address and enters it, exactly as for LIVE=1 above. So it is the
+    # same kind of file with another device tree, and it must fit the partition.
+    # tools/t48flash.py checkkernel proves the header, the addresses and the size
+    # from the finished file.
+    cat "$BUILD/arch/arm/boot/zImage" "$BUILD/arch/arm/boot/dts/broadcom/$DTS.dtb" > "$WORK/$OUT.zimage"
+    mkimage -A arm -O linux -T kernel -C none -a "$LOADADDR" -e "$LOADADDR" -n "Linux-$KVER-t48s" -d "$WORK/$OUT.zimage" "$WORK/$OUT" >/dev/null
+    rm -f "$WORK/$OUT.zimage"
+    ls -l "$BUILD/arch/arm/boot/Image" "$BUILD/arch/arm/boot/zImage" "$WORK/$OUT" | awk '{print $5, $9}'
+    python3 "$HERE/../tools/t48flash.py" checkkernel "$WORK/$OUT"
     exit 0
 fi
 cat "$BUILD/arch/arm/boot/zImage" "$BUILD/arch/arm/boot/dts/broadcom/$DTS.dtb" > "$WORK/$OUT"

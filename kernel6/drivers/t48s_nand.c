@@ -17,9 +17,22 @@
  *
  * READING works everywhere. WRITING AND ERASING work only inside the ranges listed
  * in t48s_nand_ours[] below, which is compiled in and cannot be changed at run
- * time. Everything else, and above all the loader, U-Boot, its two environments,
- * the logo and the safe-mode kernel and root filesystem, cannot be changed by this
- * driver. Three independent layers, each checking the address itself:
+ * time: the kernel partition and the app partition (issues #8, #29), and inside
+ * app the 60 blocks that held /data before the phone was installed. Everything
+ * else, and above all the loader, U-Boot, its two environments, the logo and the
+ * safe-mode kernel and root filesystem, cannot be changed by this driver, and nor
+ * can Yealink's rfs, cfg and data.
+ *
+ * On top of the list there is a lock. The kernel range and the app range start
+ * every boot closed, and a closed range is refused exactly like a place that is
+ * not on the list. app opens by itself only when the kernel was started from the
+ * flash of an installed phone (t48boot=flash on the command line, which only the
+ * kernel image the installer writes carries). Otherwise the installer, the updater
+ * and the way back to stock open what they need by writing a word to
+ * /sys/module/t48s_nand/parameters/lock (docs/install.md). The lock can only
+ * choose among the ranges compiled in; it cannot add one.
+ *
+ * Three independent layers, each checking the address itself:
  *
  *  1. Every byte for the chip's command, address and data latches passes through
  *     t48s_nand_cmd_ctrl() and t48s_nand_write_buf(). Reads go straight through.
@@ -39,8 +52,11 @@
  *
  * At start-up, before the flash is registered, t48s_nand_selftest() asks every
  * layer in turn to erase and program places that are not ours and checks that
- * each refuses and that not one byte went to the chip's latches. If any attempt
- * gets through a layer, there is no flash at all.
+ * each refuses and that not one byte went to the chip's latches: once with the
+ * lock closed (everything but the /data blocks must be refused, the kernel and
+ * app partitions included) and once with it open (everything outside the kernel
+ * and app partitions must still be refused). If any attempt gets through a
+ * layer, there is no flash at all.
  *
  * How a page is written:
  *   - the page must read as erased (all ff, spare bytes too) or it is refused;
@@ -63,6 +79,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/string.h>
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/bitops.h>
@@ -112,7 +129,7 @@ static unsigned int blocks_erased;
 module_param(blocks_erased, uint, 0444);
 static unsigned int write_errors;	/* program or erase failed, or the read-back differed */
 module_param(write_errors, uint, 0444);
-static unsigned int selftest;	/* attempts outside our ranges made, and refused, at start-up */
+static unsigned int selftest;	/* attempts on what is not ours made, and refused, at start-up */
 module_param(selftest, uint, 0444);
 
 static bool t48s_nand_testing;	/* the start-up self-test is running: no log lines */
@@ -135,14 +152,28 @@ static void t48s_latch(u8 val, unsigned int reg)
 #define T48S_PAGES_PER_BLOCK	64
 
 /*
- * The last 60 blocks of Yealink's "app" partition. Its filesystem there fills
- * blocks 0 to 538 and has never touched these (they are erased in the stock
- * flash), and it is mounted read-only, so Yealink's firmware keeps working beside
- * what we keep here: UBI, with the phone's /data. Going back to stock is erasing
- * them. See docs/flash.md.
+ * The allow-list. Three ranges, and there will never be more:
+ *
+ *  t48data    the last 60 blocks of Yealink's "app" partition. Its filesystem
+ *             there fills blocks 0 to 538 and never touched these, so /data went
+ *             here (UBI) while Yealink's firmware was still what the phone
+ *             started. Always open: it is where the owner's settings are today.
+ *  t48kernel  the whole "kernel" partition, which U-Boot loads and starts
+ *             (nboot 0x02680000 0 0x015A0000). Ours once the phone is installed.
+ *  t48app     the whole "app" partition: UBI with the two system slots and /data
+ *             once the phone is installed. It contains t48data.
+ *
+ * The last two are behind the lock described at the top of this file.
  */
-static const struct mtd_partition t48s_nand_ours[] = {
-	{ .name = "t48data", .offset = 0x06a80000, .size = 0x00780000 },
+enum { T48S_LOCK_NONE, T48S_LOCK_KERNEL, T48S_LOCK_APP, T48S_LOCKS };
+static const struct t48s_range {
+	const char *name;
+	loff_t offset, size;
+	int lock;
+} t48s_nand_ours[] = {
+	{ "t48data",   0x06a80000, 0x00780000, T48S_LOCK_NONE },
+	{ "t48kernel", 0x015a0000, 0x00280000, T48S_LOCK_KERNEL },
+	{ "t48app",    0x02720000, 0x04ae0000, T48S_LOCK_APP },
 };
 
 /* The only partitions a range may lie in. Never ubl, uboot, env, userenv, logo,
@@ -152,6 +183,9 @@ static const struct { loff_t offset, size; } t48s_nand_reusable[] = {
 	{ 0x02720000, 0x04ae0000 },	/* app */
 };
 
+/* which locks are open; T48S_LOCK_NONE is the range that has none */
+static bool t48s_nand_open[T48S_LOCKS] = { true, false, false };
+
 static bool t48s_nand_range_ok(loff_t ofs, loff_t len)
 {
 	int i;
@@ -159,11 +193,48 @@ static bool t48s_nand_range_ok(loff_t ofs, loff_t len)
 	if (len <= 0)
 		return false;
 	for (i = 0; i < ARRAY_SIZE(t48s_nand_ours); i++)
-		if (ofs >= t48s_nand_ours[i].offset &&
+		if (t48s_nand_open[t48s_nand_ours[i].lock] &&
+		    ofs >= t48s_nand_ours[i].offset &&
 		    ofs + len <= t48s_nand_ours[i].offset + t48s_nand_ours[i].size)
 			return true;
 	return false;
 }
+
+/*
+ * The lock, from userspace: /sys/module/t48s_nand/parameters/lock. Reading shows
+ * the state. Writing takes one of four exact words and nothing else. Opening is
+ * logged every time. app cannot be closed again while it is open (UBI is using
+ * it); the kernel range can, and the installer closes it when it has finished.
+ */
+static int t48s_nand_lock_set(const char *val, const struct kernel_param *kp)
+{
+	if (sysfs_streq(val, "open-kernel")) {
+		t48s_nand_open[T48S_LOCK_KERNEL] = true;
+		pr_warn("t48s_nand: lock: the kernel partition is OPEN for writing\n");
+	} else if (sysfs_streq(val, "close-kernel")) {
+		t48s_nand_open[T48S_LOCK_KERNEL] = false;
+		pr_warn("t48s_nand: lock: the kernel partition is closed\n");
+	} else if (sysfs_streq(val, "open-app")) {
+		t48s_nand_open[T48S_LOCK_APP] = true;
+		pr_warn("t48s_nand: lock: the app partition is OPEN for writing\n");
+	} else {
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static int t48s_nand_lock_get(char *buf, const struct kernel_param *kp)
+{
+	return sysfs_emit(buf, "kernel=%s app=%s\n",
+			  t48s_nand_open[T48S_LOCK_KERNEL] ? "open" : "closed",
+			  t48s_nand_open[T48S_LOCK_APP] ? "open" : "closed");
+}
+
+static const struct kernel_param_ops t48s_nand_lock_ops = {
+	.set = t48s_nand_lock_set,
+	.get = t48s_nand_lock_get,
+};
+module_param_cb(lock, &t48s_nand_lock_ops, NULL, 0600);
 
 static bool t48s_nand_page_ok(int page)
 {
@@ -633,8 +704,9 @@ static int t48s_mtd_block_markbad(struct mtd_info *mtd, loff_t ofs)
 
 /* ---- the start-up self-test: every layer, asked to write what is not ours ---- */
 
-/* one block in each partition that is not ours, and the blocks either side of ours */
-static const loff_t t48s_nand_not_ours[] = {
+/* With the lock closed: one block in each partition, the kernel and app
+ * partitions included, and the blocks either side of the /data blocks. */
+static const loff_t t48s_nand_not_ours_closed[] = {
 	0x00000000,	/* ubl: the loader */
 	0x00020000,	/* uboot */
 	0x00120000,	/* env */
@@ -642,11 +714,34 @@ static const loff_t t48s_nand_not_ours[] = {
 	0x00320000,	/* logo */
 	0x00420000,	/* smkern */
 	0x006a0000,	/* smrfs */
-	0x015a0000,	/* kernel */
+	0x015a0000,	/* kernel, its first block */
+	0x01800000,	/* kernel, its last block */
 	0x01820000,	/* rfs */
 	0x02720000,	/* app, its first block */
-	0x06a60000,	/* app, the block just below ours */
-	0x07200000,	/* cfg, the block just above ours */
+	0x06a60000,	/* app, the block just below the /data blocks */
+	0x07200000,	/* cfg, the block just above them */
+	0x07600000,	/* data */
+	0x07fe0000,	/* the last block of the chip */
+};
+
+/* With the lock open: one block in each partition that is never ours, and the
+ * blocks either side of the kernel partition and of the app partition. */
+static const loff_t t48s_nand_not_ours_open[] = {
+	0x00000000,	/* ubl: the loader */
+	0x00020000,	/* uboot, its first block */
+	0x00100000,	/* uboot, its last block */
+	0x00120000,	/* env */
+	0x00200000,	/* env, its last block */
+	0x00220000,	/* userenv */
+	0x00300000,	/* userenv, its last block */
+	0x00320000,	/* logo */
+	0x00420000,	/* smkern */
+	0x006a0000,	/* smrfs */
+	0x01580000,	/* smrfs, the block just below the kernel partition */
+	0x01820000,	/* rfs, the block just above the kernel partition */
+	0x02700000,	/* rfs, the block just below the app partition */
+	0x07200000,	/* cfg, the block just above the app partition */
+	0x075e0000,	/* cfg, its last block */
 	0x07600000,	/* data */
 	0x07fe0000,	/* the last block of the chip */
 };
@@ -677,12 +772,82 @@ static void t48s_nand_selftest_gate(struct nand_chip *chip, int page, int announ
 	announced_page = -1;
 }
 
+static int st_n, st_bad;	/* the self-test's attempts, and those not refused */
+#define T48S_MUST_REFUSE(expr) do { st_n++; if ((expr) != -EROFS) st_bad++; } while (0)
+#define T48S_MUST_NOT_SEND(stmt) do { st_n++; stmt; } while (0)
+
+/* every layer, asked to erase and program one block that is not ours */
+static void t48s_nand_selftest_block(struct nand_chip *chip, loff_t a)
+{
+	struct mtd_info *mtd = nand_to_mtd(chip);
+	struct mtd_oob_ops ops;
+	struct erase_info ei;
+	int page = a >> T48S_PAGE_SHIFT;
+
+	if (t48s_nand_range_ok(a, mtd->erasesize) || t48s_nand_page_ok(page) ||
+	    t48s_nand_page_ok(page + T48S_PAGES_PER_BLOCK - 1)) {
+		st_bad++;	/* the list is wrong, or the range check is: try nothing */
+		return;
+	}
+	/* layer 3 */
+	memset(&ei, 0, sizeof(ei));
+	ei.addr = a;
+	ei.len = mtd->erasesize;
+	T48S_MUST_REFUSE(t48s_mtd_erase(mtd, &ei));
+	memset(&ops, 0, sizeof(ops));
+	ops.mode = MTD_OPS_PLACE_OOB;
+	ops.datbuf = t48s_nand_testbuf;
+	ops.len = mtd->writesize;
+	T48S_MUST_REFUSE(t48s_mtd_write_oob(mtd, a, &ops));
+	T48S_MUST_REFUSE(t48s_mtd_block_markbad(mtd, a));
+	/* layer 2 */
+	T48S_MUST_REFUSE(t48s_nand_write_page(chip, t48s_nand_testbuf, 0, page));
+	T48S_MUST_REFUSE(t48s_nand_write_page_raw(chip, t48s_nand_testbuf, 0, page));
+	memset(chip->oob_poi, 0xff, mtd->oobsize);
+	chip->oob_poi[0] = 0;	/* a bad block marker, well formed */
+	T48S_MUST_REFUSE(t48s_nand_write_oob(chip, page));
+	T48S_MUST_REFUSE(t48s_nand_write_oob_raw(chip, page));
+	memset(chip->oob_poi, 0xff, mtd->oobsize);
+	T48S_MUST_NOT_SEND(t48s_nand_cmdfunc(chip, NAND_CMD_ERASE1, -1, page);
+			   t48s_nand_cmdfunc(chip, NAND_CMD_ERASE2, -1, -1));
+	T48S_MUST_NOT_SEND(t48s_nand_cmdfunc(chip, NAND_CMD_SEQIN, 0, page);
+			   t48s_nand_write_buf(chip, t48s_nand_testbuf, 16);
+			   t48s_nand_cmdfunc(chip, NAND_CMD_PAGEPROG, -1, -1));
+	/* layer 1 */
+	T48S_MUST_NOT_SEND(t48s_nand_selftest_gate(chip, page, page));
+}
+
+/* an erase and a write that start inside a range and run over its end, and the
+ * same over its start: [ofs, ofs + size) is a range that is open */
+static void t48s_nand_selftest_edges(struct nand_chip *chip, loff_t ofs, loff_t size)
+{
+	struct mtd_info *mtd = nand_to_mtd(chip);
+	struct mtd_oob_ops ops;
+	struct erase_info ei;
+
+	memset(&ei, 0, sizeof(ei));
+	ei.addr = ofs - mtd->erasesize;
+	ei.len = 2 * mtd->erasesize;
+	T48S_MUST_REFUSE(t48s_mtd_erase(mtd, &ei));
+	ei.addr = ofs + size - mtd->erasesize;
+	T48S_MUST_REFUSE(t48s_mtd_erase(mtd, &ei));
+	memset(&ops, 0, sizeof(ops));
+	ops.datbuf = t48s_nand_testbuf;
+	ops.len = mtd->writesize;
+	T48S_MUST_REFUSE(t48s_mtd_write_oob(mtd, ofs + size - 1024, &ops));
+	T48S_MUST_REFUSE(t48s_mtd_write_oob(mtd, ofs - 1024, &ops));
+}
+
 /*
  * Returns the number of attempts made, all refused with nothing sent to the
  * chip, or -1 if any attempt got through a layer. Runs before the flash is
- * registered, so nothing else is using the chip.
+ * registered, so nothing else is using the chip. Two passes: the lock closed, as
+ * at every start, and the lock open, as the installer will have it. In the
+ * second, only places outside the kernel and app partitions are tried, so that
+ * a mistake in this test cannot reach them either. *closed_n gets the count of
+ * the first pass.
  */
-static int t48s_nand_selftest(struct nand_chip *chip)
+static int t48s_nand_selftest(struct nand_chip *chip, int *closed_n)
 {
 	static const u8 never[] = { NAND_CMD_RESET, NAND_CMD_RNDIN, NAND_CMD_SET_FEATURES,
 				    NAND_CMD_CACHEDPROG, 0x23, 0x2a, 0x2c, 0xa0, 0xa1 };
@@ -690,61 +855,25 @@ static int t48s_nand_selftest(struct nand_chip *chip)
 	unsigned int was_blocked = blocked, was_refused = refused;
 	unsigned long sent = latch_writes;
 	struct mtd_oob_ops ops;
-	struct erase_info ei;
-	int i, page, n = 0, bad = 0;
+	int i, page;
 	loff_t a;
 
-#define T48S_MUST_REFUSE(expr) do { n++; if ((expr) != -EROFS) bad++; } while (0)
-#define T48S_MUST_NOT_SEND(stmt) do { n++; stmt; } while (0)
+	st_n = st_bad = 0;
 	memset(t48s_nand_testbuf, 0x5a, sizeof(t48s_nand_testbuf));
 	t48s_nand_testing = true;
-	for (i = 0; i < ARRAY_SIZE(t48s_nand_not_ours); i++) {
-		a = t48s_nand_not_ours[i];
-		page = a >> T48S_PAGE_SHIFT;
-		if (t48s_nand_range_ok(a, mtd->erasesize)) {
-			bad++;		/* the list above is wrong, or the range check is */
-			continue;
-		}
-		/* layer 3 */
-		memset(&ei, 0, sizeof(ei));
-		ei.addr = a;
-		ei.len = mtd->erasesize;
-		T48S_MUST_REFUSE(t48s_mtd_erase(mtd, &ei));
-		memset(&ops, 0, sizeof(ops));
-		ops.mode = MTD_OPS_PLACE_OOB;
-		ops.datbuf = t48s_nand_testbuf;
-		ops.len = mtd->writesize;
-		T48S_MUST_REFUSE(t48s_mtd_write_oob(mtd, a, &ops));
-		T48S_MUST_REFUSE(t48s_mtd_block_markbad(mtd, a));
-		/* layer 2 */
-		T48S_MUST_REFUSE(t48s_nand_write_page(chip, t48s_nand_testbuf, 0, page));
-		T48S_MUST_REFUSE(t48s_nand_write_page_raw(chip, t48s_nand_testbuf, 0, page));
-		memset(chip->oob_poi, 0xff, mtd->oobsize);
-		chip->oob_poi[0] = 0;	/* a bad block marker, well formed */
-		T48S_MUST_REFUSE(t48s_nand_write_oob(chip, page));
-		T48S_MUST_REFUSE(t48s_nand_write_oob_raw(chip, page));
-		memset(chip->oob_poi, 0xff, mtd->oobsize);
-		T48S_MUST_NOT_SEND(t48s_nand_cmdfunc(chip, NAND_CMD_ERASE1, -1, page);
-				   t48s_nand_cmdfunc(chip, NAND_CMD_ERASE2, -1, -1));
-		T48S_MUST_NOT_SEND(t48s_nand_cmdfunc(chip, NAND_CMD_SEQIN, 0, page);
-				   t48s_nand_write_buf(chip, t48s_nand_testbuf, 16);
-				   t48s_nand_cmdfunc(chip, NAND_CMD_PAGEPROG, -1, -1));
-		/* layer 1 */
-		T48S_MUST_NOT_SEND(t48s_nand_selftest_gate(chip, page, page));
-	}
-	/* across each end of our range */
+
+	/* ---- pass 1: the lock closed ---- */
+	t48s_nand_open[T48S_LOCK_KERNEL] = false;
+	t48s_nand_open[T48S_LOCK_APP] = false;
+	for (i = 0; i < ARRAY_SIZE(t48s_nand_not_ours_closed); i++)
+		t48s_nand_selftest_block(chip, t48s_nand_not_ours_closed[i]);
+	/* across each end of the /data blocks */
 	a = t48s_nand_ours[0].offset;
-	memset(&ei, 0, sizeof(ei));
-	ei.addr = a - mtd->erasesize;
-	ei.len = 2 * mtd->erasesize;
-	T48S_MUST_REFUSE(t48s_mtd_erase(mtd, &ei));
-	ei.addr = a + t48s_nand_ours[0].size - mtd->erasesize;
-	T48S_MUST_REFUSE(t48s_mtd_erase(mtd, &ei));
+	t48s_nand_selftest_edges(chip, a, t48s_nand_ours[0].size);
+	/* inside them, the kinds of write that do not exist */
 	memset(&ops, 0, sizeof(ops));
 	ops.datbuf = t48s_nand_testbuf;
 	ops.len = mtd->writesize;
-	T48S_MUST_REFUSE(t48s_mtd_write_oob(mtd, a + t48s_nand_ours[0].size - 1024, &ops));
-	/* inside our range, the kinds of write that do not exist */
 	ops.mode = MTD_OPS_RAW;
 	T48S_MUST_REFUSE(t48s_mtd_write_oob(mtd, a, &ops));
 	ops.mode = MTD_OPS_PLACE_OOB;
@@ -784,24 +913,46 @@ static int t48s_nand_selftest(struct nand_chip *chip)
 	T48S_MUST_NOT_SEND(t48s_nand_cmd_ctrl(chip, NAND_CMD_ERASE2, NAND_NCE | NAND_CLE));
 	T48S_MUST_NOT_SEND(t48s_nand_write_buf(chip, t48s_nand_testbuf, 16));
 	T48S_MUST_NOT_SEND(t48s_nand_write_byte(chip, 0));
-#undef T48S_MUST_REFUSE
-#undef T48S_MUST_NOT_SEND
+	*closed_n = st_n;
+
+	/* ---- pass 2: the lock open, as the installer will have it ---- */
+	t48s_nand_open[T48S_LOCK_KERNEL] = true;
+	t48s_nand_open[T48S_LOCK_APP] = true;
+	for (i = 0; i < ARRAY_SIZE(t48s_nand_not_ours_open); i++)
+		t48s_nand_selftest_block(chip, t48s_nand_not_ours_open[i]);
+	for (i = 0; i < ARRAY_SIZE(t48s_nand_reusable); i++)
+		t48s_nand_selftest_edges(chip, t48s_nand_reusable[i].offset,
+					 t48s_nand_reusable[i].size);
+	/* one lock open says nothing about the other */
+	t48s_nand_open[T48S_LOCK_APP] = false;
+	t48s_nand_selftest_block(chip, 0x02720000);
+	t48s_nand_selftest_block(chip, 0x06a60000);
+	t48s_nand_open[T48S_LOCK_APP] = true;
+	t48s_nand_open[T48S_LOCK_KERNEL] = false;
+	t48s_nand_selftest_block(chip, 0x015a0000);
+	t48s_nand_selftest_block(chip, 0x01800000);
+	t48s_nand_open[T48S_LOCK_APP] = false;
 
 	if (latch_writes != sent)
-		bad++;
+		st_bad++;
 	if (gate == GATE_PROG_OPEN || gate == GATE_ERASE_OPEN || announced_page != -1 || erase_passed)
-		bad++;
+		st_bad++;
+	if (t48s_nand_open[T48S_LOCK_KERNEL] || t48s_nand_open[T48S_LOCK_APP] ||
+	    !t48s_nand_open[T48S_LOCK_NONE])
+		st_bad++;
 	t48s_nand_testing = false;
 	gate = GATE_DROP;	/* until the next command that reads */
 	blocked = was_blocked;
 	refused = was_refused;
-	if (bad) {
-		pr_err("t48s_nand: SELF-TEST FAILED: a write outside our range was not refused (%lu bytes reached the chip's latches)\n",
+	if (st_bad) {
+		pr_err("t48s_nand: SELF-TEST FAILED: a write outside our ranges was not refused (%lu bytes reached the chip's latches)\n",
 		       latch_writes - sent);
 		return -1;
 	}
-	return n;
+	return st_n;
 }
+#undef T48S_MUST_REFUSE
+#undef T48S_MUST_NOT_SEND
 
 /* ---- reading ---- */
 
@@ -973,7 +1124,8 @@ static const struct mtd_partition t48s_nand_parts[] = {
 	T48S_PART("app",     0x02720000, 0x04ae0000),
 	T48S_PART("cfg",     0x07200000, 0x00400000),
 	T48S_PART("data",    0x07600000, 0x00a00000),
-	/* ours, and the only writeable ones: t48s_nand_ours[] is added after these */
+	/* ours, and the only writeable ones: t48s_nand_ours[] is added after these,
+	 * as t48data (mtd13), t48kernel (mtd14) and t48app (mtd15) */
 };
 
 static int t48s_nand_probe(struct platform_device *pdev)
@@ -982,7 +1134,7 @@ static int t48s_nand_probe(struct platform_device *pdev)
 	struct nand_chip *chip = &t48s_nand_chip;
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	loff_t ofs;
-	int err, bad = 0, i, j;
+	int err, bad = 0, i, j, closed_n = 0;
 
 	t48s_bch_init();
 	if (!t48s_bch_selftest()) {
@@ -991,14 +1143,14 @@ static int t48s_nand_probe(struct platform_device *pdev)
 	}
 	/* every range we may write must lie whole blocks inside kernel or app */
 	for (i = 0; i < ARRAY_SIZE(t48s_nand_ours); i++) {
-		const struct mtd_partition *o = &t48s_nand_ours[i];
+		const struct t48s_range *o = &t48s_nand_ours[i];
 
 		for (j = 0; j < ARRAY_SIZE(t48s_nand_reusable); j++)
 			if (o->offset >= t48s_nand_reusable[j].offset &&
 			    o->offset + o->size <= t48s_nand_reusable[j].offset +
 						   t48s_nand_reusable[j].size)
 				break;
-		if (j == ARRAY_SIZE(t48s_nand_reusable) || o->mask_flags ||
+		if (j == ARRAY_SIZE(t48s_nand_reusable) || o->lock < 0 || o->lock >= T48S_LOCKS ||
 		    (o->offset & 0x1ffff) || (o->size & 0x1ffff) || !o->size) {
 			pr_err("t48s_nand: writeable range %s is not inside kernel or app; no flash\n",
 			       o->name);
@@ -1079,18 +1231,28 @@ static int t48s_nand_probe(struct platform_device *pdev)
 		nand_cleanup(chip);
 		return -EPERM;
 	}
-	err = t48s_nand_selftest(chip);
+	err = t48s_nand_selftest(chip, &closed_n);
 	if (err < 0) {
 		nand_cleanup(chip);
 		return -EPERM;
 	}
 	selftest = err;
-	pr_info("t48s_nand: self-test: %d attempts to erase or program outside our range, at all three layers: every one refused, nothing sent to the chip\n",
-		selftest);
+	pr_info("t48s_nand: self-test: %d attempts to erase or program what is not ours, at all three layers (%d with the lock closed, %d with it open): every one refused, nothing sent to the chip\n",
+		selftest, closed_n, selftest - closed_n);
+	/* Started from the flash of an installed phone: app is ours and in use. Only
+	 * the kernel image the installer writes says this (its device tree). */
+	if (strstr(saved_command_line, "t48boot=flash")) {
+		t48s_nand_open[T48S_LOCK_APP] = true;
+		pr_info("t48s_nand: lock: started from flash, the app partition is open\n");
+	}
 
 	/* Yealink's partitions, all read-only, then ours */
 	memcpy(parts, t48s_nand_parts, sizeof(t48s_nand_parts));
-	memcpy(parts + ARRAY_SIZE(t48s_nand_parts), t48s_nand_ours, sizeof(t48s_nand_ours));
+	for (i = 0; i < ARRAY_SIZE(t48s_nand_ours); i++) {
+		parts[ARRAY_SIZE(t48s_nand_parts) + i].name = t48s_nand_ours[i].name;
+		parts[ARRAY_SIZE(t48s_nand_parts) + i].offset = t48s_nand_ours[i].offset;
+		parts[ARRAY_SIZE(t48s_nand_parts) + i].size = t48s_nand_ours[i].size;
+	}
 	for (i = 0; i < ARRAY_SIZE(t48s_nand_parts); i++)
 		if (!(parts[i].mask_flags & MTD_WRITEABLE)) {
 			nand_cleanup(chip);
@@ -1108,9 +1270,11 @@ static int t48s_nand_probe(struct platform_device *pdev)
 	pr_info("t48s_nand: %d bad blocks, %u chip commands blocked while scanning\n",
 		bad, blocked);
 	for (i = 0; i < ARRAY_SIZE(t48s_nand_ours); i++)
-		pr_info("t48s_nand: writeable: %s, 0x%08llx to 0x%08llx; everything else is read-only\n",
+		pr_info("t48s_nand: ours: %s, 0x%08llx to 0x%08llx, %s\n",
 			t48s_nand_ours[i].name, (unsigned long long)t48s_nand_ours[i].offset,
-			(unsigned long long)(t48s_nand_ours[i].offset + t48s_nand_ours[i].size));
+			(unsigned long long)(t48s_nand_ours[i].offset + t48s_nand_ours[i].size),
+			t48s_nand_open[t48s_nand_ours[i].lock] ? "open for writing" : "locked");
+	pr_info("t48s_nand: everything else is read-only\n");
 	return 0;
 }
 
