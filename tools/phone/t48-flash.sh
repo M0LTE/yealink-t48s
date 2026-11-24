@@ -39,11 +39,13 @@ app_is_ubi() {
     return 1
 }
 # every file's checksum and every other entry's kind, owner and mode, in name order
+# (ls -n, not stat: the phone's busybox has had no stat)
+meta() { ls -ldn "$1" | { read -r mode _ uid gid _; echo "$mode $uid $gid"; }; }
 listing() {
     ( cd "$1" && find . | sort | while read -r f; do
-        if [ -f "$f" ] && [ ! -L "$f" ]; then echo "$(sha256sum < "$f" | cut -d' ' -f1) $(stat -c '%a %u %g' "$f") $f"
+        if [ -f "$f" ] && [ ! -L "$f" ]; then echo "$(sha256sum < "$f" | cut -d' ' -f1) $(meta "$f") $f"
         elif [ -L "$f" ]; then echo "link $(readlink "$f") $f"
-        else echo "$(stat -c '%F %a %u %g' "$f") $f"; fi
+        else echo "$(meta "$f") $f"; fi
     done )
 }
 detach() {

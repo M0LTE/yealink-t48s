@@ -18,3 +18,6 @@ CONFIG_SVC=y
 CONFIG_SVOK=y
 CONFIG_SVLOGD=y
 CONFIG_CHPST=y
+# stat: scripts written on a PC reach for it (the installer did, issue 8)
+CONFIG_STAT=y
+CONFIG_FEATURE_STAT_FORMAT=y
