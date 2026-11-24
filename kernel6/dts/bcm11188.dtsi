@@ -168,9 +168,10 @@
 
 		/*
 		 * USB controller 1, the phone's socket: a standard EHCI at
-		 * +0x800, interrupt 18 (IRQ_USBH1). The parent is our own small
-		 * driver, which lets the EHCI driver in only when U-Boot has
-		 * switched the block on (drivers/t48s_usb.c).
+		 * +0x800. Its interrupt is 17 (IRQ_USBHD2); 18 (IRQ_USBH1) is
+		 * controller 0's (issue #60). The parent is our own small
+		 * driver, which starts the block if U-Boot has not and then
+		 * lets the EHCI driver in (drivers/t48s_usb.c).
 		 */
 		usbh: usb@80410000 {
 			compatible = "brcm,bcm11107-usbh";
@@ -182,7 +183,7 @@
 			ehci@80410800 {
 				compatible = "generic-ehci";
 				reg = <0x80410800 0x100>;
-				interrupts = <18>;
+				interrupts = <17>;
 			};
 		};
 

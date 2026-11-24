@@ -31,9 +31,9 @@ t48s-backup/                                  made on the phone
 
 ## USB
 
-The socket is the SoC's USB controller 1: a standard EHCI whose registers start at 0x80410800, interrupt 18. Both are read from U-Boot's code (`ehci_hcd_init` at 0x03B24EC4) and Linux 3.6's `mach-bcmring` headers. The kernel's own `ehci-platform` driver runs it, with USB storage, an MBR partition table and FAT. The flash kernel still fits its partition: 2,303,174 of 2,621,440 bytes.
+The socket is the SoC's USB controller 1: a standard EHCI whose registers start at 0x80410800, interrupt 17. The address is read from U-Boot's code (`ehci_hcd_init` at 0x03B24EC4). The interrupt is `IRQ_USBHD2` in Linux 3.6's `mach-bcmring` headers; Yealink's own kernel holds the pair as a table, 18 for controller 0 and 17 for controller 1. We first had 18, and the kernel then never heard from the controller (issue [#60](https://github.com/M0LTE/yealink-t48s/issues/60)). The kernel's own `ehci-platform` driver runs it, with USB storage, an MBR partition table and FAT. The flash kernel still fits its partition: 2,312,835 of 2,621,440 bytes.
 
-**Only after a start from a stick.** Clocks, resets, the PHY and two pins are set up by U-Boot when it reads a stick, and by nothing else. `t48s_usb` reads three chip-control registers and lets the EHCI driver in only if the USB host's bus clock, the USB clock and host mode are all on. On any other start it says `USB is off` and touches nothing: a read of a block with no clock stops this SoC, as audio showed. U-Boot's sequence is written out in the driver's header for whoever does the cold start. The installer does not need it.
+**On any start.** Clocks, the PHY and two pins are set up by U-Boot only when it reads a stick. `t48s_usb` reads three chip-control registers first: if the USB host's bus clock, the USB clock and host mode are all on, it leaves everything as U-Boot left it (`USB host is running`). If not, it does what U-Boot's routine at 0x03B24CD0 does, in the same order (`USB was off: started as a host`), and only then lets the EHCI driver in: a read of a block with no clock stops this SoC, as audio showed. Checked on the phone started from flash, 2026-11-24, by making the same writes by hand: the controller came up and counted frames, and its interrupt showed on line 17 and went away when acknowledged. Not yet seen: this kernel finding a stick.
 
 ## The backup
 
@@ -108,7 +108,7 @@ Serial log running throughout (`ssh root@proxmox0 tail -f /root/t48s/session4.lo
 3. `t48s_nand: self-test: 549 attempts`. Any other number: stop.
 4. `t48-live status`: `bootmode_was=usbmode`, `bootmode_now=none`, `clear=BOOTMODE cleared`. Serial shows the variables kept and `userenv: rewritten and read back`. **This is the first write to `userenv` by our kernel.** Then, from a PC, `tools/nandbackup.sh verify` against Tom's backup: only `userenv`, `kernel` and `app` may differ.
 5. `t48-install status`: `stick=yes`, `flash=ours`.
-6. A TFTP start (menu 1) of the same kernel: `USB is off`, and the kernel carries on.
+6. A TFTP start (menu 1) or a start from flash of the same kernel: `USB was off: started as a host`, and a stick pushed in afterwards appears as `/dev/sda`.
 
 **B. Restore, then the stranger's path, on the same phone** (it ends installed again):
 

@@ -44,7 +44,7 @@ config T48S_BOOTMODE
 	depends on T48S_NAND
 
 config T48S_USB
-	bool "T48S USB host, when U-Boot has started it (a start from a stick)"
+	bool "T48S USB host"
 	depends on USB_EHCI_HCD_PLATFORM
 
 endmenu

@@ -108,7 +108,7 @@
 	status = "okay";
 };
 
-/* the USB socket: only when U-Boot has started it (a start from a stick) */
+/* the USB socket */
 &usbh {
 	status = "okay";
 };
