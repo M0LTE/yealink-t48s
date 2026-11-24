@@ -82,7 +82,7 @@ The screen is kept in memory; there is no window yet. Apps are the real programs
 
 | Command | |
 |---|---|
-| `key NAME [MS]` | press and release (held 60 ms, or MS). Names: `0`-`9`, `star`, `hash`, `up`, `down`, `left`, `right`, `ok`, `x`, `volup`, `voldown`, `headset`, `mute`, `message`, `hold`, `redial`, `transfer`, `speaker` |
+| `key NAME [MS]` | press and release (held 60 ms, or MS). Names: `0`-`9`, `star`, `hash`, `up`, `down`, `left`, `right`, `ok`, `x`, `volup`, `voldown`, `headset`, `mute`, `message`, `hold`, `redial`, `transfer`, `speaker`, and `soft1` to `soft4` (the soft keys of a phone that has them: [models.md](models.md)) |
 | `keydown NAME`, `keyup NAME` | one half of a press |
 | `touch X Y` | a tap; `touchdown X Y`, `touchmove X Y`, `touchup X Y` for a drag |
 | `hook off`, `hook on` | lift and replace the handset |

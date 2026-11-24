@@ -1,0 +1,76 @@
+# A phone with no touchscreen (the T46S, issue 10): its four soft keys press the
+# buttons along the bottom of Contacts and Calls, so nothing there needs a finger.
+wait 300
+expect idle
+key left
+expect contacts
+expectstate contacts 0
+# soft key 2 is Add
+key soft2
+expectstate contacts.mode name
+key 2
+key 2
+wait 1000
+key 6
+key 6
+key 6
+wait 1000
+key 2
+key 2
+expectstate kbd.text bob
+# a soft key does nothing while the keyboard is up
+key soft4
+expectstate contacts.mode name
+key ok
+key 1
+key 0
+key 0
+key 2
+key ok
+expectstate contacts 1
+# soft key 3 is Edit
+key soft3
+expectstate kbd.text bob
+key ok
+expectstate kbd.text 1002
+key x
+key 7
+key ok
+expectstate contacts.number 1007
+# soft key 1 is Dial; with nothing to call through the call fails and is in Calls
+key soft1
+expect call
+expectstate number 1007
+key ok
+expectstate phone ended
+key x
+expect idle
+# Calls: soft key 3 deletes the line
+key up
+expect history
+key soft3
+key x
+expect idle
+key up
+expect history
+# soft key 4 asks, and then soft key 3 is Cancel and 4 is Clear
+key soft4
+key soft3
+key soft4
+key soft4
+key x
+expect idle
+# Contacts: soft key 4 asks to delete, and soft key 4 again is Delete
+key left
+expect contacts
+key soft4
+expectstate contacts.mode confirm
+key soft3
+expectstate contacts.mode list
+expectstate contacts 1
+key soft4
+key soft4
+expectstate contacts 0
+key x
+expect idle
+quit
