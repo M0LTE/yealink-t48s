@@ -1,0 +1,196 @@
+# Settings, Update (issue 31): the screen in front of t48-update. A stand-in
+# plays the updater (tests/update/update.sh), with its scene in simdata/update.
+run mkdir -p simdata/update
+wait 200
+touch 700 420
+expectstate settings.page root
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Update
+
+# ---- nothing checked: opening the page asks the channel nothing ----
+key ok
+expectstate settings.page update
+waitstate update.state idle 3000
+run test ! -f simdata/update/asked
+expectstate settings.rows 4
+expectstate settings.row Check_now
+key up
+expectstate settings.row Latest
+expectstate settings.value Not_checked
+key up
+expectstate settings.row Channel
+expectstate settings.value stable
+key up
+expectstate settings.row Version
+expectstate settings.value 20261124-ac7a8f4,_slot_a
+shot shots/update.png
+key down
+key down
+key down
+
+# ---- a check that finds an update ----
+run echo v0.3.0 > simdata/update/offer
+key ok
+expectstate update.state checking
+expectstate settings.row Check_now
+key up
+expectstate settings.row Status
+expectstate settings.value Checking
+shot shots/update-checking.png
+waitstate update.state idle 5000
+expectstate settings.value Update_available
+key up
+expectstate settings.value v0.3.0
+key down
+key down
+key down
+expectstate settings.row Install
+expectstate settings.rows 6
+shot shots/update-available.png
+
+# ---- install: asks first, then downloads and writes with nobody waiting ----
+key ok
+expectstate overlay confirm
+expectstate overlay.title Install_v0.3.0?
+shot shots/update-confirm.png
+key x
+expectstate overlay none
+run ! grep -q install simdata/update/asked
+key ok
+key ok
+expectstate overlay none
+expectstate update.state downloading
+expectstate update.busy yes
+# nothing else can be started meanwhile
+key up
+expectstate settings.row Check_now
+key ok
+waitstate update.state writing 5000
+shot shots/update-writing.png
+waitstate update.state restart 5000
+run test "$(grep -c . simdata/update/asked)" = 2
+key up
+expectstate settings.row Status
+expectstate settings.value Restart_to_finish
+
+# ---- the restart is offered, and asks first ----
+key down
+key down
+expectstate settings.row Restart
+expectstate settings.rows 6
+shot shots/update-restart.png
+key ok
+expectstate overlay confirm
+expectstate overlay.title Restart_phone?
+key x
+run test ! -f simdata/restart.asked
+key ok
+key ok
+expectstate overlay message
+expectstate overlay.title Restarting
+wait 500
+run test -s simdata/restart.asked
+key ok
+key x
+expectstate settings.page root
+
+# ---- a check that fails: the updater's own words ----
+run rm -f simdata/update/offer simdata/update/state simdata/update/latest
+key ok
+waitstate update.state idle 3000
+expectstate settings.row Check_now
+key ok
+waitstate update.state failed 5000
+key up
+expectstate settings.row Status
+expectstate settings.value No_release_found
+shot shots/update-failed.png
+key x
+
+# ---- the last result, with its time ----
+run printf 'result=v0.3.0 installed\nresult_time=1795451100\n' > simdata/update/result
+run rm -f simdata/update/state
+key ok
+waitstate update.state idle 3000
+expectstate settings.rows 5
+key down
+expectstate settings.row Last_result
+expectstate settings.value v0.3.0_installed,_23_Nov_16:25
+key x
+
+# ---- a kernel that differs: its own install, with the consequence said ----
+run echo v0.3.0 > simdata/update/offer; echo differs > simdata/update/kernel_offer
+key ok
+waitstate update.state idle 3000
+key ok
+waitstate update.state checking 1000
+waitstate update.state idle 5000
+key down
+key down
+expectstate settings.row Install_kernel
+shot shots/update-kernel.png
+key ok
+expectstate overlay confirm
+expectstate overlay.title Install_kernel?
+shot shots/update-kernel-confirm.png
+key x
+run ! grep -q kernel simdata/update/asked
+key ok
+key ok
+expectstate update.state downloading
+waitstate update.state restart 6000
+run grep -qx kernel simdata/update/asked
+run grep -qx "result=Kernel written" simdata/update/result
+key x
+
+# ---- the channel: Stable or Testing here; a URL only shows ----
+run rm -f simdata/update/state
+key ok
+waitstate update.state idle 3000
+key up
+key up
+key up
+expectstate settings.row Channel
+expectstate settings.value stable
+key ok
+waitstate settings.value testing 3000
+run grep -qx testing simdata/update/channel
+# another channel: what the last check found no longer counts
+key down
+expectstate settings.value Not_checked
+key x
+run echo https://builds.example.org/t48 > simdata/update/channel
+key ok
+waitstate update.state idle 3000
+key up
+key up
+expectstate settings.value https://builds.example.org/t48
+key up
+expectstate settings.row Channel
+expectstate settings.value Custom
+key ok
+expectstate settings.value Custom
+shot shots/update-custom.png
+key x
+
+# ---- not installed (a start from a USB stick): the version and nothing to do ----
+run echo no > simdata/update/installed
+key ok
+waitstate update.state notinstalled 3000
+expectstate settings.rows 2
+expectstate settings.row Version
+expectstate settings.value 20261124-ac7a8f4
+key down
+expectstate settings.row Status
+expectstate settings.value Not_installed
+shot shots/update-not-installed.png
+key x
+key x
+expect idle

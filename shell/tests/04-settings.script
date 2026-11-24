@@ -335,6 +335,8 @@ key x
 
 # ---- about ----
 key down
+expectstate settings.row Update
+key down
 key ok
 expectstate settings.page about
 key x

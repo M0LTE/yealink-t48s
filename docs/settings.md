@@ -22,6 +22,7 @@ Press **Down** on the idle screen, or touch **Settings**. Everything here can al
 | Access | SSH on or off, the phone's host key, the keys that can log in, adding a first key; the web setup page on or off | at once ([access.md](access.md), [web.md](web.md)). Both are off until turned on here |
 | Apps | the app manager ([apps.md](apps.md)) | |
 | App settings | each installed app's own settings, from its manifest | the next time the app is opened (an open app is closed) |
+| Update | the release channel (Stable or Testing), and the buttons that check it, install what it has and restart ([below](#update)) | when a button is pressed and its question answered. Nothing is checked or installed by itself |
 | About | firmware and shell version, app API level, kernel, address, MAC, memory, storage | |
 
 ## The keyboard
@@ -87,9 +88,29 @@ An account with no user or no domain is not used. Removing an account asks first
 
 The app gets each value in a SETTING message when it starts. "Reset to defaults" forgets the owner's values.
 
+## Update
+
+Issue [#31](https://github.com/M0LTE/yealink-t48s/issues/31). The page is a front end for `t48-update` ([install.md](install.md), [the script](../buildroot/board/t48s/rootfs-overlay/usr/bin/t48-update)): it shows what `t48-update info` says and runs `check`, `install`, `kernel` and `channel`. Opening the page asks the channel nothing.
+
+| Row | Shows |
+|---|---|
+| Version | what is running and its slot: `20261124-ac7a8f4, slot a` |
+| Channel | Stable or Testing, changed here. A channel that is a URL shows as Custom with the URL under it, and is set with `t48-update channel` or from the web setup page |
+| Latest | the channel's newest version, or `Not checked` |
+| Status | `Up to date`, `Update available`, `Checking`, `Downloading`, `Writing`, `Restart to finish`, or the updater's own words for what failed. Absent until there is something to say |
+| Check now | asks the channel |
+| Install | only when there is an update. Asks first (`Install v0.3.0?`), then downloads and writes the slot not in use |
+| Restart | only after an install. Asks first; the new slot gets its one try |
+| Install kernel | only when the channel's kernel differs. Asks first, with `A failed kernel needs recovery mode` |
+| Last result | the last result and when: `v0.3.0 installed, 23 Nov 16:25` |
+
+A phone that is not installed (started from a USB stick) shows its version and `Not installed`, and nothing to press.
+
+The updater runs as a child process and the screen never waits for it: while it works the page asks `t48-update info` again about once a second, and the other buttons are greyed. The phone works as usual meanwhile, and leaving the page does not stop it. The restart is `t48-apply restart`.
+
 ## Testing
 
-Brightness is tested in `06-backlight.script`, the Access page in `07-access.script` and themes in `10-themes.script` ([shell.md](shell.md#the-backlight), [access.md](access.md#testing)). `make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, the first account, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
+Brightness is tested in `06-backlight.script`, the Access page in `07-access.script`, themes in `10-themes.script` and the Update page in `11-update.script` (against [`shell/tests/update/update.sh`](../shell/tests/update/update.sh), which plays `t48-update` with files in place of the network and the flash) ([shell.md](shell.md#the-backlight), [access.md](access.md#testing)). `make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, the first account, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
 
 ## On the phone (2026-11-23)
 

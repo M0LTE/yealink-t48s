@@ -42,6 +42,7 @@ struct options {
     const char *sip;     /* baresip's control socket (t48ctrl), NULL: no SIP */
     const char *audio;   /* the audio service's control socket, NULL: no audio */
     const char *apply;   /* program run with a settings file's name when that file has changed, NULL: none */
+    const char *update;  /* the updater, run as "PROGRAM info", "check" and so on (t48-update), NULL: none */
     const char *access;  /* folder where t48-access leaves its status file (docs/access.md) */
     const char *notice;  /* a file of one or two lines shown on the idle screen while it exists (t48-live), NULL: none */
     const char *web;     /* folder where the web setup page leaves its status file (docs/web.md), NULL: none */

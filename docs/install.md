@@ -71,7 +71,7 @@ A new system image is written to the other slot and read back. At the next start
 
 The kernel has one slot, because U-Boot's boot command is fixed. `t48-update kernel FILE SHA256` writes it with the same read-back. A bad kernel is recovered through recovery mode.
 
-Fetching releases from GitHub by itself and a screen in Settings are not written yet.
+The same from the phone's screen: Settings, Update ([settings.md](settings.md#update)).
 
 ## Rescue
 

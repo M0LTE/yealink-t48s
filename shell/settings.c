@@ -31,14 +31,15 @@
 #define T48_VERSION "development build"
 #endif
 
-enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME };
+enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME, P_UPDATE };
 static const char *const page_names[] = {"root", "accounts", "sip", "network", "time", "timezone", "sound", "screen", "access", "about",
-                                         "appsettings", "appconf", "store", "storeapp", "theme"};
+                                         "appsettings", "appconf", "store", "storeapp", "theme", "update"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
 enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16 };
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
-              A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME };
+              A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME,
+              A_UPD_CHANNEL, A_UPD_CHECK, A_UPD_INSTALL, A_UPD_KERNEL, A_UPD_RESTART };
 
 struct row {
     int kind, flags;
@@ -47,7 +48,8 @@ struct row {
     char file[80], key[48];
     char def[160];         /* what the value is when the store has none */
     const char *choices;   /* R_CHOICE: "dhcp|static" */
-    int target;            /* R_MENU: page. R_ACTION: action. R_LEVEL: which volume, or -1 the backlight */
+    int target;            /* R_MENU: page. R_ACTION: action. R_LEVEL: which volume, or -1 the backlight.
+                              R_CHOICE: an action that takes the choice, or 0 for the store */
     char arg[64];
     int level, level_max;
 };
@@ -215,6 +217,157 @@ static void door_left(char *out, size_t n)
     snprintf(out, n, "%ld:%02ld", left / 60, left % 60);
 }
 
+/* ---------- updates (issue #31): the front end of t48-update ---------- */
+
+/* What "t48-update info" last said. The updater is a separate program
+ * (--update), run as a child and never waited for: one child reads info, one
+ * does the work (check, install, kernel, channel), and while work is going on
+ * info is asked for again about once a second. Nothing here starts by itself. */
+static struct {
+    int loaded, installed;
+    char slot[8], version[64], channel[160], latest[64], update[12], kernel[12], state[16], message[120], result[120];
+    long result_time;
+    pid_t info_pid, cmd_pid;
+    int info_fd, again;
+    char doing[16];               /* the state to show until the updater's own says the same */
+    long long asked;
+} upd = {.info_fd = -1};
+
+#define UPDATE_CHECK_MS 1000
+
+static void update_select(void);
+static void message(const char *t, const char *text);
+static void redraw_me(void);
+
+static void firmware_version(char *v, size_t n)
+{
+    FILE *f;
+    snprintf(v, n, "%s", T48_VERSION);
+    if ((f = fopen("/etc/t48-release", "r"))) {
+        if (fgets(v, (int)n, f)) v[strcspn(v, "\r\n")] = 0;
+        fclose(f);
+    }
+}
+
+static int update_working(const char *state)
+{
+    return !strcmp(state, "checking") || !strcmp(state, "downloading") || !strcmp(state, "writing");
+}
+
+static int update_busy(void) { return upd.cmd_pid > 0 || update_working(upd.state); }
+
+/* without an updater, or one that says nothing: a phone that is not installed */
+static void update_none(void)
+{
+    upd.loaded = 1;
+    upd.installed = 0;
+    firmware_version(upd.version, sizeof upd.version);
+}
+
+static void update_info(void)
+{
+    int p[2];
+    if (upd.info_pid > 0) { upd.again = 1; return; }
+    if (!opt.update || !opt.update[0] || pipe(p) < 0) { update_none(); return; }
+    pid_t pid = fork();
+    if (pid < 0) { close(p[0]); close(p[1]); update_none(); return; }
+    if (pid == 0) {
+        dup2(p[1], 1);
+        for (int fd = 3; fd < 256; fd++) close(fd);
+        execlp(opt.update, opt.update, "info", (char *)NULL);
+        _exit(127);
+    }
+    close(p[1]);
+    fcntl(p[0], F_SETFL, O_NONBLOCK);
+    fcntl(p[0], F_SETFD, FD_CLOEXEC);
+    upd.info_pid = pid;
+    upd.info_fd = p[0];
+    upd.asked = t48_now_ms();
+}
+
+static void update_parse(char *text)
+{
+    int seen = 0;
+    upd.installed = 0;
+    upd.slot[0] = upd.version[0] = upd.channel[0] = upd.latest[0] = upd.message[0] = upd.result[0] = 0;
+    upd.result_time = 0;
+    snprintf(upd.update, sizeof upd.update, "unknown");
+    snprintf(upd.kernel, sizeof upd.kernel, "unknown");
+    snprintf(upd.state, sizeof upd.state, "idle");
+    for (char *line = strtok(text, "\n"); line; line = strtok(NULL, "\n")) {
+        char *v = strchr(line, '=');
+        if (!v) continue;
+        *v++ = 0;
+        seen = 1;
+        if (!strcmp(line, "installed")) upd.installed = !strcmp(v, "yes");
+        else if (!strcmp(line, "slot")) snprintf(upd.slot, sizeof upd.slot, "%s", v);
+        else if (!strcmp(line, "version")) snprintf(upd.version, sizeof upd.version, "%s", v);
+        else if (!strcmp(line, "channel")) snprintf(upd.channel, sizeof upd.channel, "%s", v);
+        else if (!strcmp(line, "latest")) snprintf(upd.latest, sizeof upd.latest, "%s", v);
+        else if (!strcmp(line, "update")) snprintf(upd.update, sizeof upd.update, "%s", v);
+        else if (!strcmp(line, "kernel")) snprintf(upd.kernel, sizeof upd.kernel, "%s", v);
+        else if (!strcmp(line, "state") && v[0]) snprintf(upd.state, sizeof upd.state, "%s", v);
+        else if (!strcmp(line, "message")) snprintf(upd.message, sizeof upd.message, "%s", v);
+        else if (!strcmp(line, "result")) snprintf(upd.result, sizeof upd.result, "%s", v);
+        else if (!strcmp(line, "result_time")) upd.result_time = atol(v);
+    }
+    upd.loaded = 1;
+    if (!seen) upd.installed = 0;
+    if (!upd.version[0]) firmware_version(upd.version, sizeof upd.version);
+    /* work just started may not have reached the updater's own state yet */
+    if (upd.cmd_pid > 0 && upd.doing[0] && !update_working(upd.state)) snprintf(upd.state, sizeof upd.state, "%s", upd.doing);
+}
+
+/* check, install, kernel, or channel NAME */
+static void update_run(const char *cmd, const char *arg)
+{
+    if (update_busy() || !opt.update || !opt.update[0]) return;
+    pid_t pid = fork();
+    if (pid < 0) { message("Not started", "Could not run the updater"); return; }
+    if (pid == 0) {
+        int nul = open("/dev/null", O_WRONLY);
+        if (nul >= 0) dup2(nul, 1);   /* the cause of a failure comes back through info */
+        for (int fd = 3; fd < 256; fd++) close(fd);
+        execlp(opt.update, opt.update, cmd, arg, (char *)NULL);
+        _exit(127);
+    }
+    upd.cmd_pid = pid;
+    snprintf(upd.doing, sizeof upd.doing, "%s", !strcmp(cmd, "check") ? "checking" : !strcmp(cmd, "channel") ? "" : "downloading");
+    if (upd.doing[0]) snprintf(upd.state, sizeof upd.state, "%s", upd.doing);
+    logmsg("update: %s %s", cmd, arg ? arg : "");
+}
+
+
+static int update_reaped(pid_t pid, int status)
+{
+    int on_page = depth >= 0 && stack[depth].page == P_UPDATE;
+    if (upd.info_pid > 0 && pid == upd.info_pid) {
+        char text[1500];
+        ssize_t n = read(upd.info_fd, text, sizeof text - 1);
+        int first = !upd.loaded;
+        text[n > 0 ? n : 0] = 0;
+        close(upd.info_fd);
+        upd.info_fd = -1;
+        upd.info_pid = 0;
+        update_parse(text);
+        if (upd.again) { upd.again = 0; update_info(); }
+        if (on_page) { rebuild(); if (first) update_select(); redraw_me(); }
+        return 1;
+    }
+    if (upd.cmd_pid > 0 && pid == upd.cmd_pid) {
+        int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        upd.cmd_pid = 0;
+        logmsg("update: %s", code == 0 ? "done" : "failed");
+        if (code == 127) message("Not started", "Could not run the updater");
+        else if (code != 0 && !upd.doing[0]) message("Channel not saved", "");
+        /* what it left behind: the new state, or the cause of a failure */
+        update_info();
+        if (on_page) { rebuild(); redraw_me(); }
+        return 1;
+    }
+    return 0;
+}
+
 /* ---------- the app manager's child process ---------- */
 
 struct store_app {
@@ -238,7 +391,10 @@ static struct {
 } job = {.fd = -1};
 
 static void rebuild(void);
-static void redraw_me(void) { shell_settings_changed(); }
+static void redraw_me(void)
+{
+    shell_settings_changed();
+}
 
 static const char *feed_now(void) { return cfg_str("feed", "url", pkg_default_feed()); }
 
@@ -363,6 +519,7 @@ static void message(const char *t, const char *text)
 
 int settings_reaped(pid_t pid, int status)
 {
+    if (update_reaped(pid, status)) return 1;
     if (job.pid <= 0 || pid != job.pid) return 0;
     if (job.fd >= 0) { settings_job_readable(); if (job.fd >= 0) close(job.fd); }
     job.fd = -1;
@@ -499,6 +656,7 @@ static void build_root(void)
     snprintf(v, sizeof v, "%d installed", napps);
     add_menu("Apps", P_STORE, v);
     add_menu("App settings", P_APPSETTINGS, "");
+    add_menu("Update", P_UPDATE, "");
     add_menu("About", P_ABOUT, "");
 }
 
@@ -732,11 +890,7 @@ static void build_about(void)
     int up;
     snprintf(title, sizeof title, "About");
     add_info("Phone", "Yealink SIP-T48S, open firmware");
-    snprintf(v, sizeof v, "%s", T48_VERSION);
-    if ((f = fopen("/etc/t48-release", "r"))) {
-        if (fgets(v, sizeof v, f)) v[strcspn(v, "\r\n")] = 0;
-        fclose(f);
-    }
+    firmware_version(v, sizeof v);
     add_info("Firmware", v);
     add_info("Shell", T48_VERSION ", built " __DATE__);
     snprintf(v, sizeof v, "%d", T48_API_LEVEL);
@@ -769,6 +923,71 @@ static void build_about(void)
     }
     add_info("Licence", "AGPL-3.0-or-later");
     add_info("Source", "github.com/M0LTE/yealink-t48s");
+}
+
+/* "23 Nov 16:25", as the call list has it */
+static void list_time(char *out, size_t n, long when)
+{
+    time_t t = when;
+    struct tm tm;
+    char b[40];
+    localtime_r(&t, &tm);
+    strftime(b, sizeof b, "%e %b %H:%M", &tm);
+    snprintf(out, n, "%s", b[0] == ' ' ? b + 1 : b);
+}
+
+static void build_update(void)
+{
+    char v[200];
+    struct row *r;
+    snprintf(title, sizeof title, "Update");
+    if (!upd.loaded) { snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Loading"); return; }
+    if (upd.installed && upd.slot[0]) snprintf(v, sizeof v, "%s, slot %s", upd.version, upd.slot);
+    else snprintf(v, sizeof v, "%s", upd.version);
+    add_info("Version", v);
+    if (!upd.installed) { add_info("Status", "Not installed"); return; }
+    int busy = update_busy(), restart = !strcmp(upd.state, "restart");
+    if (!strcmp(upd.channel, "stable") || !strcmp(upd.channel, "testing")) {
+        r = add(R_CHOICE, "Channel");
+        snprintf(r->value, sizeof r->value, "%s", upd.channel);
+        r->choices = "stable|testing";
+        r->target = A_UPD_CHANNEL;
+        if (busy) r->flags = F_DISABLED;
+    } else {
+        /* the owner's own builds: set from the command line or the web setup page */
+        add_info("Channel", "Custom");
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%s", upd.channel);
+    }
+    add_info("Latest", upd.latest[0] ? upd.latest : "Not checked");
+    const char *st = !strcmp(upd.state, "checking") ? "Checking" : !strcmp(upd.state, "downloading") ? "Downloading" :
+                     !strcmp(upd.state, "writing") ? "Writing" : restart ? "Restart to finish" :
+                     !strcmp(upd.state, "failed") ? (upd.message[0] ? upd.message : "Failed") :
+                     !strcmp(upd.update, "yes") ? "Update available" : !strcmp(upd.update, "no") ? "Up to date" : "";
+    if (st[0]) add_info("Status", st);
+    r = add_action("Check now", A_UPD_CHECK, "");
+    if (busy) r->flags = F_DISABLED;
+    if (!strcmp(upd.update, "yes") && !restart) {
+        r = add_action("Install", A_UPD_INSTALL, "");
+        if (busy) r->flags = F_DISABLED;
+    }
+    if (restart) add_action("Restart", A_UPD_RESTART, "");
+    if (!strcmp(upd.kernel, "differs")) {
+        r = add_action("Install kernel", A_UPD_KERNEL, "");
+        if (busy) r->flags = F_DISABLED;
+    }
+    if (upd.result[0]) {
+        size_t at = snprintf(v, sizeof v, "%s", upd.result);
+        if (upd.result_time > 0 && at < sizeof v - 20) { snprintf(v + at, sizeof v - at, ", "); list_time(v + at + 2, sizeof v - at - 2, upd.result_time); }
+        add_info("Last result", v);
+    }
+}
+
+/* start on Check now: the first row, the channel, changes at a press */
+static void update_select(void)
+{
+    for (int i = 0; i < nrows; i++)
+        if (rows[i].kind == R_ACTION) { stack[depth].sel = i; break; }
+    rebuild();
 }
 
 static void build_appsettings(void)
@@ -879,7 +1098,11 @@ static void build_storeapp(const char *id)
 
 static void rebuild(void)
 {
+    char keep[96] = "";
     if (depth < 0) return;
+    /* the Update page gains and loses rows as work goes on: the chosen action stays chosen */
+    if (stack[depth].page == P_UPDATE && stack[depth].sel < nrows && rows[stack[depth].sel].kind == R_ACTION)
+        snprintf(keep, sizeof keep, "%s", rows[stack[depth].sel].label);
     nrows = 0;
     switch (stack[depth].page) {
     case P_ROOT: build_root(); break;
@@ -897,7 +1120,10 @@ static void rebuild(void)
     case P_STORE: build_store(); break;
     case P_STOREAPP: build_storeapp(stack[depth].arg); break;
     case P_THEME: build_theme(); break;
+    case P_UPDATE: build_update(); break;
     }
+    for (int i = 0; keep[0] && i < nrows; i++)
+        if (rows[i].kind == R_ACTION && !strcmp(rows[i].label, keep)) stack[depth].sel = i;
     if (stack[depth].sel >= nrows) stack[depth].sel = nrows ? nrows - 1 : 0;
     if (stack[depth].top > stack[depth].sel) stack[depth].top = stack[depth].sel;
     if (stack[depth].sel >= stack[depth].top + VISIBLE) stack[depth].top = stack[depth].sel - VISIBLE + 1;
@@ -914,6 +1140,7 @@ static void push(enum page p, const char *arg)
     stack[depth].page = p;
     snprintf(stack[depth].arg, sizeof stack[0].arg, "%s", arg ? arg : "");
     logmsg("settings: page %s", page_names[p]);
+    if (p == P_UPDATE) { upd.loaded = 0; update_info(); }   /* what the updater says now; no check of the channel */
     rebuild();
     /* start on the first row that does something */
     while (stack[depth].sel < nrows - 1 && (rows[stack[depth].sel].kind == R_NOTE || rows[stack[depth].sel].kind == R_INFO)) stack[depth].sel++;
@@ -921,6 +1148,7 @@ static void push(enum page p, const char *arg)
         for (int i = 0; i < nrows; i++)
             if (rows[i].value[0]) stack[depth].sel = i;
     rebuild();
+    if (p == P_UPDATE) update_select();
 }
 
 static void pop(void)
@@ -1100,6 +1328,30 @@ static void do_action(const struct row *r)
         snprintf(ov.title, sizeof ov.title, "Remove %s?", acc.dev ? "added keys" : "all keys");
         snprintf(ov.text, sizeof ov.text, "%s", acc.dev ? "Built-in keys stay" : "");
         break;
+    case A_UPD_CHECK: update_run("check", NULL); break;
+    case A_UPD_INSTALL:
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_CONFIRM;
+        ov.act = A_UPD_INSTALL;
+        ov.yes = "Install";
+        snprintf(ov.title, sizeof ov.title, "Install %s?", upd.latest);
+        break;
+    case A_UPD_KERNEL:
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_CONFIRM;
+        ov.act = A_UPD_KERNEL;
+        ov.yes = "Install";
+        snprintf(ov.title, sizeof ov.title, "Install kernel?");
+        snprintf(ov.text, sizeof ov.text, "A failed kernel needs recovery mode");
+        break;
+    case A_UPD_RESTART:
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_CONFIRM;
+        ov.act = A_UPD_RESTART;
+        ov.yes = "Restart";
+        snprintf(ov.title, sizeof ov.title, "Restart phone?");
+        break;
+    case A_UPD_CHANNEL:
     case A_NONE: break;
     }
     rebuild();
@@ -1127,6 +1379,12 @@ static void confirmed(enum action act, const char *arg)
         ov.kind = O_DOOR;
         break;
     case A_FORGET_KEYS: run_apply("access-forget-keys"); break;
+    case A_UPD_INSTALL: update_run("install", NULL); break;
+    case A_UPD_KERNEL: update_run("kernel", NULL); break;
+    case A_UPD_RESTART:
+        run_apply("restart");
+        message("Restarting", "");
+        break;
     case A_ACCOUNT_REMOVE: {
         char path[400];
         if (strncmp(arg, "sip", 3) || strchr(arg, '/')) break;
@@ -1164,7 +1422,8 @@ static void activate(int i, int dir)
             if (!strcmp(p, r->value)) at = n;
             opts[n++] = p;
         }
-        store_value(r, opts[(at + (dir < 0 ? n - 1 : 1)) % n]);
+        if (r->target == A_UPD_CHANNEL) update_run("channel", opts[(at + (dir < 0 ? n - 1 : 1)) % n]);
+        else store_value(r, opts[(at + (dir < 0 ? n - 1 : 1)) % n]);
         rebuild();
         break;
     }
@@ -1341,12 +1600,17 @@ int settings_timeout(long long now)
     if (depth >= 0 && kbd_open) return t48_kbd_timeout(&kbd);
     if (depth >= 0 && stack[depth].page == P_ACCESS)
         return acc_checked + ACCESS_CHECK_MS > now ? (int)(acc_checked + ACCESS_CHECK_MS - now) : 0;
+    if (depth >= 0 && stack[depth].page == P_UPDATE && update_busy())
+        return upd.asked + UPDATE_CHECK_MS > now ? (int)(upd.asked + UPDATE_CHECK_MS - now) : UPDATE_CHECK_MS;
     return -1;
 }
 
 void settings_tick(long long now)
 {
     if (depth >= 0 && kbd_open && t48_kbd_tick(&kbd) != T48_KBD_NOTHING) redraw_me();
+    /* work is going on: how far it has got, about once a second */
+    if (depth >= 0 && stack[depth].page == P_UPDATE && update_busy() && upd.info_pid <= 0 && now >= upd.asked + UPDATE_CHECK_MS)
+        update_info();
     if (depth < 0 || kbd_open || stack[depth].page != P_ACCESS || now < acc_checked + ACCESS_CHECK_MS) return;
     static long shown_left = -1;
     int was_open = acc.door, changed = access_read();
@@ -1404,7 +1668,8 @@ static void two_lines_centred(int cx, int y, int w, const t48_font *f, uint32_t 
 /* a stored choice as it is shown: the files keep "dhcp", the screen says DHCP */
 static const char *choice_text(const char *v)
 {
-    static const char *const map[][2] = {{"dhcp", "DHCP"}, {"static", "Static"}, {"udp", "UDP"}, {"tcp", "TCP"}, {"tls", "TLS"}};
+    static const char *const map[][2] = {{"dhcp", "DHCP"}, {"static", "Static"}, {"udp", "UDP"}, {"tcp", "TCP"}, {"tls", "TLS"},
+                                             {"stable", "Stable"}, {"testing", "Testing"}};
     for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
         if (!strcmp(v, map[i][0])) return map[i][1];
     return v;
@@ -1465,7 +1730,7 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
 static void draw_overlay(void)
 {
     struct row_ink ink;
-    int danger = ov.kind == O_CONFIRM && (!ov.yes || ov.act == A_FORGET_KEYS);
+    int danger = ov.kind == O_CONFIRM && (!ov.yes || ov.act == A_FORGET_KEYS || ov.act == A_UPD_KERNEL);
     ui_dialog(OV_X, OV_Y, OV_W, OV_H, danger ? B_STOP : B_PLAIN);
     ui_dialog_ink(&ink);
     t48_text_centre(&ui, SW / 2, OV_Y + 30, &t48_font_head, ink.text, ov.title);
@@ -1605,6 +1870,8 @@ const char *settings_state(const char *key)
         for (char *p = b; *p; p++) if (*p == ' ') *p = '_';
         return b[0] ? b : "(empty)";
     }
+    if (!strcmp(key, "update.state")) return !upd.loaded ? "loading" : !upd.installed ? "notinstalled" : upd.state;
+    if (!strcmp(key, "update.busy")) return update_busy() ? "yes" : "no";
     if (!strcmp(key, "tz")) return getenv("TZ") ? getenv("TZ") : "-";
     return NULL;
 }

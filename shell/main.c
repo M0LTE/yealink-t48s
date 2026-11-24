@@ -37,6 +37,7 @@ struct options opt = {
     .sip = "/run/t48-sip/ctrl.sock",
     .audio = T48AC_SOCKET,
     .apply = "/usr/bin/t48-apply",
+    .update = "t48-update",
     .access = "/run/t48-access",
     .notice = "/run/t48-notice",
     .web = "/run/t48-web",
@@ -721,6 +722,7 @@ static void usage(void)
         "  --audio SOCKET   the audio service's control socket (%s; the same)\n"
         "  --fb DEVICE      framebuffer (%s)\n"
         "  --apply PROGRAM  run with a settings file's name when it has changed (%s)\n"
+        "  --update PROGRAM the updater behind Settings, Update (%s)\n"
         "  --access DIR     where t48-access leaves its status file (%s)\n"
         "  --notice FILE    one or two lines to show on the idle screen while it exists (%s)\n"
         "  --web DIR        where the web setup page leaves its status file (%s)\n"
@@ -731,7 +733,7 @@ static void usage(void)
         "  --runner PROGRAM run apps with this, such as qemu-arm for apps built for the phone\n"
         "also: t48-app (install, update and remove apps) and t48-config (settings), each with its own help\n",
         opt.apps, opt.data, opt.config, opt.state, opt.sip ? opt.sip : "none", opt.audio ? opt.audio : "none", opt.fb,
-        opt.apply ? opt.apply : "none", opt.access, opt.notice ? opt.notice : "none",
+        opt.apply ? opt.apply : "none", opt.update ? opt.update : "none", opt.access, opt.notice ? opt.notice : "none",
         opt.web ? opt.web : "none");
 }
 
@@ -749,7 +751,7 @@ int main(int argc, char **argv)
     }
 
     for (int i = 1; i < argc; i++) sim |= !strcmp(argv[i], "--sim");
-    if (sim) opt.sip = opt.audio = opt.apply = opt.notice = opt.web = NULL;   /* a PC's own services stay out of it unless asked */
+    if (sim) opt.sip = opt.audio = opt.apply = opt.update = opt.notice = opt.web = NULL;   /* a PC's own services stay out of it unless asked */
     for (int i = 1; i < argc; i++) {
         const char **dst = NULL;
         if (!strcmp(argv[i], "--sim")) continue;
@@ -764,6 +766,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--script")) dst = &opt.script;
         else if (!strcmp(argv[i], "--shot")) dst = &opt.shot;
         else if (!strcmp(argv[i], "--apply")) dst = &opt.apply;
+        else if (!strcmp(argv[i], "--update")) dst = &opt.update;
         else if (!strcmp(argv[i], "--runner")) dst = &opt.runner;
         else if (!strcmp(argv[i], "--access")) dst = &opt.access;
         else if (!strcmp(argv[i], "--notice")) dst = &opt.notice;
