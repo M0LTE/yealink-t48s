@@ -40,6 +40,18 @@ If power is lost half way: nothing is harmed. Some blocks are erased and some st
 
 The program on the phone is `nandrestore` ([`native/nandrestore.c`](../native/nandrestore.c)). It is written for the general case, a partition with Yealink's data in it: erase a block, write each page with the backup's spare bytes, read it back, compare all 2112 bytes. That is what a restore of `app` or `kernel` will use once we write those.
 
+## After an install
+
+Once the phone is installed ([install.md](install.md)) the way back is
+
+```
+tools/t48install.sh restore DIR
+```
+
+It checks the backup, saves `/data` to the PC, puts Yealink's `app` partition back and then its `kernel` partition, every page compared with the backup, spare bytes and error correction included, and ends by comparing every partition it never writes with how it was. Rehearsed on a copy of the whole flash in a file: after an install and this, the file is identical to the backup (`tools/test-install.sh bytes`). Not yet run on the phone.
+
+If U-Boot's `BOOTMODE` flag is set (a recovery-mode start leaves it), Yealink's firmware resets its own settings at its first start. The restore says so; start the rescue TFTP set once to clear it ([live-image.md](live-image.md#leaving-the-phone-as-it-was-the-bootmode-flag)).
+
 ## Ways back that need none of this
 
 - **Recovery mode** is in U-Boot, which we never write: hold Speakerphone at power-on, then TFTP ([own-kernel.md](own-kernel.md)). It boots our live image from RAM whatever is in the rest of the flash, and from there the steps above work.

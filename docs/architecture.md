@@ -167,6 +167,8 @@ Issue [#29](https://github.com/M0LTE/yealink-t48s/issues/29), needs NAND access 
 - **One kernel slot**, because U-Boot's boot command is fixed and we do not change it. Kernel updates are rare, written with a read-back check, and the fallback for a bad one is recovery mode.
 - **`/data`** holds settings (`/data/config`), apps (`/data/apps`), and the owner's changes (`/data/local`). A factory reset wipes it.
 
+(2026-11-24: the full layout, the installer, updates with fallback and the way back are written and rehearsed off the phone; the first write waits for Tom: [install.md](install.md).)
+
 (2026-11-23: a first step is in place, see [flash.md](flash.md). `/data` is in UBI on the 60 blocks at the end of `app` that Yealink's filesystem never used, so Yealink's firmware still works beside it; the kernel partition and the rest of `app` wait until the phone can start without Yealink. The backup and the way back are in [backup.md](backup.md).)
 
 ### Patchability

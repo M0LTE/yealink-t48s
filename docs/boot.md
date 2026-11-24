@@ -26,7 +26,7 @@ A boot is made of two files, both from one Buildroot run:
 The first stage looks, in this order:
 
 1. **In RAM beside the kernel**, as the file `/system.img`. That is how a kexec boot works (`kernel6/build.sh` with `SYSTEM=system.img` packs it next to the first stage; `kernel/build.sh kexec` does the same for the 3.6 fallback), and a recovery-mode (live) boot too: U-Boot loads a second file as a ramdisk, `T48S.rfs`, and that is a cpio archive holding `system.img`, which lands in the same place ([live-image.md](live-image.md#what-is-in-the-two-files-and-why)).
-2. **In flash**, a system slot, once the phone is installed (issue #29). Not written yet; the script has the place for it.
+2. **In flash**, a system slot, once the phone is installed (issues #29 and #31, [install.md](install.md)). The kernel then says `t48boot=flash`; the first stage attaches UBI on the `app` partition, picks slot A or B (the active one, or a new one on its single try), and copies that image into RAM. Written and rehearsed off the phone; not yet run on it.
 
 Either way it is the same file, mounted the same way (squashfs through a loop device), so there is one system image however the phone was started. It costs its own size in RAM, about 4 MB, against 7 MB when everything was unpacked.
 
@@ -40,7 +40,7 @@ If there is no system image, or it does not mount, the first stage stays up by i
 - the network by DHCP, and SSH as root: with the built-in keys on one of our test builds, otherwise with a password made up at that moment and shown only on the screen;
 - a shell on the serial port.
 
-To see it: build a kernel with the first stage alone (`ROOTFS=firststage.cpio` and no `SYSTEM`) and boot it. A live boot whose ramdisk is missing or damaged ends here too. The menu (other slot, start without the owner's changes, wipe) is issue #32.
+On an installed phone it is also where a start ends when neither slot starts, or when an install was cut short; the installer can be run again from the PC against it. To see it: build a kernel with the first stage alone (`ROOTFS=firststage.cpio` and no `SYSTEM`) and boot it. A live boot whose ramdisk is missing or damaged ends here too. The menu (other slot, start without the owner's changes, wipe) is issue #32.
 
 ## Services
 

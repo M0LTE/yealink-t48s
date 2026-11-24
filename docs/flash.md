@@ -1,5 +1,7 @@
 # What we keep in flash
 
+**2026-11-24: the full layout, the installer and the way back are written and rehearsed, and wait for Tom's go-ahead: [install.md](install.md).** This page describes the phone as it is until then, and the driver.
+
 Issue [#29](https://github.com/M0LTE/yealink-t48s/issues/29). The design is in [architecture.md](architecture.md#flash-layout); how the chip is read and its error correction are in [nand.md](nand.md); the backup and the way back in [backup.md](backup.md).
 
 ## Today: `/data`, beside Yealink's firmware
@@ -29,7 +31,7 @@ At boot `rcS` runs `t48-data mount`: if our blocks hold UBI, `/data` comes from 
 
 Both kernels have the same driver with the same rule: `kernel/drivers/t48s_nand.c` (Linux 3.6) and `kernel6/drivers/t48s_nand.c` (Linux 6.18). The 6.18 one also tests the rule against itself at every start, and the two kernels have been checked to mount and write the same `/data` in turn: [kernel6/README.md](../kernel6/README.md#flash).
 
-`kernel/drivers/t48s_nand.c` reads the whole chip and writes **only the ranges compiled into it**; today that is the one above. A range must lie inside `kernel` or `app` or the driver refuses to start. The loader, U-Boot, both environments, the logo and the safe-mode kernel and root filesystem can never be written; nor, today, can anything else of Yealink's.
+The driver reads the whole chip and writes **only the ranges compiled into it**. Under Linux 3.6 that is the one above. Under Linux 6.18 the list also has the whole `kernel` partition and the whole `app` partition, for the install, and those two are **locked at every start**: a locked range is refused exactly like a place that is not on the list. `app` unlocks by itself only when the kernel was started from the flash of an installed phone; otherwise only the installer, `t48-update kernel` and the way back unlock anything, by writing a word to `/sys/module/t48s_nand/parameters/lock`. The lock chooses among the compiled-in ranges and cannot add one. A range must lie inside `kernel` or `app` or the driver refuses to start. The loader, U-Boot, both environments, the logo and the safe-mode kernel and root filesystem can never be written; nor, today, can anything else of Yealink's.
 
 Three layers each check the address for themselves:
 
@@ -53,9 +55,9 @@ The kernel has UBI and UBIFS and still no other way to the flash: no block devic
 
 The rest of the layout (our kernel in the `kernel` partition, all of `app` as UBI with two system slots) waits on the phone starting cold. In order:
 
-1. **Bring the hardware up from cold.** Written and proved from our own kernel (2026-11-24): the audio block is switched off and started again ([audio.md](audio.md#cold-start-2026-11-24-issues-7-and-29)), the Ethernet switch is reset, its clocks gated and our address removed, and brought up again ([live-image.md](live-image.md#the-switch-from-cold)), and the touch chip's SPI clock, which U-Boot leaves off, is switched on. **Left: one recovery-mode boot to see it after U-Boot alone** ([the test](live-image.md#cold-boot-test-2-the-b6-cold-set)); it needs someone at the phone.
-2. **A kernel that fits.** Kernel plus first stage must be under 2.5 MB compressed for the `kernel` partition; the first stage is about 1 MB before compression ([boot.md](boot.md)).
-3. **The first stage finds the system image in flash**: a UBI volume per slot, read into RAM and mounted the same way as today.
-4. **Then write**: add `kernel` and all of `app` to the driver's ranges, restore-test them with `nandrestore`, write a kernel that has already booted through recovery mode. Recovery mode and safe mode stay as the ways back.
+1. **Bring the hardware up from cold.** Done: the recovery-mode start passed on 2026-11-24 (screen, touch, keys, handset, network, sound). Written and proved from our own kernel (2026-11-24): the audio block is switched off and started again ([audio.md](audio.md#cold-start-2026-11-24-issues-7-and-29)), the Ethernet switch is reset, its clocks gated and our address removed, and brought up again ([live-image.md](live-image.md#the-switch-from-cold)), and the touch chip's SPI clock, which U-Boot leaves off, is switched on. **Left: one recovery-mode boot to see it after U-Boot alone** ([the test](live-image.md#cold-boot-test-2-the-b6-cold-set)); it needs someone at the phone.
+2. **A kernel that fits.** Done: `kernel6/build.sh` with `FLASH=1` gives 2,154,358 bytes of the 2,621,440.
+3. **The first stage finds the system image in flash**: written ([install.md](install.md#layout-after-the-install)); a UBI volume per slot, read into RAM and mounted the same way as today.
+4. **Then write**: the installer is `tools/t48install.sh`; it waits for Tom's go-ahead. Recovery mode and safe mode stay as the ways back.
 
-One thing to settle before step 4: what Yealink's own updater does with an `app` partition full of data it does not know, since that is the stock way back for other people's phones.
+Still open, for other people's phones: what Yealink's own updater does with an `app` partition full of data it does not know. Our own way back (`tools/t48install.sh restore`) does not depend on it.
