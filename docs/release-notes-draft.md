@@ -16,7 +16,7 @@ A replacement for Yealink's firmware: Linux 6.18, a SIP phone, apps, a web setup
 - Web setup from a browser on the same network, paired with a code the phone shows.
 - Updates over the network, stable and testing channels. An update that does not start falls back by itself.
 - SSH, off until turned on at the phone.
-- A rescue menu: hold X at power-on.
+- A rescue menu, X held at power-on. New, and the least tried part.
 
 ## Known limits
 
