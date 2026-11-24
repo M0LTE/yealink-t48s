@@ -436,7 +436,7 @@ It runs from memory. Your Yealink firmware and its settings stay in the
 phone, and a normal power-up brings them back.
 
 Project and full guide: https://github.com/M0LTE/yealink-t48s
-(docs/live-image.md)
+(docs/guide.md)
 
 To try it
 ---------
@@ -454,6 +454,16 @@ To try it
 Settings (network, SIP account) are entered on the phone's screen. They
 are kept in memory only, so they are gone when you unplug it.
 
+To install it for good
+----------------------
+On the phone: Settings, Install. Back up first (it copies the phone's
+whole flash onto this stick and checks the copy; about 10 minutes, and
+the stick needs 160 MB free), then Install. Keep the t48s-backup
+folder: it is the way back to Yealink's firmware, from the same page.
+
+Power: use a 5 V supply of 1.5 A or more. Yealink's 0.6 A adapter is
+too small to run the phone and a stick: the phone freezes.
+
 To go back to Yealink
 ---------------------
 1. Unplug the power.
@@ -467,8 +477,9 @@ To go back to Yealink
 If it does not start
 --------------------
 - The menu never appears: you let go too early, or held another key.
-- "Usb failed" on the screen, or it stops at "Start Updating...": the
-  phone could not read this stick. Unplug the power, take the stick out,
+- It stops at "Start Updating...": most often the power supply (see
+  above). Otherwise:
+- "Usb failed" on the screen: the phone could not read this stick. Unplug the power, take the stick out,
   power up normally. Then try another stick: a plain USB 2.0 one of
   32 GB or less (not USB 3, not a card reader), set up with ONE
   partition, old-style "MBR" partition table, formatted FAT32. The

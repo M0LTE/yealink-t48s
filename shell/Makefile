@@ -53,7 +53,7 @@ SIM = ./t48-sim --apps simdata/installed:apps --data simdata/appdata --config si
 check: all $(O)/apps $(O)/feeds
 	@mkdir -p $(O)/shots
 	cd $(O) && for t in ../tests/*.script; do echo "== $$t"; rm -rf simdata; \
-		T48_BACKLIGHT=simdata/bl $(SIM) --script $$t 2>sim.log || { cat sim.log; exit 1; }; cat sim.log; \
+		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(SIM) --script $$t 2>sim.log || { cat sim.log; exit 1; }; cat sim.log; \
 		if grep -q 7355719 sim.log; then echo "the password typed in 04-settings is in the log"; exit 1; fi; done
 	@echo "all simulator tests passed"
 

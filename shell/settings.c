@@ -31,14 +31,15 @@
 #define T48_VERSION "development build"
 #endif
 
-enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME };
+enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME, P_INSTALL };
 static const char *const page_names[] = {"root", "accounts", "sip", "network", "time", "timezone", "sound", "screen", "access", "about",
-                                         "appsettings", "appconf", "store", "storeapp", "theme"};
+                                         "appsettings", "appconf", "store", "storeapp", "theme", "install"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
 enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16 };
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
-              A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME };
+              A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME,
+              A_FW_BACKUP, A_FW_INSTALL, A_FW_RESTORE, A_FW_RESTART };
 
 struct row {
     int kind, flags;
@@ -231,7 +232,7 @@ static struct {
     int fd;
     char buf[2048];
     size_t n;
-    enum { J_LIST, J_CHANGE } kind;
+    enum { J_LIST, J_CHANGE, J_FIRMWARE } kind;
     char verb[24], name[64];
     char result[300];
     int ok, listed, blank;   /* blank: nothing was listed when this list was asked for */
@@ -241,6 +242,14 @@ static void rebuild(void);
 static void redraw_me(void) { shell_settings_changed(); }
 
 static const char *feed_now(void) { return cfg_str("feed", "url", pkg_default_feed()); }
+
+/* the installer on a phone started from a USB stick (t48-install, docs/installer.md) */
+static const char *fw_tool(void) { return getenv("T48_INSTALL") ? getenv("T48_INSTALL") : "/usr/bin/t48-install"; }
+static int fw_live(void)
+{
+    const char *f = getenv("T48_LIVE") ? getenv("T48_LIVE") : "/run/t48-live";
+    return access(f, F_OK) == 0;
+}
 
 static int job_start(int kind, const char *cmd, const char *arg)
 {
@@ -253,8 +262,9 @@ static int job_start(int kind, const char *cmd, const char *arg)
         dup2(p[1], 1);
         for (int fd = 3; fd < 256; fd++) close(fd);
         signal(SIGPIPE, SIG_DFL);
-        execl("/proc/self/exe", "t48-app", "--machine", "--apps", opt.apps, "--config", opt.config, "--data", opt.data,
-              cmd, arg, (char *)NULL);
+        if (kind == J_FIRMWARE) execl(fw_tool(), "t48-install", "--machine", cmd, (char *)NULL);
+        else execl("/proc/self/exe", "t48-app", "--machine", "--apps", opt.apps, "--config", opt.config, "--data", opt.data,
+                   cmd, arg, (char *)NULL);
         _exit(127);
     }
     close(p[1]);
@@ -267,7 +277,7 @@ static int job_start(int kind, const char *cmd, const char *arg)
     job.ok = job.listed = 0;
     job.result[0] = 0;
     if (kind == J_LIST) { feed_error[0] = 0; job.blank = !nstore; }
-    logmsg("apps: t48-app %s %s", cmd, arg ? arg : "");
+    logmsg("%s %s %s", kind == J_FIRMWARE ? "install: t48-install" : "apps: t48-app", cmd, arg ? arg : "");
     return 0;
 }
 
@@ -319,6 +329,11 @@ static void job_line(char *line)
         const char *doing = !strcmp(what, "index") ? "Reading feed" : !strcmp(what, "download") ? "Downloading" :
                             !strcmp(what, "verify") ? "Verifying" : !strcmp(what, "unpack") ? "Unpacking" : what;
         snprintf(ov.text, sizeof ov.text, "%s", doing);
+        redraw_me();
+    } else if (!strncmp(line, "step ", 5) && job.kind == J_FIRMWARE && ov.kind == O_BUSY) {
+        char *text = NULL;
+        ov.percent = (int)strtol(line + 5, &text, 10);
+        snprintf(ov.text, sizeof ov.text, "%s", *text == ' ' ? text + 1 : text);
         redraw_me();
     } else if (!strncmp(line, "done ", 5)) {
         job.ok = 1;
@@ -375,6 +390,11 @@ int settings_reaped(pid_t pid, int status)
         logmsg("apps: %d listed%s%s", nstore, feed_error[0] ? "; feed: " : "", feed_error);
         /* the list has just appeared where there was none: start at its top */
         if (depth >= 0 && stack[depth].page == P_STORE && job.blank) stack[depth].sel = stack[depth].top = 0;
+    } else if (job.kind == J_FIRMWARE) {
+        ok = ok && job.ok;
+        logmsg("install: %s: %s", job.verb, ok ? job.result : job.result[0] ? job.result : "stopped");
+        if (ok) message(job.result, "");
+        else message("Stopped", job.result[0] ? job.result : "Installer stopped");
     } else {
         char t[120];
         ok = ok && job.ok;
@@ -500,6 +520,7 @@ static void build_root(void)
     add_menu("Apps", P_STORE, v);
     add_menu("App settings", P_APPSETTINGS, "");
     add_menu("About", P_ABOUT, "");
+    if (fw_live()) add_menu("Install", P_INSTALL, "");
 }
 
 /* the settings file of account 1 to 6: sip, sip2, ... sip6 */
@@ -877,6 +898,52 @@ static void build_storeapp(const char *id)
     else if (inst) add_action("Remove", A_REMOVE, id)->flags = F_DANGER;
 }
 
+/* Install: what t48-install status says, and its three jobs */
+static void build_install(void)
+{
+    char cmd[300], line[120], v[120];
+    int stick = 0, files = 0, ours = 0, backup = 0, free_mb = 0;
+    char date[40] = "";
+    FILE *f;
+    snprintf(title, sizeof title, "Install");
+    snprintf(cmd, sizeof cmd, "%s status 2>/dev/null", fw_tool());
+    if ((f = popen(cmd, "r"))) {
+        while (fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (!strcmp(line, "stick=yes")) stick = 1;
+            else if (!strcmp(line, "files=yes")) files = 1;
+            else if (!strcmp(line, "flash=ours")) ours = 1;
+            else if (!strcmp(line, "backup=checked")) backup = 2;
+            else if (!strcmp(line, "backup=unfinished")) backup = 1;
+            else if (!strncmp(line, "free_mb=", 8)) free_mb = atoi(line + 8);
+            else if (!strncmp(line, "backup_date=", 12)) snprintf(date, sizeof date, "%.10s", line + 12);
+        }
+        pclose(f);
+    }
+    if (stick) snprintf(v, sizeof v, "%d MB free", free_mb); else snprintf(v, sizeof v, "Not found");
+    add_info("Stick", v);
+    add_info("Phone", ours ? "Open firmware" : "Yealink firmware");
+    if (backup == 2) snprintf(v, sizeof v, "Checked, %s", date); else snprintf(v, sizeof v, "%s", backup ? "Unfinished" : "None");
+    add_info("Backup", v);
+    if (backup != 2 && !ours) add_action("Back up", A_FW_BACKUP, "")->flags = stick ? 0 : F_DISABLED;
+    if (!ours) add_action("Install", A_FW_INSTALL, "")->flags = backup == 2 && files ? 0 : F_DISABLED;
+    if (ours) add_action("Restore Yealink firmware", A_FW_RESTORE, "")->flags = backup == 2 ? F_DANGER : F_DISABLED;
+    add_action("Restart", A_FW_RESTART, "");
+    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Power supply: 5 V, 1.5 A or more. Do not unplug while writing");
+}
+
+static void fw_job(const char *cmd, const char *doing)
+{
+    if (job.pid > 0) { message("Busy", "Another install is running"); return; }
+    snprintf(job.verb, sizeof job.verb, "%s", cmd);
+    if (job_start(J_FIRMWARE, cmd, NULL) < 0) { message("Not started", "Could not run the installer"); return; }
+    memset(&ov, 0, sizeof ov);
+    ov.kind = O_BUSY;
+    ov.percent = 0;
+    snprintf(ov.title, sizeof ov.title, "%s", doing);
+    snprintf(ov.text, sizeof ov.text, "Starting");
+}
+
 static void rebuild(void)
 {
     if (depth < 0) return;
@@ -897,6 +964,7 @@ static void rebuild(void)
     case P_STORE: build_store(); break;
     case P_STOREAPP: build_storeapp(stack[depth].arg); break;
     case P_THEME: build_theme(); break;
+    case P_INSTALL: build_install(); break;
     }
     if (stack[depth].sel >= nrows) stack[depth].sel = nrows ? nrows - 1 : 0;
     if (stack[depth].top > stack[depth].sel) stack[depth].top = stack[depth].sel;
@@ -1037,6 +1105,24 @@ static void do_action(const struct row *r)
         if (!strcmp(app_id(), r->def)) app_quit();
         break;
     }
+    case A_FW_BACKUP: fw_job("backup", "Backing up"); break;
+    case A_FW_RESTART: fw_job("restart", "Restarting"); break;
+    case A_FW_INSTALL:
+    case A_FW_RESTORE:
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_CONFIRM;
+        ov.act = (enum action)r->target;
+        if (r->target == A_FW_INSTALL) {
+            ov.yes = "Install";
+            snprintf(ov.title, sizeof ov.title, "Install?");
+            snprintf(ov.text, sizeof ov.text, "Replaces Yealink's firmware. The backup on the stick restores it");
+        } else {
+            ov.yes = "Restore";
+            snprintf(ov.title, sizeof ov.title, "Restore Yealink firmware?");
+            snprintf(ov.text, sizeof ov.text, "Removes the open firmware and its settings");
+        }
+        snprintf(ov.extra, sizeof ov.extra, "About 10 minutes. Do not unplug");
+        break;
     case A_FEED_DEFAULT:
         cfg_set("feed", "url", NULL);
         store_refresh();
@@ -1127,6 +1213,8 @@ static void confirmed(enum action act, const char *arg)
         ov.kind = O_DOOR;
         break;
     case A_FORGET_KEYS: run_apply("access-forget-keys"); break;
+    case A_FW_INSTALL: fw_job("install", "Installing"); break;
+    case A_FW_RESTORE: fw_job("restore", "Restoring"); break;
     case A_ACCOUNT_REMOVE: {
         char path[400];
         if (strncmp(arg, "sip", 3) || strchr(arg, '/')) break;
@@ -1465,7 +1553,7 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
 static void draw_overlay(void)
 {
     struct row_ink ink;
-    int danger = ov.kind == O_CONFIRM && (!ov.yes || ov.act == A_FORGET_KEYS);
+    int danger = ov.kind == O_CONFIRM && (!ov.yes || ov.act == A_FORGET_KEYS || ov.act == A_FW_INSTALL || ov.act == A_FW_RESTORE);
     ui_dialog(OV_X, OV_Y, OV_W, OV_H, danger ? B_STOP : B_PLAIN);
     ui_dialog_ink(&ink);
     t48_text_centre(&ui, SW / 2, OV_Y + 30, &t48_font_head, ink.text, ov.title);

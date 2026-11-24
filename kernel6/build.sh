@@ -21,6 +21,7 @@
 #                    MODEL=t46s is a live build only, with no flash driver at all
 #                    (NAND=0): docs/models.md
 #   DTS              board device tree (default bcm11188-yealink-MODEL)
+#   USB=0            leave out USB sticks (kernel6/usb.config)
 #   EXTRA_CONFIG     one more config fragment
 #   OUT              name of the result (default zImage-t48s)
 #   SLOT=1           fail if the result is larger than the 2.5 MB kernel partition
@@ -123,6 +124,7 @@ cat "$HERE/t48s.config" > "$BUILD/all.config"
 [ "${DEBUG:-1}" = 0 ] || cat "$HERE/debug.config" >> "$BUILD/all.config"
 [ "${NAND:-1}" != 1 ] || cat "$HERE/nand.config" >> "$BUILD/all.config"
 [ ! -f "$HERE/$MODEL.config" ] || cat "$HERE/$MODEL.config" >> "$BUILD/all.config"
+[ "${USB:-1}" != 1 ] || cat "$HERE/usb.config" >> "$BUILD/all.config"
 [ -z "$EXTRA_CONFIG" ] || cat "$EXTRA_CONFIG" >> "$BUILD/all.config"
 cat >> "$BUILD/all.config" <<EOC
 CONFIG_INITRAMFS_SOURCE="$WORK/initramfs-$DTS.cpio"

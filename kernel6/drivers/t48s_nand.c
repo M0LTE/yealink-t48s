@@ -23,6 +23,13 @@
  * safe-mode kernel and root filesystem, cannot be changed by this driver, and nor
  * can Yealink's rfs, cfg and data.
  *
+ * One exception, as narrow as it can be made (issue #7): on a phone started
+ * through recovery mode, t48s_nand_userenv_rewrite() below may erase one block
+ * of userenv and program its first two pages, to take U-Boot's BOOTMODE flag out
+ * again. The block's contents are built in the kernel; nothing comes from
+ * userspace. It is a window that is closed outside that function, and what it
+ * lets through is in t48s_nand_userenv.h.
+ *
  * On top of the list there is a lock. The kernel range and the app range start
  * every boot closed, and a closed range is refused exactly like a place that is
  * not on the list. app opens by itself only when the kernel was started from the
@@ -83,6 +90,8 @@
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/bitops.h>
+#include <linux/crc32.h>
+#include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/rawnand.h>
@@ -129,9 +138,12 @@ static unsigned int blocks_erased;
 module_param(blocks_erased, uint, 0444);
 static unsigned int write_errors;	/* program or erase failed, or the read-back differed */
 module_param(write_errors, uint, 0444);
+static unsigned int userenv_rewrites;	/* t48s_nand_userenv_rewrite() calls let through this boot */
+module_param(userenv_rewrites, uint, 0444);
 static unsigned int selftest;	/* attempts on what is not ours made, and refused, at start-up */
 module_param(selftest, uint, 0444);
 
+static bool t48s_nand_ready;	/* the flash is registered: probe passed every check */
 static bool t48s_nand_testing;	/* the start-up self-test is running: no log lines */
 
 /*
@@ -186,7 +198,8 @@ static const struct { loff_t offset, size; } t48s_nand_reusable[] = {
 /* which locks are open; T48S_LOCK_NONE is the range that has none */
 static bool t48s_nand_open[T48S_LOCKS] = { true, false, false };
 
-static bool t48s_nand_range_ok(loff_t ofs, loff_t len)
+/* the allow-list and its locks, alone */
+static bool t48s_nand_list_ok(loff_t ofs, loff_t len)
 {
 	int i;
 
@@ -198,6 +211,17 @@ static bool t48s_nand_range_ok(loff_t ofs, loff_t len)
 		    ofs + len <= t48s_nand_ours[i].offset + t48s_nand_ours[i].size)
 			return true;
 	return false;
+}
+
+/* The userenv window (t48s_nand_userenv.h): closed, except inside
+ * t48s_nand_userenv_rewrite(). */
+#include "t48s_nand_userenv.h"
+static struct t48s_uenv_window t48s_uenv = { -1, T48S_UENV_CLOSED };
+
+/* what may be erased or programmed: the allow-list, or the window while it is open */
+static bool t48s_nand_range_ok(loff_t ofs, loff_t len)
+{
+	return t48s_nand_list_ok(ofs, len) || t48s_userenv_ok(&t48s_uenv, ofs, len);
 }
 
 /*
@@ -339,7 +363,9 @@ static void t48s_nand_cmd_ctrl(struct nand_chip *chip, int cmd, unsigned int ctr
 		/* column (0: a page; 2048: its spare bytes alone), then the page */
 		page = gate_addr[2] | gate_addr[3] << 8;
 		i = gate_addr[0] | gate_addr[1] << 8;
-		if (!t48s_nand_page_ok(page) || page != announced_page || (i != 0 && i != 2048)) {
+		if (!t48s_nand_page_ok(page) || page != announced_page || (i != 0 && i != 2048) ||
+		    (i == 2048 && !t48s_nand_list_ok((loff_t)page << T48S_PAGE_SHIFT,
+						     1 << T48S_PAGE_SHIFT))) {
 			t48s_nand_block_cmd(NAND_CMD_SEQIN);
 			break;
 		}
@@ -589,7 +615,10 @@ static int t48s_nand_write_oob(struct nand_chip *chip, int page)
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	int i, rc;
 
-	if (!t48s_nand_block_ok(page)) {
+	/* the allow-list alone: a marker is never written through the userenv window */
+	if (page < 0 || (page % T48S_PAGES_PER_BLOCK) ||
+	    !t48s_nand_list_ok((loff_t)page << T48S_PAGE_SHIFT,
+			       T48S_PAGES_PER_BLOCK << T48S_PAGE_SHIFT)) {
 		t48s_nand_refuse("spare byte write", (long long)page << T48S_PAGE_SHIFT);
 		return -EROFS;
 	}
@@ -694,7 +723,8 @@ static int t48s_mtd_erase(struct mtd_info *mtd, struct erase_info *instr)
 
 static int t48s_mtd_block_markbad(struct mtd_info *mtd, loff_t ofs)
 {
-	if (!t48s_nand_range_ok(ofs & ~(loff_t)(mtd->erasesize - 1), mtd->erasesize)) {
+	/* the allow-list alone, as above */
+	if (!t48s_nand_list_ok(ofs & ~(loff_t)(mtd->erasesize - 1), mtd->erasesize)) {
 		t48s_nand_refuse("mtd mark bad", ofs);
 		return -EROFS;
 	}
@@ -775,6 +805,8 @@ static void t48s_nand_selftest_gate(struct nand_chip *chip, int page, int announ
 static int st_n, st_bad;	/* the self-test's attempts, and those not refused */
 #define T48S_MUST_REFUSE(expr) do { st_n++; if ((expr) != -EROFS) st_bad++; } while (0)
 #define T48S_MUST_NOT_SEND(stmt) do { st_n++; stmt; } while (0)
+#define T48S_NO(expr) do { st_n++; if (expr) st_bad++; } while (0)
+#define T48S_YES(expr) do { st_n++; if (!(expr)) st_bad++; } while (0)
 
 /* every layer, asked to erase and program one block that is not ours */
 static void t48s_nand_selftest_block(struct nand_chip *chip, loff_t a)
@@ -933,6 +965,65 @@ static int t48s_nand_selftest(struct nand_chip *chip, int *closed_n)
 	t48s_nand_selftest_block(chip, 0x01800000);
 	t48s_nand_open[T48S_LOCK_APP] = false;
 
+	/* ---- pass 3: the userenv window (t48s_nand_userenv.h) ----
+	 * For the block the window names, only the three questions the layers ask
+	 * are put, never a write: a mistake here must not be able to reach
+	 * userenv. Every other block is tried at every layer with the window
+	 * open, as above. */
+	a = T48S_UENV_OFS;
+	page = a >> T48S_PAGE_SHIFT;
+	/* closed, as at every start */
+	T48S_NO(t48s_nand_range_ok(a, mtd->erasesize));
+	T48S_NO(t48s_nand_page_ok(page));
+	/* nothing but a whole block of userenv, and a known phase, can be opened */
+	T48S_NO(!t48s_userenv_set(&t48s_uenv, 0x00200000, T48S_UENV_ERASE));	/* env */
+	T48S_NO(!t48s_userenv_set(&t48s_uenv, 0x00320000, T48S_UENV_ERASE));	/* logo */
+	T48S_NO(!t48s_userenv_set(&t48s_uenv, 0x00000000, T48S_UENV_PROGRAM));	/* the loader */
+	T48S_NO(!t48s_userenv_set(&t48s_uenv, 0x015a0000, T48S_UENV_PROGRAM));	/* kernel */
+	T48S_NO(!t48s_userenv_set(&t48s_uenv, a + 2048, T48S_UENV_ERASE));	/* not a block */
+	T48S_NO(!t48s_userenv_set(&t48s_uenv, a, 7));				/* not a phase */
+	T48S_NO(t48s_nand_range_ok(a, mtd->erasesize));
+	for (i = T48S_UENV_ERASE; i <= T48S_UENV_PROGRAM; i++) {
+		T48S_YES(!t48s_userenv_set(&t48s_uenv, a, i));
+		if (i == T48S_UENV_ERASE) {
+			/* one erase of that block; no program, no second block, no marker */
+			T48S_YES(t48s_nand_block_ok(page));
+			T48S_NO(t48s_nand_page_ok(page));
+			T48S_NO(t48s_nand_range_ok(a, T48S_UENV_LEN));
+			T48S_NO(t48s_nand_range_ok(a, 2 * mtd->erasesize));
+			T48S_NO(t48s_nand_range_ok(a + mtd->erasesize, mtd->erasesize));
+			T48S_NO(t48s_nand_list_ok(a, mtd->erasesize));
+		} else {
+			/* its first two pages; no third, no erase, no part of a page */
+			T48S_YES(t48s_nand_page_ok(page));
+			T48S_YES(t48s_nand_page_ok(page + 1));
+			T48S_YES(t48s_nand_range_ok(a, T48S_UENV_LEN));
+			T48S_NO(t48s_nand_page_ok(page + 2));
+			T48S_NO(t48s_nand_page_ok(page + T48S_PAGES_PER_BLOCK - 1));
+			T48S_NO(t48s_nand_page_ok(page + T48S_PAGES_PER_BLOCK));
+			T48S_NO(t48s_nand_block_ok(page));
+			T48S_NO(t48s_nand_range_ok(a, mtd->erasesize));
+			T48S_NO(t48s_nand_range_ok(a, 3 * mtd->writesize));
+			T48S_NO(t48s_nand_range_ok(a + mtd->writesize, T48S_UENV_LEN));
+			T48S_NO(t48s_nand_range_ok(a - mtd->writesize, T48S_UENV_LEN));
+			T48S_NO(t48s_nand_range_ok(a + 1024, mtd->writesize));
+			T48S_NO(t48s_nand_list_ok(a, mtd->writesize));
+		}
+		/* the window says nothing about any other block, in userenv or out */
+		t48s_nand_selftest_block(chip, 0x00000000);	/* ubl: the loader */
+		t48s_nand_selftest_block(chip, 0x00020000);	/* uboot */
+		t48s_nand_selftest_block(chip, 0x00200000);	/* env, the block just below userenv */
+		t48s_nand_selftest_block(chip, 0x00240000);	/* userenv, its second block */
+		t48s_nand_selftest_block(chip, 0x00300000);	/* userenv, its last block */
+		t48s_nand_selftest_block(chip, 0x00320000);	/* logo, the block just above */
+	}
+	t48s_userenv_set(&t48s_uenv, -1, T48S_UENV_CLOSED);
+	T48S_NO(t48s_nand_range_ok(a, mtd->erasesize));
+	T48S_NO(t48s_nand_range_ok(a, T48S_UENV_LEN));
+	T48S_NO(t48s_nand_page_ok(page));
+	if (t48s_uenv.phase != T48S_UENV_CLOSED || t48s_uenv.block != -1)
+		st_bad++;
+
 	if (latch_writes != sent)
 		st_bad++;
 	if (gate == GATE_PROG_OPEN || gate == GATE_ERASE_OPEN || announced_page != -1 || erase_passed)
@@ -953,6 +1044,8 @@ static int t48s_nand_selftest(struct nand_chip *chip, int *closed_n)
 }
 #undef T48S_MUST_REFUSE
 #undef T48S_MUST_NOT_SEND
+#undef T48S_NO
+#undef T48S_YES
 
 /* ---- reading ---- */
 
@@ -1237,7 +1330,7 @@ static int t48s_nand_probe(struct platform_device *pdev)
 		return -EPERM;
 	}
 	selftest = err;
-	pr_info("t48s_nand: self-test: %d attempts to erase or program what is not ours, at all three layers (%d with the lock closed, %d with it open): every one refused, nothing sent to the chip\n",
+	pr_info("t48s_nand: self-test: %d attempts to erase or program what is not ours, at all three layers (%d with the lock closed, %d with it open or around the userenv window): every one refused, nothing sent to the chip\n",
 		selftest, closed_n, selftest - closed_n);
 	/* Started from the flash of an installed phone: app is ours and in use. Only
 	 * the kernel image the installer writes says this (its device tree). */
@@ -1275,7 +1368,87 @@ static int t48s_nand_probe(struct platform_device *pdev)
 			(unsigned long long)(t48s_nand_ours[i].offset + t48s_nand_ours[i].size),
 			t48s_nand_open[t48s_nand_ours[i].lock] ? "open for writing" : "locked");
 	pr_info("t48s_nand: everything else is read-only\n");
+	t48s_nand_ready = true;
 	return 0;
+}
+
+/* ---- the one write outside kernel and app: U-Boot's BOOTMODE flag (issue #7) ---- */
+
+static DEFINE_MUTEX(t48s_uenv_mutex);
+
+/* the kernel's command line holds this word, whole */
+static bool t48s_nand_cmdline_has(const char *word)
+{
+	const char *p = saved_command_line;
+	size_t n = strlen(word);
+
+	while ((p = strstr(p, word))) {
+		if ((p == saved_command_line || p[-1] == ' ') && (!p[n] || p[n] == ' '))
+			return true;
+		p += n;
+	}
+	return false;
+}
+
+/*
+ * For kernel/drivers/t48s_bootmode.c, which builds the block: erase the one block
+ * of userenv at chip offset block_ofs and program its first two pages with data,
+ * a 4 KB U-Boot environment. Everything else is refused:
+ *   - a phone not started through recovery mode (t48boot=live): there the flag
+ *     is not ours to touch, and an installed phone never needs this;
+ *   - any offset that is not a whole block of userenv, any length but 4096;
+ *   - a block whose own CRC is wrong (U-Boot would throw such a block away);
+ *   - a third call in one boot.
+ * The erase and the two page writes go through the same three layers as every
+ * other write, each of which asks the window for itself: an erased check before
+ * each page, the ECC in software, a raw read-back of all 2112 bytes. The window
+ * is closed again before this returns, whatever happened. 0 or -errno.
+ */
+int t48s_nand_userenv_rewrite(loff_t block_ofs, const u8 *data, size_t len);
+int t48s_nand_userenv_rewrite(loff_t block_ofs, const u8 *data, size_t len)
+{
+	struct mtd_info *mtd = nand_to_mtd(&t48s_nand_chip);
+	struct erase_info ei;
+	size_t done = 0;
+	int err;
+
+	if (!t48s_nand_ready)
+		return -ENODEV;
+	if (!t48s_nand_cmdline_has("t48boot=live")) {
+		t48s_nand_refuse("userenv rewrite on a phone not started through recovery mode", block_ofs);
+		return -EPERM;
+	}
+	if (!data || len != T48S_UENV_LEN || !t48s_userenv_block_ok(block_ofs) ||
+	    (u32)~crc32_le(~0U, data + 4, len - 4) !=
+	    (data[0] | data[1] << 8 | data[2] << 16 | (u32)data[3] << 24)) {
+		t48s_nand_refuse("userenv rewrite that is not one environment block", block_ofs);
+		return -EINVAL;
+	}
+	mutex_lock(&t48s_uenv_mutex);
+	if (userenv_rewrites >= 2) {
+		mutex_unlock(&t48s_uenv_mutex);
+		t48s_nand_refuse("a third userenv rewrite in one boot", block_ofs);
+		return -EBUSY;
+	}
+	userenv_rewrites++;
+	pr_warn("t48s_nand: userenv: rewriting the environment block at 0x%08llx (one erase, two pages)\n",
+		(unsigned long long)block_ofs);
+	memset(&ei, 0, sizeof(ei));
+	ei.addr = block_ofs;
+	ei.len = mtd->erasesize;
+	err = t48s_userenv_set(&t48s_uenv, block_ofs, T48S_UENV_ERASE) ? -EINVAL : mtd_erase(mtd, &ei);
+	if (!err)
+		err = t48s_userenv_set(&t48s_uenv, block_ofs, T48S_UENV_PROGRAM) ? -EINVAL :
+		      mtd_write(mtd, block_ofs, len, &done, data);
+	t48s_userenv_set(&t48s_uenv, -1, T48S_UENV_CLOSED);
+	if (!err && done != len)
+		err = -EIO;
+	mutex_unlock(&t48s_uenv_mutex);
+	if (err)
+		pr_err("t48s_nand: userenv: the rewrite failed (%d)\n", err);
+	else
+		pr_warn("t48s_nand: userenv: rewritten and read back; the window is closed\n");
+	return err;
 }
 
 static const struct of_device_id t48s_nand_of_match[] = {

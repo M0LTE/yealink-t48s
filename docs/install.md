@@ -87,7 +87,7 @@ Recovery mode and safe mode are Yealink's and are untouched. The rescue menu on 
 
 ## The lock
 
-The driver ([kernel6/README.md](../kernel6/README.md#flash)) can write `kernel` and `app` and nothing else, and both start every boot locked. `app` opens by itself only when the kernel was started from flash on an installed phone. Otherwise the installer opens what it needs and closes `kernel` again when it has finished. At every start the driver tries 396 writes it must refuse, with the lock closed and with it open, and gives no flash at all if one gets through.
+The driver ([kernel6/README.md](../kernel6/README.md#flash)) can write `kernel` and `app` and nothing else, and both start every boot locked. `app` opens by itself only when the kernel was started from flash on an installed phone. Otherwise the installer opens what it needs and closes `kernel` again when it has finished. At every start the driver tries the writes it must refuse (549 attempts and questions), with the lock closed, with it open, and around the one `userenv` block of [installer.md](installer.md#the-bootmode-flag-the-one-write-outside-kernel-and-app), and gives no flash at all if one gets through.
 
 ## What has been shown without writing
 

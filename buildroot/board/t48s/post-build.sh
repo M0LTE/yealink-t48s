@@ -18,3 +18,6 @@ rm -f "$TARGET_DIR"/etc/dropbear
 # on /etc/t48-dev by the first stage.
 mkdir -p "$TARGET_DIR"/etc/t48-dev
 chmod 700 "$TARGET_DIR"/etc/t48-dev
+# the on-phone installer (t48-install, docs/installer.md) runs the same script a
+# PC copies over for tools/t48install.sh
+install -D -m 0755 "$(dirname "$0")/../../../tools/phone/t48-flash.sh" "$TARGET_DIR"/usr/lib/t48/t48-flash.sh
