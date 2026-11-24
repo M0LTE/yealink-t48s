@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Yealink SIP-T46S started by U-Boot's recovery mode from TFTP or a USB stick
+ * (kernel6/build.sh with MODEL=t46s LIVE=1): the phone's device tree with the
+ * ramdisk and the live command line. U-Boot loads T46S.bin and T46S.rfs at
+ * the same two addresses as on the T48S, both inside this phone's 64 MB.
+ */
+#include "bcm11188-yealink-t46s.dts"
+#include "t48s-live.dtsi"
+
+/ {
+	chosen {
+		/* as t48s-live.dtsi, with the text console turned like the panel */
+		bootargs = "console=tty0 console=ttyAMA0,115200 earlycon t48boot=live fbcon=rotate:2 loglevel=8";
+	};
+};

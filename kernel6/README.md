@@ -36,6 +36,8 @@ ROOTFS=firststage.cpio LIVE=1                               # T48S.bin for U-Boo
 ROOTFS=firststage.cpio FLASH=1                              # T48S-kernel.uimg for the kernel partition (docs/install.md)
 ```
 
+`MODEL=t46s LIVE=1` builds `T46S.bin`, the same kernel with the T46S's device tree and no flash driver, for a first try on that phone ([docs/models.md](../docs/models.md)). What differs between the two phones is in their device trees (`dts/bcm11188-yealink-t48s.dts`, `-t46s.dts`; what they share is `dts/yealink-t4xs.dtsi`): memory, screen, key table, backlight pin and steps, lamps. The Holtek driver compares the phone's own hardware id with the device tree's and says so in the log if the wrong kernel was started.
+
 `LIVE=1` makes the kernel file of the live image ([docs/live-image.md](../docs/live-image.md), "The same with Linux 6.18"): a U-Boot image of the same kernel with `dts/bcm11188-yealink-t48s-live.dts`, which adds the ramdisk U-Boot loads and `t48boot=live` to the device tree. U-Boot's own hand-over (tags, no device tree) is not used. The build ends by checking the file's addresses (`tools/mkliveimage.py checkbin`).
 
 CI (`.github/workflows/build.yml`) builds all three and publishes `Image-kexec` and the live set (`t48s-live.tar.gz`). The 3.6 fallback, `Image-kexec-linux3.6`, is built from the same first stage and system image.

@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * What every Yealink T4xS desk phone on the BCM11188 has in common: serial
+ * console, watchdog, Ethernet switch, audio block, and the marker our own
+ * drivers look for ("yealink,sip-t4xs": Holtek chip, keypad controller, hook
+ * switch on GPIO29, backlight PWM). What differs between models is in each
+ * phone's own file: memory, screen, key table, lamps, backlight pin, touch.
+ */
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include "bcm11188.dtsi"
+
+/ {
+	aliases {
+		serial0 = &uarta;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		bootargs = "console=ttyAMA0,115200 earlycon loglevel=8";
+	};
+};
+
+&uarta {
+	status = "okay";
+};
+
+&watchdog {
+	status = "okay";
+	timeout-sec = <30>;
+};
+
+&ethernet {
+	status = "okay";
+};
+
+&audio {
+	status = "okay";
+};

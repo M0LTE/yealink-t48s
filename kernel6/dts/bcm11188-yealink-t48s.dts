@@ -4,21 +4,13 @@
  */
 /dts-v1/;
 
-#include <dt-bindings/gpio/gpio.h>
-#include "bcm11188.dtsi"
+#include "yealink-t4xs.dtsi"
 
 / {
 	model = "Yealink SIP-T48S";
-	compatible = "yealink,sip-t48s", "brcm,bcm11188", "brcm,bcm11107";
-
-	aliases {
-		serial0 = &uarta;
-	};
-
-	chosen {
-		stdout-path = "serial0:115200n8";
-		bootargs = "console=ttyAMA0,115200 earlycon loglevel=8";
-	};
+	compatible = "yealink,sip-t48s", "yealink,sip-t4xs", "brcm,bcm11188", "brcm,bcm11107";
+	/* what the Holtek chip must answer; the kernel warns if it does not */
+	yealink,hardware-id = <65>;
 
 	/*
 	 * 124 MB from 0x00400000 (the first 4 MB are not ours). The top 6 MB
@@ -67,6 +59,39 @@
 		};
 	};
 
+	/*
+	 * The keys, as <Yealink's code for the matrix position (row * 8 +
+	 * column + 1), Linux key code>. From Yealink's T48.qmap and pressed
+	 * one by one (docs/keypad-touch-hw.md). The same table is built into
+	 * drivers/t48s_keypad.c for a device tree without this node.
+	 */
+	keypad {
+		compatible = "yealink,t4xs-keypad";
+		yealink,keymap =
+			<65 KEY_1>, <66 KEY_2>, <67 KEY_3>,
+			<57 KEY_4>, <58 KEY_5>, <59 KEY_6>,
+			<49 KEY_7>, <50 KEY_8>, <51 KEY_9>,
+			<41 KEY_KPASTERISK>, <42 KEY_0>, <43 KEY_NUMERIC_POUND>,
+			<68 KEY_UP>, <52 KEY_DOWN>, <61 KEY_LEFT>, <69 KEY_RIGHT>,
+			<60 KEY_ENTER>,		/* OK */
+			<53 KEY_BACKSPACE>,	/* X */
+			<45 KEY_VOLUMEDOWN>, <44 KEY_VOLUMEUP>,
+			<33 KEY_PROG1>,		/* Headset */
+			<25 KEY_MUTE>,
+			<34 KEY_MESSENGER>,	/* Message */
+			<26 KEY_PAUSE>,		/* Hold */
+			<35 KEY_AGAIN>,		/* Redial */
+			<37 KEY_FORWARD>,	/* Transfer */
+			<36 KEY_PROG2>;		/* Speakerphone */
+	};
+
+	/* the lamp behind the screen: enable on GPIO18, ten PWM steps (drivers/t48s_backlight.c) */
+	backlight {
+		compatible = "yealink,t4xs-backlight";
+		yealink,enable-pin = <18>;
+		yealink,pwm-fields = /bits/ 8 <27 24 21 18 15 12 9 6 3 0>;
+	};
+
 	reserved-memory {
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -77,23 +102,6 @@
 			no-map;
 		};
 	};
-};
-
-&uarta {
-	status = "okay";
-};
-
-&watchdog {
-	status = "okay";
-	timeout-sec = <30>;
-};
-
-&ethernet {
-	status = "okay";
-};
-
-&audio {
-	status = "okay";
 };
 
 &nand {
