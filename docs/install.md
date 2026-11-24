@@ -161,3 +161,20 @@ dea5687047e26cb7348747a309299bda3b98db5dcf8ef45e375c9dde46d6ffab  kernel.dataoob
 
 The backup is `dumps/stock-backup/`, with a second copy on studybox ([backup.md](backup.md)).
 
+## Self-update on the phone, 2026-11-24
+
+Every change after the install reached Tom's phone through `t48-update` on the phone itself. `/data` and the SIP registration were checked after each restart.
+
+| | What | Result |
+|---|---|---|
+| 1 | The install's image (slot a) fetched `system.img` of the `system-latest` pre-release from GitHub over HTTPS, with its SHA-256 | written to slot b in 6 seconds; after the restart `20261124-1d14020` ran on trial and became the active slot a minute later |
+| 2 | `t48-update channel testing`, `check` | `Up to date`, `Kernel differs` (the phone's kernel is a test build with keys). `stable` says `No release found` until there is a `v*` release with these files |
+| 3 | On purpose: an image of random bytes behind a valid first four, from a PC on the network | accepted by its checksum, written to slot a. At the restart it did not mount; the first stage started slot b in the same start, by itself |
+| 4 | A good image, `dev2-f595541`, from the PC | slot a, on trial, confirmed |
+| 5 | On purpose: a real image whose start-up restarts the phone after 25 seconds | started in slot b on its one try, restarted itself, and the next start went back to slot a by itself. Last result: `ff503d9d2c25 did not start, went back` |
+| 6 | Settings, Update on the phone's screen, Check now | `Latest 20261124-1d14020`, `Update available` ([picture](img/update-screen.png)) |
+
+The serial console, dead after every start from U-Boot until then (issue 59), answered from step 1 on.
+
+**Not done: the kernel.** The kernel with the rescue menu and the serial fix is built and its parts are tested (the menu on the phone's own screen with keys injected, [picture](img/rescue-menu.png); the first stage's nothing-starts path in QEMU; the register write on the running phone), but it has not been written to the kernel partition: that waits for one start through recovery mode, or Tom's word.
+
