@@ -311,6 +311,8 @@ One thing that was not as expected: the DAC channels' DMA control word (0x009048
 
 Not measured, needs an ear: sidetone (the level control is a straight port of Yealink's function and could not be checked by loopback), how the earpiece and loudspeaker sound, and the headset path with a headset plugged in.
 
+**The loudspeaker can freeze the phone** (2026-11-24, issue #57): with these gains a steady tone above about -18 dBFS, less when the processor is busy, pulls the supply down until the phone hangs. `t48-audiod` limits what it sends to -25.2 dBFS ([audiod.md](audiod.md#the-loudspeakers-limit)); `t48play` does not, so keep test tones well under that.
+
 To hear it (moderate levels; nothing here is louder than quiet speech):
 
 ```

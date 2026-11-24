@@ -34,6 +34,7 @@ Rules worth knowing:
 - **On hook means the microphone is off.** With no route set, baresip gets pure silence and call audio is not played, whatever baresip is doing.
 - **The ring melody can never reach an earpiece.** It only plays with no route set, which means the loudspeaker. If a call is already up, "ring" becomes the quiet call waiting beep on the current route.
 - **Tones and key sounds follow the route** and its volume. On hook (on-hook dialling) they come from the loudspeaker at the ringer volume.
+- **The loudspeaker has a hard limit.** Whatever goes to its amplifier (ringer, on-hook tones, the speaker route's call audio) passes a peak limiter, and no setting or routes file gets round it. [Why, and the numbers](#the-loudspeakers-limit).
 - **It keeps no settings.** The shell owns the saved volumes and sends them at start. If the shell restarts, the service carries on as it was and the call is not disturbed.
 
 ## Build, run, test
@@ -81,7 +82,7 @@ For the shell to adopt: [`audiod/include/t48_audio_ctl.h`](../audiod/include/t48
 |---|---|---|
 | HELLO | `u16 version` (1) | first; answered with STATE |
 | ROUTE | `u8`: 0 none, 1 handset, 2 speaker, 3 headset | none = on hook |
-| VOLUME | `u8 which` (1 handset, 2 speaker, 3 headset, 4 ringer), `u8 level` 0 to 15 | 3 dB a step, 0 is silent |
+| VOLUME | `u8 which` (1 handset, 2 speaker, 3 headset, 4 ringer), `u8 level` 0 to 15 | 0 is silent. Handset, speaker and headset: 3 dB a step, 15 is full level. Ringer: 2 dB a step, 15 is the [loudspeaker's limit](#the-loudspeakers-limit) |
 | MUTE | `u8 on` | microphone only; cleared by ROUTE none |
 | TONE | `u8`: 0 off, 1 dial, 2 ringback, 3 busy, 4 error, 5 call waiting | plays until replaced or stopped |
 | RING | `u8 on` | an incoming call is alerting |
@@ -98,7 +99,7 @@ What the shell does with it:
 - **Call coming in:** RING 1. To answer: RING 0, then ROUTE, then tell baresip to accept. (In that order, so the answering owner never hears a call waiting beep.) Rejected or missed: RING 0.
 - **Volume keys:** VOLUME for the route in use, or the ringer when on hook; the shell saves the number.
 
-Tones are the UK plan (dial 350+440 Hz; ringback 400+450 Hz in the double-ring rhythm; busy 400 Hz, 0.375 s on and off; error 400 Hz steady). The ringer is two notes swapped 20 times a second in the same double-ring rhythm. Another country is another small table in `tone.c`.
+Tones are the UK plan (dial 350+440 Hz; ringback 400+450 Hz in the double-ring rhythm; busy 400 Hz, 0.375 s on and off; error 400 Hz steady). The ringer is two notes (1000 and 1250 Hz) taking turns 20 times a second in the same double-ring rhythm; each note is a sine that fades into the other over 6 ms, and each burst fades in and out over 20 ms. Every tone starts and stops on a half-cosine fade. Another country is another small table in `tone.c`.
 
 ## The route table
 
@@ -130,6 +131,41 @@ set Codec A Capture Source = 0
 ```
 
 There are four rows: handset, speaker, headset, and alert (the loudspeaker for ringing and on-hook tones, with both microphones switched off).
+
+A route that switches the amplifier on cannot set the loudspeaker's DAC gain above -6 dB or its output gain above -3 dB. A routes file that asks for more is told so in the log and gets those values.
+
+## The loudspeaker's limit
+
+Issue [#57](https://github.com/M0LTE/yealink-t48s/issues/57): a loud ring froze the phone, and the watchdog reset it 30 seconds later. Nothing is logged.
+
+**The cause is the phone's power budget, and the ringer is only one part of it.** Screen brightness, the four lamps, a busy processor and the loudspeaker add up, and past a point the phone freezes. Measured on 2026-11-24 with the old ringer (1 kHz and 1.25 kHz at a steady level), raising the level 1 dB at a time, on the OEM power adapter:
+
+| Screen | Lamps | Processor | Sound | Result |
+|---|---|---|---|---|
+| lit | off | idle | old ringer at -16.2 dBFS peak | fine |
+| lit | off | idle | old ringer at -15.2 dBFS | freeze (Linux 3.6) |
+| full | all 4 on | idle | old ringer at -18.2 dBFS | fine |
+| full | all 4 on | idle | old ringer at -17.2 dBFS | freeze, on Linux 3.6 and on 6.18 |
+| full | all 4 on | 60% busy | new ringer at the limit, -25.2 dBFS | freeze within 20 s |
+| full | all 4 on | fully busy | no sound, amplifier on | fine for 10 s |
+| full | all 4 on | fully busy | any sound at all, even a quiet dial tone in the handset | freeze within 20 s |
+| full | off | fully busy | quiet dial tone in the handset | fine for 40 s |
+| at 1 of 10 | all 4 on | fully busy | quiet dial tone in the handset | fine for 40 s |
+
+The freeze reported by hand was at -21.2 dBFS (the old ringer at volume 10), lower than any of ours with an idle processor.
+
+**What the audio service does about its share:**
+
+- A peak limiter on every route that uses the amplifier: no sample leaves above 1800 (-25.2 dBFS). That is 8 dB (a sixth of the power) under the level that froze the phone with the screen full and every lamp lit, and 4 dB under the report. A louder sound is turned down within one sample and let back up over about 60 ms, so a tone stays a tone; it is not clipped.
+- The ringer's volume runs up to that limit and no further: 15 is exactly on it, each step below is 2 dB, and the default is 13. The old steps were 3 dB from a level five times higher, so 10 and above could all freeze the phone.
+- The loudspeaker's analog and DAC gains are held at the values the limit was measured with.
+- The ringer itself is gentler: sine notes that fade into each other, bursts that fade in and out.
+
+**Loudness, at the phone's own base microphone:** the ringer at 15 is 5 dB louder than the old ringer at 7 (the loudest setting known to be safe before); at 14 it matches the old 8; at the default, 13, it is 1 dB louder than the old 7.
+
+**Proved:** a 20-second ring at volume 15, by a real call and with every lamp lit and the screen full, with no freeze, on both kernels ([below](#on-the-phone)).
+
+**Not solved here:** the budget itself. With the screen full, every lamp lit and the processor busy, the phone has nothing left for any sound, in a call as much as when ringing. That needs the supply measured ([#58](https://github.com/M0LTE/yealink-t48s/issues/58)).
 
 ## Echo
 
@@ -206,15 +242,15 @@ Nothing else: no rate other than 16 kHz, no volume ramps, no routing logic. Rout
 
 Run on 2026-11-23. Nothing in this section touched the phone or any sound device; the phone's results follow it.
 
-`make -C audiod check`: 635 checks in six unit tests, and 31 in the socket test, all passing.
+`make -C audiod check`: 755 checks in seven unit tests, and 32 in the socket test, all passing (2026-11-24).
 
 | Test | What it shows |
 |---|---|
-| `test_tone` | every tone is the right pitch and level, the rhythms are right to 5 ms, nothing clicks on or off, key sounds end by themselves, all 12 DTMF pairs |
-| `test_dsp` | volume steps are 3 dB, mixing clips and never wraps, a 9000-count DC offset is removed and a voice tone is not |
+| `test_tone` | every tone is the right pitch and level, the rhythms are right to 5 ms, nothing clicks on or off, key sounds end by themselves, all 12 DTMF pairs. The ringer: both notes at full level in their turns, never above one note's level where they overlap, a 20 ms fade at each end of a burst and when stopped, nothing but the two notes in the spectrum, no corner in the wave |
+| `test_dsp` | volume steps are 3 dB, mixing clips and never wraps, a 9000-count DC offset is removed and a voice tone is not. The ringer's steps are 2 dB with 15 on the limit. The limiter: nothing under the ceiling is changed by a bit; a full-scale tone comes out at the ceiling and still a sine (third harmonic under 1%); full-scale square waves and noise from silence never pass it, at any frame size; the gain is back a quarter of a second after something loud |
 | `test_pace` | the loudspeaker queue when baresip is on time, late, bursty or too fast; the clock gives 50 frames a second, catches up a short stall and does not replay a long one |
 | `test_echo` | far-end echo cut 35 dB including its first and last 60 ms; the owner alone passes untouched; break-in works within 40 ms; background noise never switches anything |
-| `test_engine` | on hook the microphone is silent and the call is not played; mute; per-route volume; the ring melody stops the moment a route is set |
+| `test_engine` | on hook the microphone is silent and the call is not played; mute; per-route volume; the ring melody stops the moment a route is set. The limit: the loudest call with a tone and a key sound on top at speaker volume 15, and the ringer at every volume, never pass 1800; a quiet call and the earpiece are untouched; a routes file cannot raise the loudspeaker's gains, and a route that switches the amplifier on is limited whatever its name |
 | `test_msg` | messages whole, a byte at a time, oversized, and to a peer that has stopped reading |
 | `socket_test.py` | the real daemon with a stand-in for baresip: 100 frames arrive 20.0 ms apart, numbered from 0; silence on hook, the microphone file off hook; three late answers are played as silence and counted; an old-version client is refused; tones, ringer and key sounds land in the loudspeaker file and the hardware goes idle after each |
 
@@ -241,6 +277,16 @@ Run on 2026-11-23 in the daytime at moderate level, with the phone's base microp
 | 24 s speaker-route stream | 1200 frames each way, none late, none dropped; tick 131 microseconds on average, 153 at most |
 | Going idle | amplifier, outputs, sidetone and microphones all off, DMA stopped |
 | A real call: registered to the test SIP server ([sip-test-server.md](sip-test-server.md)), called its echo service, speaker route at volume 10, 10 s, G.722 | 493 frames each way, none late, no overruns or underruns. What the microphone sent came back from the echo service 283 ms later at the same level (0.1 dB, correlation 0.98), and was played |
+
+Run on 2026-11-24 for the loudspeaker's limit (issue #57), on development builds of this tree, ringing from the test SIP server:
+
+| Test | Linux 6.18 | Linux 3.6 |
+|---|---|---|
+| A real call left ringing for 20 s at ringer volume 15 | no freeze | no freeze |
+| The ringer at 15 for 20 s with the screen at full brightness and all four lamps lit | no freeze | no freeze |
+| The same with the processor 60% busy as well | froze within 20 s | not tried |
+
+Loudness and the levels that freeze the phone are in [The loudspeaker's limit](#the-loudspeakers-limit).
 
 Found and fixed on the way: switching a microphone on makes a thump (14000 counts, gone in 0.4 s) that went to the far end, so the first half second after a route change is now sent as silence; the service left the amplifier and microphone on when idle; and it needed real-time priority (above).
 
