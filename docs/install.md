@@ -173,6 +173,7 @@ Every change after the install reached Tom's phone through `t48-update` on the p
 | 4 | A good image, `dev2-f595541`, from the PC | slot a, on trial, confirmed |
 | 5 | On purpose: a real image whose start-up restarts the phone after 25 seconds | started in slot b on its one try, restarted itself, and the next start went back to slot a by itself. Last result: `ff503d9d2c25 did not start, went back` |
 | 6 | Settings, Update on the phone's screen, Check now | `Latest 20261124-1d14020`, `Update available` ([picture](img/update-screen.png)) |
+| 7 | After main was merged and CI had published again: `t48-update install` with no file, from the testing channel | `20261124-79cde57` downloaded, checked against `SHA256SUMS`, written to slot b, on trial, confirmed. That is what the phone runs now |
 
 The serial console, dead after every start from U-Boot until then (issue 59), answered from step 1 on.
 
