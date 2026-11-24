@@ -15,6 +15,7 @@
 #   OVERLAY          a directory laid over ROOTFS (optional)
 #   DEBUG=0          leave out the early debug output (kernel6/debug.config)
 #   NAND=0           leave out the flash driver, UBI and UBIFS (kernel6/nand.config)
+#   USB=0            leave out USB sticks (kernel6/usb.config)
 #   DTS              board device tree (default bcm11188-yealink-t48s)
 #   EXTRA_CONFIG     one more config fragment
 #   OUT              name of the result (default zImage-t48s)
@@ -105,6 +106,7 @@ mkdir -p "$BUILD"
 cat "$HERE/t48s.config" > "$BUILD/all.config"
 [ "${DEBUG:-1}" = 0 ] || cat "$HERE/debug.config" >> "$BUILD/all.config"
 [ "${NAND:-1}" != 1 ] || cat "$HERE/nand.config" >> "$BUILD/all.config"
+[ "${USB:-1}" != 1 ] || cat "$HERE/usb.config" >> "$BUILD/all.config"
 [ -z "$EXTRA_CONFIG" ] || cat "$EXTRA_CONFIG" >> "$BUILD/all.config"
 cat >> "$BUILD/all.config" <<EOC
 CONFIG_INITRAMFS_SOURCE="$WORK/initramfs-$DTS.cpio"
