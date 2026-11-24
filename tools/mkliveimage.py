@@ -464,10 +464,10 @@ On the phone: Settings, Install. The page offers one step at a time.
    restarts by itself.
 Keep the t48s-backup folder: it is the way back to Yealink's firmware.
 To go back, start from this stick again: the same page then offers
-Restore, and ends the same way.
+Restore Yealink firmware, and ends the same way.
 
 Power: use a 5 V supply of 1.5 A or more. Yealink's 0.6 A adapter is
-too small to run the phone and a stick: the phone freezes.
+too small: the phone freezes and sticks are not read.
 
 To stop trying it (nothing installed)
 -------------------------------------
@@ -484,15 +484,16 @@ If it does not start
 - The menu never appears: you let go too early, or held another key.
 - It stops at "Start Updating...": most often the power supply (see
   above). Otherwise:
-- "Usb failed" on the screen: the phone could not read this stick. Unplug the power, take the stick out,
-  power up normally. Then try another stick: a plain USB 2.0 one of
-  32 GB or less (not USB 3, not a card reader), set up with ONE
-  partition, old-style "MBR" partition table, formatted FAT32. The
-  guide above has the exact steps for Windows, macOS and Linux.
+- "Usb failed" on the screen: the phone could not read this stick.
+  Unplug the power, take the stick out, power up normally. Check the
+  power supply first. Then try another stick: a plain USB 2.0 one of
+  32 GB or less, set up with ONE partition, old-style "MBR" partition
+  table, formatted FAT32. The guide above has the exact steps for
+  Windows, macOS and Linux.
 - "Update failed": the files are damaged; copy them again.
 
-Nothing here can damage the phone: the part of it that reads the stick
-is never changed.
+The part of the phone that reads the stick is never written, by a
+try or by an install, so the stick always starts.
 
 What is on this stick
 ---------------------
@@ -500,9 +501,15 @@ What is on this stick
 The .rom file is not firmware. It is a 4 KB label the phone checks
 before it will start the other two files.
 
+This project is not affiliated with or endorsed by Yealink. Yealink is
+a trademark of its owner. Use it at your own risk: installing replaces
+the phone's firmware, and the way back is Restore, from this stick,
+with the backup the installer made.
+
 Licences: the kernel is GPL-2.0, the rest of the firmware is
 AGPL-3.0-or-later, and it includes other free software under its own
-licences. Source code: the project page above.
+licences. They are listed in NOTICE.md on the project page above, and
+the source for these files is t48s-sources.tar.gz in the same release.
 """
 
 

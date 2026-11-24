@@ -9,7 +9,7 @@
 # is built only for tags and runs started by hand (gh workflow run build.yml), and
 # each of those also updates the rolling pre-release "sdk-latest" (sdk/README.md).
 # The same runs also make t48s-sources.tar.gz, the source that goes with the
-# binaries (NOTICE).
+# binaries (NOTICE.md).
 # Every build of main, and every run started by hand, also updates the rolling
 # pre-release "system-latest": the system image and the kernel for the kernel
 # partition, with VERSION and SHA256SUMS. That is the updater's testing channel;
@@ -156,7 +156,7 @@ jobs:
           (cd "$RUNNER_TEMP/t48s-stick/install" && sha256sum T48S-kernel.uimg system.img > SHA256SUMS)
           ls k6-src/linux-*.tar.xz >/dev/null 2>&1 || cp "$RUNNER_TEMP"/k6/linux-*.tar.xz k6-src/
 
-      # The source that goes with the binaries (NOTICE, "Source for the binaries"):
+      # The source that goes with the binaries (NOTICE.md, "Source for the binaries"):
       # Buildroot's legal-info (the source archive, patches, licence text and
       # manifest of every package in the image and in the SDK's toolchain), the
       # Buildroot release itself, both kernel source archives, and this repository
@@ -208,7 +208,7 @@ jobs:
         run: |
           (cd out && sha256sum t48s-sdk.tar.gz > t48s-sdk.tar.gz.sha256)
           git push -f origin "$GITHUB_SHA:refs/tags/sdk-latest"
-          notes="The newest app SDK, rebuilt by hand or for a release. Built from $GITHUB_REF_NAME at $GITHUB_SHA on $(date -u +%Y-%m-%d). How to use it: sdk/README.md. Source for the compiler and libraries inside: NOTICE in the repository."
+          notes="The newest app SDK, rebuilt by hand or for a release. Built from $GITHUB_REF_NAME at $GITHUB_SHA on $(date -u +%Y-%m-%d). How to use it: sdk/README.md. Source for the compiler and libraries inside: NOTICE.md in the repository."
           if gh release view sdk-latest >/dev/null 2>&1; then
             gh release edit sdk-latest --prerelease --latest=false --title "SDK (latest build)" --notes "$notes"
           else
@@ -227,7 +227,7 @@ jobs:
           cp out/VERSION out/system.img out/T48S-kernel.uimg latest/
           (cd latest && sha256sum VERSION system.img T48S-kernel.uimg > SHA256SUMS)
           git push -f origin "$GITHUB_SHA:refs/tags/system-latest"
-          notes="The newest build of the system image and the kernel, for testing: $T48_VERSION, built from $GITHUB_REF_NAME at $GITHUB_SHA. An installed phone follows it with: t48-update channel testing (docs/install.md). No SSH keys inside. Source for Linux, busybox and the other third-party parts: NOTICE in the repository."
+          notes="The newest build of the system image and the kernel, for testing: $T48_VERSION, built from $GITHUB_REF_NAME at $GITHUB_SHA. An installed phone follows it with: t48-update channel testing (docs/install.md). No SSH keys inside. Source for Linux, busybox and the other third-party parts: NOTICE.md in the repository."
           if gh release view system-latest >/dev/null 2>&1; then
             gh release edit system-latest --prerelease --latest=false --title "System (latest build, testing)" --notes "$notes"
           else
@@ -244,4 +244,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
-            --notes "t48s-stick.zip is what a phone owner needs: unpack it onto a FAT32 USB stick, start the phone from it, and install from the phone's own screen if you want to keep it (docs/guide.md). Use a 5 V power supply of 1.5 A or more. It holds no keys and no password; SSH is off until it is turned on at the phone's screen (Settings, Access). The rest is for developers and for the updater: t48s-live.tar.gz is the same three start files for a TFTP server (docs/live-image.md); system.img and T48S-kernel.uimg are what an installed phone on the stable channel updates itself from (docs/install.md); rootfs.cpio.gz is the system image's files as an archive; Image-kexec (Linux 6.18) and Image-kexec-linux3.6 (the old kernel, kept as a fallback for this release only) start by kexec from Yealink's firmware; t48s-sdk.tar.gz is the app SDK (sdk/README.md). t48s-sources.tar.gz is the source that goes with these binaries: Linux, busybox and the other third-party packages, with their licences (NOTICE). Not affiliated with or endorsed by Yealink. Use at your own risk."
+            --notes "t48s-stick.zip is what a phone owner needs: unpack it onto a FAT32 USB stick, start the phone from it, and install from the phone's own screen if you want to keep it (docs/guide.md). Use a 5 V power supply of 1.5 A or more. It holds no keys and no password; SSH is off until it is turned on at the phone's screen (Settings, Access). The rest is for developers and for the updater: t48s-live.tar.gz is the same three start files for a TFTP server (docs/live-image.md); system.img and T48S-kernel.uimg are what an installed phone on the stable channel updates itself from (docs/install.md); rootfs.cpio.gz is the system image's files as an archive; Image-kexec (Linux 6.18) and Image-kexec-linux3.6 (the old kernel, kept as a fallback for this release only) start by kexec from Yealink's firmware; t48s-sdk.tar.gz is the app SDK (sdk/README.md). t48s-sources.tar.gz is the source that goes with these binaries: Linux, busybox and the other third-party packages, with their licences (NOTICE.md). Not affiliated with or endorsed by Yealink. Use at your own risk."

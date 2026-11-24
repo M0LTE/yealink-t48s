@@ -10,7 +10,7 @@ yealink-t48s-@VERSION@.tar.gz
     The repository at that commit: our own programs (AGPL-3.0-or-later),
     the kernel drivers, device trees, patches and configurations
     (GPL-2.0; kernel/, kernel6/, kmod/), the Buildroot external tree
-    (buildroot/) and the build scripts. NOTICE in it lists the
+    (buildroot/) and the build scripts. NOTICE.md in it lists the
     third-party code and its licences.
 
 linux/

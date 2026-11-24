@@ -2,14 +2,16 @@
 
 Open firmware for the Yealink SIP-T48S. Try it from a USB stick, install it from the phone's own screen, go back to Yealink's firmware from the same screen.
 
-**Status, 2026-11-24.** The stick start, the backup, Install and Restore have each run on one phone. The page's present order of steps and the restart when the stick comes out are rehearsed off the phone and not yet run on one ([what is left](installer.md#test-plan-for-a-real-phone)). Until more phones have been through it, install only a phone you can afford to recover over a serial lead.
+**Status, 2026-11-24.** Trying, Back up, Install and Restore have run end to end on one phone, the author's. Yours would be the second: install only a phone you could do without.
+
+Not affiliated with or endorsed by Yealink; Yealink is a trademark of its owner. Use at your own risk. Installing replaces the phone's firmware; the way back is [Restore](#go-back-to-yealink), from the stick, with the backup the installer made.
 
 ![the idle screen](design/switchboard/phone-idle.png)
 
 ## You need
 
 - A T48S on any Yealink firmware.
-- **A 5 V power supply of 1.5 A or more.** Yealink's 0.6 A adapter cannot run the phone and a stick: the phone freezes at "Start Updating".
+- **A 5 V power supply of 1.5 A or more.** Yealink's own adapter is 0.6 A, and the phone draws up to 0.9 A. On it the phone freezes at "Start Updating", sticks are not read, and a busy phone can freeze later.
 - A USB 2.0 stick, 1 to 32 GB, with 200 MB free.
 - A computer, once, to fill the stick.
 
@@ -64,18 +66,50 @@ If the power fails during Install: start from the stick again and choose Install
 | Right | do not disturb |
 | Down | Settings |
 
-- **Accounts.** Settings, Accounts: up to six SIP accounts. User, Password and Domain are enough for most. Calls go out from the default account; Left and Right in the dialler pick another. More in [phone.md](phone.md).
-- **Calls.** Lift the handset or press Speaker. Hold, mute, transfer, a second call, voicemail on the Message key.
-- **Web setup.** Typing a password on the phone is slow. Settings, Access, Web setup turns on a page for a browser on the same network; the phone shows a code to pair it. Accounts, contacts, a settings backup. [web.md](web.md).
+- **Accounts.** Settings, Accounts: up to six SIP accounts. User, Password and Domain are enough for most. Calls go out from the default account; Left and Right in the dialler pick another. [phone.md](phone.md).
+- **Calls.** Lift the handset or press Speaker. Hold, mute, transfer, a second call, voicemail on the Message key. On Speaker one side is heard at a time. The headset socket is untried.
+- **Contacts and calls.** Left for contacts, Up for the call list. A name shows wherever its number does.
+- **Do not disturb.** Right on the idle screen. Callers are told the phone is not available, nothing rings, and each call is listed as missed.
+- **Web setup.** Typing a password on the phone is slow. Settings, Access, Web setup turns on a page for a browser on the same network; the phone shows a code to pair it. Accounts, contacts, sound, keys, a settings backup. [web.md](web.md).
 - **Apps.** Settings, Apps lists what the feed offers. Install, update, remove. [apps.md](apps.md); to write one, [sdk/README.md](../sdk/README.md).
 - **Themes.** Settings, Screen, Theme. Three: [design](design/README.md).
-- **SSH.** Off until turned on: Settings, Access. [access.md](access.md).
-- **Updates.** Settings, Update checks the release channel and installs into the slot not in use. A bad update falls back by itself. [install.md](install.md#updates-and-fallback).
 
 | | |
 |---|---|
 | ![the dialler](img/phone-dialler.png) | ![a call](img/phone-in-call.png) |
 | ![settings](img/settings.png) | ![web setup](img/web-overview.png) |
+
+## Updates
+
+On an installed phone: **Settings, Update**, **Check now**, then **Install** and **Restart**. Nothing is fetched or installed unless asked.
+
+- **Channel.** `stable` is the newest release. `testing` is the newest build of `main`, a few times a day and untried.
+- An update goes into the system slot not in use and gets one try. If the phone is not up a minute after the restart, the next start goes back to the slot that worked.
+- **Install kernel** shows when the channel's kernel differs from the phone's. There is one kernel, with no fallback: a kernel that does not start needs the stick.
+
+More: [install.md](install.md#updates-and-fallback).
+
+## SSH
+
+Off until turned on: **Settings, Access, SSH**. The phone shows its host key first. Login is as root, by key only.
+
+**Add key** opens password login for ten minutes with a password shown on the screen, so `ssh-copy-id root@ADDRESS` can put a key on the phone; it closes when the key arrives. Or paste the key into the Access page of web setup. **Remove all keys** empties the list. [access.md](access.md).
+
+## Rescue menu
+
+On an installed phone, hold **X** from power-on until the menu shows, about 3 seconds after the logo. Up, Down and OK, or the number.
+
+![the rescue menu](img/rescue-menu.png)
+
+| | |
+|---|---|
+| Start | as usual. Also what happens after a minute |
+| Start slot b | the other system slot, this once |
+| Start with settings wiped | asks first. Settings, accounts, keys and apps are moved aside in `/data`, not deleted |
+| Rescue | a small system: the address on the screen, SSH with a one-time password it shows, a serial shell |
+| Restore help | how to go back to Yealink's firmware |
+
+The same menu shows by itself when no system starts, with Rescue, Restart and Restore help.
 
 ## Go back to Yealink
 
@@ -85,11 +119,14 @@ If the power fails during Install: start from the stick again and choose Install
 
 The phone's flash is then byte for byte what the backup holds. The open firmware's settings are gone.
 
+Restore needs this phone's own backup. Without the `t48s-backup` folder there is no way back from the screen.
+
 ## Troubleshooting
 
 | | |
 |---|---|
 | Stops at "Start Updating" | The power supply. Use 5 V at 1.5 A or more |
+| Freezes, then restarts itself half a minute later | The power supply again. Loud ringing, a bright screen and a busy phone together are more than 0.6 A |
 | The menu never shows | Speakerphone was let go too early, or another key was held |
 | "Usb failed" | The stick could not be read: not FAT32 on an MBR partition, or a stick this U-Boot dislikes. Try a plain USB 2.0 stick of another make |
 | "Update failed" | The files on the stick are damaged. Copy them again |
@@ -108,7 +145,7 @@ The phone's flash is then byte for byte what the backup holds. The open firmware
 
 Recovery mode (Speakerphone at power-on) is in the phone's loader, which is never written. Whatever else is in the flash, the stick starts.
 
-The older way, with a TFTP server and a second computer, still works: [live-image.md](live-image.md).
+If no stick will start, the same recovery mode takes the files over the network: menu option 1, a TFTP server on a second computer, and `t48s-live.tar.gz` from the release. [live-image.md](live-image.md). Started that way, the idle screen says so if Yealink's settings will be reset at its next start.
 
 ## For developers
 
