@@ -57,9 +57,27 @@
  * so the DAC is never left holding a level or starved in mid-wave. The DMA
  * channel is only stopped when the stream is closed.
  *
- * It does not initialise the APM block: clocks, sample rate, FIFO and codec
- * enables are used as found (true after a kexec from Yealink's kernel). A
- * cold start needs the reset and init sequence in docs/audio.md.
+ * COLD START. After a kexec from Yealink's kernel the APM block is running
+ * and is used as found. When it is not (the phone came straight from U-Boot,
+ * which does nothing with audio: the block is not clocked, and reading one of
+ * its registers stops the kernel with an external abort), t48s_apm_cold_start()
+ * brings it up: the two APM clocks, the audio channel enables and the block's
+ * soft reset in chip control, Broadcom's ApmHw_init register table, 16 kHz on
+ * both codecs, the codec enables, and the analog side as Yealink idles. The
+ * equalisers stay off (flat); Yealink loads its own tuning into them, which a
+ * phone that started from Yealink still has.
+ *
+ * Whether the block is on is read from chip control, never from the block.
+ * The first accesses to the block are made with the external abort caught
+ * (t48s_guard), so a block that still does not answer costs the sound and not
+ * the boot: the driver then says so and registers nothing.
+ *
+ * To test the cold start without a cold boot (no stream may be open; stop the
+ * audio service first):
+ *   echo 1 > /sys/module/t48s_audio/parameters/cold
+ * puts the block back into the state a power-on leaves (held in reset, clocks
+ * gated, audio channels disabled, the audio DMA controller off), shows that a
+ * read is caught, and cold-starts it. See docs/audio.md, "Cold start".
  *
  * DMA: each channel runs a ring of linked-list items, one per 5 ms block,
  * straight out of or into the ALSA buffer, with the control words Yealink's
@@ -94,6 +112,9 @@
 #include <sound/info.h>
 #include <mach/irqs.h>
 
+#include <linux/moduleparam.h>
+#include <asm/system_misc.h>
+
 #define DRV_NAME	"t48s_audio"
 
 #define APM_PHYS	0x30600000
@@ -106,12 +127,30 @@
 #define GPIO0_SIZE	0x1000
 #define GPIO_SPK_AMP	0x80000000	/* GPIO31: loudspeaker amplifier, high = on */
 
-/* chip control: the voice DSP (VPM) */
+/* chip control: the APM's clocks, enables and reset; the voice DSP (VPM) */
+#define CHIPC_APM100_CLK	0x44		/* 200 MHz / 2 */
+#define CHIPC_APM100_CLK_ON	0x00010002	/* as Yealink runs it: divide by 2, output on */
+#define CHIPC_APM200_CLK	0x58		/* PLL2 channel 3 */
+#define CHIPC_APM200_CLK_ON	0x00010009	/* as Yealink runs it: divide by 9, output on */
+#define CHIPC_CLK_OUTPUT	0x00010000
+#define CHIPC_BUSCLK		0x5c
+#define CHIPC_BUSCLK_DMAC0	0x00000020
+#define CHIPC_AUDIO_EN		0x7c
+#define CHIPC_AUDIO_EN_CLOCKS	0x00000090	/* APM and NTP clocks */
+#define CHIPC_AUDIO_EN_CODECS	0x00000007	/* all, channel A, channel B */
+#define CHIPC_AUDIO_EN_OURS	(CHIPC_AUDIO_EN_CLOCKS | CHIPC_AUDIO_EN_CODECS)
+#define CHIPC_SOFTRESET2	0x84
+#define CHIPC_SOFTRESET2_APM	0x00002001
+#define CHIPC_PLL2_PREDIV	0xa8		/* PLL2, which the 200 MHz comes from: */
+#define CHIPC_PLL2_PREDIV_OK	0x02004811	/* as U-Boot sets it and Yealink leaves it */
+#define CHIPC_GPIOMUX3		0x124		/* GPIO24-31, 4 bits per pin, 0 = plain GPIO */
+#define GPIO_DIR		0x400		/* 1 = output */
 #define CHIPC_CLKEN		0x10
 #define CHIPC_CLKEN_VPM		0x00010000
 #define CHIPC_VPM_HALT		0x301c
 
 /* APM */
+#define APM_FLUSH		0x000	/* FIFO flush strobes */
 #define APM_IRQSTAT		0x004	/* write 1 to clear */
 #define APM_IRQEN		0x008
 #define APM_IRQ_DAC_UNF_A	0x10
@@ -120,6 +159,20 @@
 #define APM_IRQ_ADC_OVF_B	0x80
 #define APM_IRQ_FIFO		0xf0
 #define APM_CTL			0x00c	/* top four bits: codec enables */
+#define APM_CTL_INIT		0x00810204
+#define APM_CTL_CODECS		0xf0000000
+#define APM_CODEC_A		0x020	/* codec control; bits 31 and 30 hold A and B
+					 * until they are enabled, 26 and 27 switch the
+					 * two equalisers on */
+#define APM_CODEC_B		0x050
+#define APM_CODEC_HOLD_AB	0xc0000000
+#define APM_RATE_LOAD		0x080	/* value for the strobes in APM_RATE_CTL */
+#define APM_RATE_LOAD_IDLE	0x53e2d624
+#define APM_RATE_LOAD_16K	0x14f8b589
+#define APM_RATE_CTL		0x084
+#define APM_FIFO_CLR_A		0x104	/* written with all ones before the enable */
+#define APM_FIFO_CLR_B		0x10c
+#define APM_FIFO_CLR		0x114
 #define APM_COEF_DATA		0x010	/* filter coefficient memory: value, */
 #define APM_COEF_ADDR		0x014	/* then index, bank and a write strobe */
 #define APM_COEF_STROBE		0x100
@@ -154,6 +207,11 @@
 					 * bits 20-31: output attenuation, 3 dB a step */
 #define APM_OUT_MODE_ALL	0x000ff000
 #define APM_OUT_GAIN_ALL	0xfff00000
+#define APM_OUT_RAMPS		0x00003333	/* in APM_OUT_MUTE: each output's mute ramps
+						 * over 40 ms, as Yealink sets it */
+#define APM_DAC			0x13c
+#define APM_DAC_POWERDOWN	0x00000600	/* bit 9 codec B, bit 10 codec A */
+#define APM_DAC_RAMP_COSINE	0x60000000
 #define APM_MICDET_A		0x42c	/* bit 1: input A mic bias off */
 #define APM_MICDET_B		0x52c
 #define APM_MICDET_BIASA_OFF	0x00000002
@@ -322,6 +380,8 @@ struct t48s_audio {
 	void __iomem *apm;
 	void __iomem *dmac;
 	void __iomem *gpio;
+	void __iomem *chipc;
+	int cold_starts;	/* times this driver brought the block up itself */
 	spinlock_t lock;	/* registers shared between the codecs */
 	struct t48s_codec codec[2];
 };
@@ -1098,6 +1158,7 @@ static void t48s_proc_read(struct snd_info_entry *entry, struct snd_info_buffer 
 		    dmac_rd(au, DMAC_CFG), dmac_rd(au, DMAC_CHEN) & 0xff);
 	snd_iprintf(buf, "Speaker amplifier (GPIO31): %s\n",
 		    readl(au->gpio) & GPIO_SPK_AMP ? "on" : "off");
+	snd_iprintf(buf, "Cold starts by this driver since boot: %d\n", au->cold_starts);
 	snd_iprintf(buf, "APM registers:\n");
 	for (i = 0; i < ARRAY_SIZE(regs); i++)
 		snd_iprintf(buf, " %03x: %08x\n", regs[i], apm_rd(au, regs[i]));
@@ -1141,13 +1202,367 @@ static void t48s_outputs_off(struct t48s_audio *au)
 	}
 }
 
+/* ---- cold start ---- */
+
+/*
+ * A register of a block that is not clocked or is held in reset does not
+ * answer: the bus raises an external abort, a little after the access
+ * ("imprecise"), and with nobody catching it that is the end of the kernel
+ * (seen on the first start through U-Boot). While t48s_guard is set the abort
+ * is noted and execution goes on; at any other time it is the kernel's to
+ * report, as before.
+ */
+static int t48s_guard, t48s_aborted;
+
+static int t48s_abort(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
+{
+	if (!t48s_guard)
+		return 1;
+	t48s_aborted++;
+	return 0;
+}
+
+static void t48s_guard_on(void)
+{
+	t48s_aborted = 0;
+	t48s_guard = 1;
+}
+
+/* how many accesses were refused since t48s_guard_on() */
+static int t48s_refused(struct t48s_audio *au)
+{
+	/* an abort from the last access may still be on its way */
+	(void)readl(au->chipc);
+	udelay(200);
+	return t48s_aborted;
+}
+
+static int t48s_guard_off(struct t48s_audio *au)
+{
+	int n = t48s_refused(au);
+
+	t48s_guard = 0;
+	return n;
+}
+
+/* chip control registers are shared with every other driver: read, change,
+ * write with interrupts off (one CPU) */
+static void chipc_update(struct t48s_audio *au, u32 off, u32 mask, u32 val)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	writel((readl(au->chipc + off) & ~mask) | (val & mask), au->chipc + off);
+	local_irq_restore(flags);
+}
+
+/* NULL if chip control has the block switched on, else what is missing. Reads
+ * chip control only: the block's own registers must not be touched before
+ * this says NULL. */
+static const char *t48s_apm_gated(struct t48s_audio *au)
+{
+	if (!(readl(au->chipc + CHIPC_APM100_CLK) & CHIPC_CLK_OUTPUT) ||
+	    !(readl(au->chipc + CHIPC_APM200_CLK) & CHIPC_CLK_OUTPUT))
+		return "clocks gated";
+	if ((readl(au->chipc + CHIPC_AUDIO_EN) & CHIPC_AUDIO_EN_OURS) != CHIPC_AUDIO_EN_OURS)
+		return "audio channels disabled";
+	if (readl(au->chipc + CHIPC_SOFTRESET2) & CHIPC_SOFTRESET2_APM)
+		return "held in reset";
+	if (!(readl(au->chipc + CHIPC_BUSCLK) & CHIPC_BUSCLK_DMAC0))
+		return "DMA controller clock gated";
+	return NULL;
+}
+
+/* the same, and then the block's own state. Call with the guard on if there
+ * is any doubt that it answers. */
+static const char *t48s_apm_missing(struct t48s_audio *au)
+{
+	const char *gated = t48s_apm_gated(au);
+
+	if (gated)
+		return gated;
+	if ((apm_rd(au, APM_CTL) & APM_CTL_CODECS) != APM_CTL_CODECS)
+		return "codecs not enabled";
+	if (apm_rd(au, APM_RATE_A) != APM_RATE_16K || apm_rd(au, APM_RATE_B) != APM_RATE_16K)
+		return "not at 16 kHz";
+	return NULL;
+}
+
+/*
+ * For testing only: put the block where a power-on leaves it. Held in reset
+ * (which puts every APM register back to its default: outputs muted, DACs
+ * and ADCs powered down), clocks gated, audio channels disabled, the audio
+ * DMA controller disabled and its bus clock gated. No stream may be open.
+ */
+static void t48s_apm_power_off(struct t48s_audio *au)
+{
+	int i;
+
+	t48s_amp(au, 0);
+	apm_update(au, APM_OUT_MUTE, APM_OUT_MUTE_ALL, APM_OUT_MUTE_ALL);
+	msleep(MUTE_RAMP_MS);
+	for (i = 0; i < 4; i++)
+		dmac_quiet(au, au->codec[i / 2].st[i % 2].d->dma_ch);
+	dmac_wr(au, DMAC_CFG, 0);
+	chipc_update(au, CHIPC_SOFTRESET2, CHIPC_SOFTRESET2_APM, CHIPC_SOFTRESET2_APM);
+	chipc_update(au, CHIPC_AUDIO_EN, CHIPC_AUDIO_EN_OURS, 0);
+	chipc_update(au, CHIPC_APM100_CLK, CHIPC_CLK_OUTPUT, 0);
+	chipc_update(au, CHIPC_APM200_CLK, CHIPC_CLK_OUTPUT, 0);
+	chipc_update(au, CHIPC_BUSCLK, CHIPC_BUSCLK_DMAC0, 0);
+	msleep(20);
+}
+
+/* ApmHw_SampleFreqSet(codec, 16000), as in Yealink's kernel: the rate, then
+ * two values loaded by strobes, and the ADC's unity gain for this rate */
+static void t48s_rate_16k(struct t48s_audio *au, int codec)
+{
+	const struct t48s_codec_desc *d = &t48s_codecs[codec];
+	u32 gain_strobe = codec ? 0x10 : 0x08, strobe = codec ? 0x04 : 0x02;
+	u32 asrc_reg = codec ? 0x058 : 0x028;
+
+	apm_wr(au, d->rate_reg, APM_RATE_16K);
+	apm_wr(au, APM_RATE_LOAD, APM_RATE_LOAD_16K);
+	apm_update(au, APM_RATE_CTL, gain_strobe, gain_strobe);
+	apm_update(au, d->adc_dgain_reg, ~ADC_DGAIN_KEEP, dgain_bits(ADC_UNITY, 24, DGAIN_0DB_STEP));
+	apm_update(au, APM_RATE_CTL, gain_strobe, 0);
+	apm_wr(au, APM_RATE_LOAD, APM_RATE_LOAD_IDLE);
+	apm_update(au, APM_RATE_CTL, strobe, strobe);
+	apm_update(au, asrc_reg, 0x18000000, 0);	/* both clear at 43 kHz and below */
+	apm_update(au, d->adc_dgain_reg, 0x60000000, 0);
+	apm_update(au, APM_RATE_CTL, strobe, 0);
+}
+
+/*
+ * Bring the APM block up from the state a power-on leaves. The order is
+ * Broadcom's (apmInit, apmPrepare and apmEnable in their GPL halaudio APM
+ * driver); the register writes are those of ApmHw_init, ApmHw_SampleFreqSet
+ * and ApmHw_ChEnable in Yealink's kernel image. Ends with the analog side as
+ * Yealink's firmware idles (so both ways of starting give the same thing),
+ * except that every output is muted, switched off and at its lowest gain.
+ * May sleep. Call with the guard on.
+ */
+#define APM_UDELAY	0xffff
+static const struct { u16 reg; u32 val; } t48s_apm_init[] = {
+	{ APM_CTL, APM_CTL_INIT }, { 0x20c, 0x4 },
+	/* codec A */
+	{ APM_CODEC_A, 0xe0000000 }, { APM_UDELAY }, { 0x018, 0x420 },
+	{ APM_CODEC_A, 0xe0880000 }, { APM_SIDETONE_A, 0 }, { 0x028, 0x02130000 },
+	{ APM_DAC_DGAIN_A, 0x00337fff }, { 0x03c, 0x31d }, { APM_ADC_DGAIN_A, 0x031314f8 },
+	{ APM_RATE_A, 0x20000000 }, { 0x048, 0x10 }, { 0x04c, 0x5000 },
+	/* codec B */
+	{ APM_CODEC_B, 0x80000000 }, { APM_UDELAY }, { 0x01c, 0x420 },
+	{ APM_CODEC_B, 0x80880000 }, { APM_SIDETONE_B, 0 }, { 0x058, 0x02130000 },
+	{ APM_DAC_DGAIN_B, 0x00337fff }, { 0x06c, 0x31d }, { APM_ADC_DGAIN_B, 0x031314f8 },
+	{ APM_RATE_B, 0x20000000 }, { 0x078, 0x10 }, { 0x07c, 0x5000 },
+	/* codec C (an ADC nothing is wired to; set up as Broadcom does, never enabled) */
+	{ 0x21c, 0x80000000 }, { APM_UDELAY }, { 0x218, 0x400 }, { 0x21c, 0x80080000 },
+	{ 0x284, 0 }, { 0x220, 0x205 }, { 0x224, 0x031314f8 }, { 0x228, 0x20000000 },
+	{ 0x22c, 0x10 },
+	/* shared */
+	{ 0x0a0, 0x80000000 }, { APM_RATE_LOAD, APM_RATE_LOAD_IDLE }, { APM_RATE_CTL, 0x6 },
+	{ 0x230, 0x2 }, { 0x234, 0 }, { 0x088, 0 }, { 0x168, 0 }, { 0x164, 0 },
+	{ 0x160, 0x80000000 },
+};
+
+static void t48s_apm_cold_start(struct t48s_audio *au)
+{
+	static const u16 fifo_regs[] = { 0x428, 0x528, 0x420, 0x520 };
+	unsigned long flags;
+	int i;
+
+	/* the loudspeaker amplifier's pin first: plain GPIO, low, output */
+	chipc_update(au, CHIPC_GPIOMUX3, 0xf0000000, 0);
+	t48s_amp(au, 0);
+	local_irq_save(flags);
+	writel(readl(au->gpio + GPIO_DIR) | GPIO_SPK_AMP, au->gpio + GPIO_DIR);
+	local_irq_restore(flags);
+
+	/* clocks, audio channels, and a reset so that every register starts
+	 * from its default */
+	chipc_update(au, CHIPC_BUSCLK, CHIPC_BUSCLK_DMAC0, CHIPC_BUSCLK_DMAC0);
+	writel(CHIPC_APM200_CLK_ON, au->chipc + CHIPC_APM200_CLK);
+	writel(CHIPC_APM100_CLK_ON, au->chipc + CHIPC_APM100_CLK);
+	chipc_update(au, CHIPC_AUDIO_EN, CHIPC_AUDIO_EN_CLOCKS, CHIPC_AUDIO_EN_CLOCKS);
+	chipc_update(au, CHIPC_AUDIO_EN, CHIPC_AUDIO_EN_CODECS, CHIPC_AUDIO_EN_CODECS);
+	chipc_update(au, CHIPC_SOFTRESET2, CHIPC_SOFTRESET2_APM, CHIPC_SOFTRESET2_APM);
+	udelay(100);
+	chipc_update(au, CHIPC_SOFTRESET2, CHIPC_SOFTRESET2_APM, 0);
+	udelay(50);
+
+	/* the first access to the block: if it is refused, leave it alone */
+	(void)apm_rd(au, APM_CTL);
+	if (t48s_refused(au))
+		return;
+
+	/* ApmHw_init */
+	apm_wr(au, APM_IRQSTAT, 0xff);
+	apm_wr(au, APM_IRQEN, apm_rd(au, APM_IRQEN) & ~0xff);
+	for (i = 0; i < ARRAY_SIZE(t48s_apm_init); i++) {
+		if (t48s_apm_init[i].reg == APM_UDELAY)
+			udelay(50);
+		else
+			apm_wr(au, t48s_apm_init[i].reg, t48s_apm_init[i].val);
+	}
+	apm_update(au, 0x0a0, 0x80000000, 0);
+	apm_update(au, APM_DAC, 0x180, 0);
+	apm_update(au, APM_ANA, 1, 0);
+	apm_update(au, 0x434, 1, 1);
+	apm_update(au, 0x534, 1, 1);
+	apm_wr(au, 0x438, 4);
+	apm_wr(au, 0x538, 4);
+	apm_update(au, APM_MICDET_A, 1, 1);
+	apm_update(au, APM_MICDET_B, 1, 1);
+	for (i = 0; i < ARRAY_SIZE(fifo_regs); i++)
+		apm_update(au, fifo_regs[i], 7, 4);	/* FIFO thresholds */
+	apm_update(au, APM_RATE_CTL, 0xf00, 0x700);
+
+	/* the output side before anything runs: a reset leaves the four outputs
+	 * muted but switched on at 0 dB, with the DACs powered down. Mute ramps
+	 * as Yealink has them, then off and at the lowest gain. */
+	apm_wr(au, APM_OUT_MUTE, APM_OUT_MUTE_ALL | APM_OUT_RAMPS);
+	apm_update(au, APM_DAC, APM_DAC_RAMP_COSINE, APM_DAC_RAMP_COSINE);
+	apm_wr(au, APM_OUT_MODE, APM_OUT_MODE_ALL | APM_OUT_GAIN_ALL);
+
+	t48s_rate_16k(au, 0);
+	t48s_rate_16k(au, 1);
+
+	/* ApmHw_ChEnable for codecs A and B */
+	apm_wr(au, APM_IRQSTAT, APM_IRQ_FIFO);
+	apm_wr(au, APM_FIFO_CLR_A, ~0);
+	apm_wr(au, APM_FIFO_CLR_B, ~0);
+	apm_wr(au, APM_FIFO_CLR, ~0);
+	apm_wr(au, APM_FLUSH, 0xf);
+	apm_update(au, APM_CTL, APM_CTL_CODECS, APM_CTL_CODECS);
+	udelay(25);
+	apm_update(au, APM_CODEC_A, APM_CODEC_HOLD_AB, 0);
+
+	/* the analog side as Yealink idles: microphone bias supplies on, codec B's
+	 * ADC on, on input B (the handset microphone) at 15 dB and 0 dB digital;
+	 * codec A's ADC off and its digital gain muted */
+	apm_wr(au, APM_ANA, APM_ANA_ADC_B_ON);
+	apm_wr(au, APM_AFE_A, 0);
+	apm_wr(au, APM_AFE_B, APM_AFE_INPUT_B | (15 << APM_AFE_PGA_SHIFT));
+	apm_update(au, APM_MICDET_A, APM_MICDET_BIASA_OFF, 0);
+	apm_update(au, APM_MICDET_B, APM_MICDET_BIASA_OFF, 0);
+	apm_update(au, APM_ADC_DGAIN_A, ~ADC_DGAIN_KEEP, dgain_bits(ADC_UNITY, 24, 0));
+
+	/* last, with every output stage off and muted: power the DACs */
+	apm_update(au, APM_DAC, APM_DAC_POWERDOWN, 0);
+	msleep(20);
+	au->cold_starts++;
+}
+
+/* The block is running, by Yealink's hand or ours. Enable no interrupt until
+ * a stream runs (Yealink leaves the four FIFO error interrupts enabled; with
+ * no DMA running they are all pending), take the outputs over, and learn the
+ * gains that are not kept in a readable form. May sleep. */
+static void t48s_take_over(struct t48s_audio *au)
+{
+	int i;
+
+	apm_wr(au, APM_IRQEN, apm_rd(au, APM_IRQEN) & ~0xff);
+	t48s_outputs_off(au);
+	for (i = 0; i < 2; i++)
+		au->codec[i].adc_step = adc_step_of(apm_rd(au, au->codec[i].d->adc_dgain_reg));
+}
+
+/*
+ * Make sure the block runs, starting it if it does not. Returns NULL, or why
+ * there is no audio hardware to use. Never lets a refused access stop the
+ * kernel. May sleep.
+ */
+static const char *t48s_bring_up(struct t48s_audio *au, const char *why)
+{
+	const char *missing;
+
+	t48s_guard_on();
+	if (!why) {
+		why = t48s_apm_missing(au);
+		if (t48s_refused(au)) {
+			/* chip control says on, the block says nothing: start it too */
+			why = "it does not answer";
+			t48s_aborted = 0;
+		}
+	}
+	if (why) {
+		pr_info(DRV_NAME ": audio block is off (%s): starting it\n", why);
+		t48s_apm_cold_start(au);
+	}
+	missing = t48s_refused(au) ? NULL : t48s_apm_missing(au);
+	if (!missing && !t48s_refused(au))
+		t48s_take_over(au);
+	if (t48s_guard_off(au))
+		return "it does not answer";
+	if (missing)
+		return missing;
+	if (why)
+		pr_info(DRV_NAME ": audio block started from cold\n");
+	return NULL;
+}
+
+/*
+ * /sys/module/t48s_audio/parameters/cold: a test of the cold start with no
+ * cold boot. Writing 1 puts the block into its power-on state, shows that a
+ * read of it is refused and caught, and starts it again; it fails with "busy"
+ * while any stream is open. Stop the audio service first: mixer settings are
+ * back at the driver's defaults afterwards, and nothing may touch the mixer
+ * meanwhile. Reading gives how often this driver has cold-started the block
+ * since boot.
+ */
+static struct t48s_audio *the_audio;
+
+static int cold_set(const char *val, const struct kernel_param *kp)
+{
+	struct t48s_audio *au = the_audio;
+	const char *missing;
+	unsigned long flags;
+	int i, v, busy = 0, refused;
+
+	if (kstrtoint(val, 0, &v) || v != 1)
+		return -EINVAL;
+	if (!au)
+		return -ENODEV;
+	spin_lock_irqsave(&au->lock, flags);
+	for (i = 0; i < 4; i++)
+		if (au->codec[i / 2].st[i % 2].ss)
+			busy = 1;
+	spin_unlock_irqrestore(&au->lock, flags);
+	if (busy)
+		return -EBUSY;
+	t48s_apm_power_off(au);
+	pr_info(DRV_NAME ": test: audio block switched off (%s)\n", t48s_apm_gated(au));
+	t48s_guard_on();
+	(void)apm_rd(au, APM_IRQEN);
+	refused = t48s_guard_off(au);
+	pr_info(DRV_NAME ": test: a read of the block while off was %s\n",
+		refused ? "refused, and caught" : "answered");
+	missing = t48s_bring_up(au, "switched off for the test");
+	if (missing) {
+		pr_err(DRV_NAME ": test: cold start failed: %s\n", missing);
+		return -EIO;
+	}
+	return 0;
+}
+
+static int cold_get(char *buf, const struct kernel_param *kp)
+{
+	return sprintf(buf, "%d\n", the_audio ? the_audio->cold_starts : 0);
+}
+
+static const struct kernel_param_ops cold_ops = { .set = cold_set, .get = cold_get };
+module_param_cb(cold, &cold_ops, NULL, 0644);
+
 static int __init t48s_audio_init(void)
 {
 	struct platform_device *pdev;
 	struct snd_card *card;
 	struct t48s_audio *au;
+	const char *missing;
 	int i, j, rc;
 
+	/* fault 22, the imprecise external abort: what a register of a block
+	 * that is switched off answers with */
+	hook_fault_code(22, t48s_abort, SIGBUS, BUS_OBJERR, "imprecise external abort");
 	pdev = platform_device_register_simple(DRV_NAME, -1, NULL, 0);
 	if (IS_ERR(pdev))
 		return PTR_ERR(pdev);
@@ -1172,14 +1587,12 @@ static int __init t48s_audio_init(void)
 	au->apm = ioremap(APM_PHYS, APM_SIZE);
 	au->dmac = ioremap(DMA0_PHYS, DMA0_SIZE);
 	au->gpio = ioremap(GPIO0_PHYS, GPIO0_SIZE);
-	if (!au->apm || !au->dmac || !au->gpio)
+	au->chipc = ioremap(CHIPC_PHYS, CHIPC_SIZE);
+	if (!au->apm || !au->dmac || !au->gpio || !au->chipc)
 		goto fail_card;
 
 	t48s_halt_dsp();
 
-	/* Yealink leaves the four FIFO error interrupts enabled; with no DMA running
-	 * they are all pending. Enable none until a stream runs. */
-	apm_wr(au, APM_IRQEN, apm_rd(au, APM_IRQEN) & ~0xff);
 	for (i = 0; i < 2; i++) {
 		struct t48s_codec *c = &au->codec[i];
 
@@ -1191,7 +1604,20 @@ static int __init t48s_audio_init(void)
 			c->st[j].play = j == SNDRV_PCM_STREAM_PLAYBACK;
 		}
 	}
-	t48s_outputs_off(au);
+	/* one line for the log of a cold start: what the boot loader left */
+	pr_info(DRV_NAME ": chip control as found: APM clocks 0x%08x 0x%08x, audio enable 0x%02x, reset 0x%08x, bus clocks 0x%08x, PLL2 0x%08x\n",
+		readl(au->chipc + CHIPC_APM100_CLK), readl(au->chipc + CHIPC_APM200_CLK),
+		readl(au->chipc + CHIPC_AUDIO_EN), readl(au->chipc + CHIPC_SOFTRESET2),
+		readl(au->chipc + CHIPC_BUSCLK), readl(au->chipc + CHIPC_PLL2_PREDIV));
+	missing = t48s_bring_up(au, NULL);
+	if (missing) {
+		pr_err(DRV_NAME ": no sound: the audio block could not be started (%s)\n", missing);
+		rc = -ENODEV;
+		goto fail_quiet;
+	}
+	if (au->cold_starts && readl(au->chipc + CHIPC_PLL2_PREDIV) != CHIPC_PLL2_PREDIV_OK)
+		pr_warn(DRV_NAME ": PLL2 is not set as expected: the sample rate may be off\n");
+
 	rc = request_irq(IRQ_APM, t48s_apm_irq, 0, "t48s_audio apm", au);
 	if (rc)
 		goto fail_card;
@@ -1204,7 +1630,6 @@ static int __init t48s_audio_init(void)
 		struct t48s_codec *c = &au->codec[i];
 		struct snd_pcm *pcm;
 
-		c->adc_step = adc_step_of(apm_rd(au, c->d->adc_dgain_reg));
 		for (j = 0; j < 2; j++) {
 			struct t48s_stream *s = &c->st[j];
 
@@ -1228,14 +1653,7 @@ static int __init t48s_audio_init(void)
 		snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE, &t48s_pcm_ops);
 		snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV, &pdev->dev,
 						      MAX_BLKS * BLK_BYTES, MAX_BLKS * BLK_BYTES);
-
-		if (apm_rd(au, c->d->rate_reg) != APM_RATE_16K)
-			pr_warn(DRV_NAME ": %s: sample rate register is 0x%08x, not the 16 kHz setting\n",
-				c->d->name, apm_rd(au, c->d->rate_reg));
 	}
-	if ((apm_rd(au, APM_CTL) >> 28) != 0xf)
-		pr_warn(DRV_NAME ": APM codecs not enabled (control 0x%08x): cold start is not supported yet\n",
-			apm_rd(au, APM_CTL));
 
 	for (i = 0; i < ARRAY_SIZE(t48s_ctls); i++) {
 		rc = snd_ctl_add(card, snd_ctl_new1(&t48s_ctls[i], au));
@@ -1252,11 +1670,13 @@ static int __init t48s_audio_init(void)
 	rc = snd_card_register(card);
 	if (rc < 0)
 		goto fail_card;
+	the_audio = au;
 	pr_info(DRV_NAME ": codec A (hw:0,0) and codec B (hw:0,1), capture and playback, 16 kHz mono; outputs off\n");
 	return 0;
 
 fail_card:
 	pr_err(DRV_NAME ": init failed (%d)\n", rc);
+fail_quiet:
 	return rc;	/* this is built in: the few allocations are left behind */
 fail_pdev:
 	platform_device_unregister(pdev);
