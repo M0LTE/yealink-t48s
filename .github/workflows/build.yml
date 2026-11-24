@@ -8,6 +8,8 @@
 # v* tag. The SDK
 # is built only for tags and runs started by hand (gh workflow run build.yml), and
 # each of those also updates the rolling pre-release "sdk-latest" (sdk/README.md).
+# The same runs also make t48s-sources.tar.gz, the source that goes with the
+# binaries (NOTICE).
 # Every build of main, and every run started by hand, also updates the rolling
 # pre-release "system-latest": the system image and the kernel for the kernel
 # partition, with VERSION and SHA256SUMS. That is the updater's testing channel;
@@ -154,6 +156,31 @@ jobs:
           (cd "$RUNNER_TEMP/t48s-stick/install" && sha256sum T48S-kernel.uimg system.img > SHA256SUMS)
           ls k6-src/linux-*.tar.xz >/dev/null 2>&1 || cp "$RUNNER_TEMP"/k6/linux-*.tar.xz k6-src/
 
+      # The source that goes with the binaries (NOTICE, "Source for the binaries"):
+      # Buildroot's legal-info (the source archive, patches, licence text and
+      # manifest of every package in the image and in the SDK's toolchain), the
+      # Buildroot release itself, both kernel source archives, and this repository
+      # (kernel drivers, patches, configurations and device trees). About 470 MB,
+      # so only for a release or a run started by hand. Linux 3.6 has no LICENSES
+      # folder, which Buildroot's linux-headers package expects: COPYING is named.
+      - name: Source archive for a release (t48s-sources.tar.gz)
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: |
+          buildroot/build.sh "$RUNNER_TEMP/br" legal-info LINUX_HEADERS_LICENSE_FILES=COPYING
+          S="$RUNNER_TEMP/t48s-sources"
+          mkdir -p "$S/buildroot" "$S/linux"
+          mv "$RUNNER_TEMP/br/output/legal-info" "$S/buildroot/legal-info"
+          cp "$RUNNER_TEMP"/br/buildroot-*.tar.xz "$S/buildroot/"
+          cp "$RUNNER_TEMP"/k6/linux-6.*.tar.xz "$S/linux/"
+          # Linux 3.6.11 is already in legal-info while the headers come from it
+          [ -n "$(find "$S/buildroot/legal-info" -name linux-3.6.11.tar.xz | head -n 1)" ] || cp linux-3.6.11.tar.xz "$S/linux/"
+          git archive --prefix="yealink-t48s-$T48_VERSION/" -o "$S/yealink-t48s-$T48_VERSION.tar.gz" HEAD
+          sed "s/@VERSION@/$T48_VERSION/g; s/@COMMIT@/$GITHUB_SHA/g" tools/sources-readme.txt > "$S/README.txt"
+          # the archives inside are compressed already
+          tar -C "$RUNNER_TEMP" -I 'gzip -1' -cf "$RUNNER_TEMP/t48s-sources.tar.gz" t48s-sources
+          rm -rf "$S"
+          ls -l "$RUNNER_TEMP/t48s-sources.tar.gz"
+
       - name: Collect outputs
         run: |
           mkdir out
@@ -163,6 +190,7 @@ jobs:
           (cd "$RUNNER_TEMP/t48s-stick" && zip -q -r "$OLDPWD/out/t48s-stick.zip" T48S.rom T48S.bin T48S.rfs README.txt install)
           cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" "$RUNNER_TEMP/br/output/images/system.img" out/
           if [ -f "$RUNNER_TEMP/t48s-sdk.tar.gz" ]; then cp "$RUNNER_TEMP/t48s-sdk.tar.gz" out/; fi
+          if [ -f "$RUNNER_TEMP/t48s-sources.tar.gz" ]; then mv "$RUNNER_TEMP/t48s-sources.tar.gz" out/; fi
           gzip -9 out/rootfs.cpio
           (cd out && sha256sum * > SHA256SUMS)
           ls -l out
@@ -180,7 +208,7 @@ jobs:
         run: |
           (cd out && sha256sum t48s-sdk.tar.gz > t48s-sdk.tar.gz.sha256)
           git push -f origin "$GITHUB_SHA:refs/tags/sdk-latest"
-          notes="The newest app SDK, rebuilt by hand or for a release. Built from $GITHUB_REF_NAME at $GITHUB_SHA on $(date -u +%Y-%m-%d). How to use it: sdk/README.md."
+          notes="The newest app SDK, rebuilt by hand or for a release. Built from $GITHUB_REF_NAME at $GITHUB_SHA on $(date -u +%Y-%m-%d). How to use it: sdk/README.md. Source for the compiler and libraries inside: NOTICE in the repository."
           if gh release view sdk-latest >/dev/null 2>&1; then
             gh release edit sdk-latest --prerelease --latest=false --title "SDK (latest build)" --notes "$notes"
           else
@@ -199,7 +227,7 @@ jobs:
           cp out/VERSION out/system.img out/T48S-kernel.uimg latest/
           (cd latest && sha256sum VERSION system.img T48S-kernel.uimg > SHA256SUMS)
           git push -f origin "$GITHUB_SHA:refs/tags/system-latest"
-          notes="The newest build of the system image and the kernel, for testing: $T48_VERSION, built from $GITHUB_REF_NAME at $GITHUB_SHA. An installed phone follows it with: t48-update channel testing (docs/install.md). No SSH keys inside."
+          notes="The newest build of the system image and the kernel, for testing: $T48_VERSION, built from $GITHUB_REF_NAME at $GITHUB_SHA. An installed phone follows it with: t48-update channel testing (docs/install.md). No SSH keys inside. Source for Linux, busybox and the other third-party parts: NOTICE in the repository."
           if gh release view system-latest >/dev/null 2>&1; then
             gh release edit system-latest --prerelease --latest=false --title "System (latest build, testing)" --notes "$notes"
           else
@@ -216,4 +244,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
-            --notes "t48s-stick.zip is what a phone owner needs: unpack it onto a FAT32 USB stick, start the phone from it and install from the phone's own screen (docs/guide.md). It holds no keys and no password. Image-kexec (Linux 6.18) boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). t48s-live.tar.gz is the same system as the three files for a USB stick or TFTP (docs/live-image.md); it has not been cold-started on a phone yet. Image-kexec-linux3.6 is the same system on the old kernel, kept as a fallback for this release only. Image-kexec carries no SSH keys and no password, and SSH is off until it is turned on at the phone's screen (Settings, Access; docs/access.md). system.img is the system image built into it (docs/boot.md) and rootfs.cpio.gz the same files as an archive; t48s-sdk.tar.gz is the app SDK (sdk/README.md). An installed phone on the stable channel updates itself from system.img, and from T48S-kernel.uimg when asked (t48-update, docs/install.md)."
+            --notes "t48s-stick.zip is what a phone owner needs: unpack it onto a FAT32 USB stick, start the phone from it, and install from the phone's own screen if you want to keep it (docs/guide.md). Use a 5 V power supply of 1.5 A or more. It holds no keys and no password; SSH is off until it is turned on at the phone's screen (Settings, Access). The rest is for developers and for the updater: t48s-live.tar.gz is the same three start files for a TFTP server (docs/live-image.md); system.img and T48S-kernel.uimg are what an installed phone on the stable channel updates itself from (docs/install.md); rootfs.cpio.gz is the system image's files as an archive; Image-kexec (Linux 6.18) and Image-kexec-linux3.6 (the old kernel, kept as a fallback for this release only) start by kexec from Yealink's firmware; t48s-sdk.tar.gz is the app SDK (sdk/README.md). t48s-sources.tar.gz is the source that goes with these binaries: Linux, busybox and the other third-party packages, with their licences (NOTICE). Not affiliated with or endorsed by Yealink. Use at your own risk."
