@@ -18,7 +18,9 @@
  * 0x410 enable, 0x418 status, 0x41C clear.
  *
  * Which function a pin has is set in the chip control block (0x80000118 on,
- * 4 bits per pin) and is left as the boot loader set it.
+ * 4 bits per pin, 0 = plain GPIO). A pin that is asked for through this driver
+ * is switched to plain GPIO, whatever the boot loader left; pins nobody asks
+ * for keep the function they have.
  */
 #include <linux/gpio/driver.h>
 #include <linux/interrupt.h>
@@ -39,9 +41,14 @@
 #define GPIO_MIS	0x418		/* interrupt status */
 #define GPIO_IC		0x41c		/* interrupt clear, write 1 */
 
+#define CHIPC_PHYS	0x80000000
+#define CHIPC_GPIOMUX(pin)	(0x118 + 4 * ((pin) / 8))
+#define GPIO_BANK0_PHYS	0x80004000	/* each bank is 0x800 further on */
+
 struct bcmring_gpio {
 	struct gpio_chip gc;
 	void __iomem *base;
+	unsigned int first;		/* number of this bank's pin 0 on the SoC */
 };
 
 static void bcmring_gpio_change(void __iomem *reg, u32 bit, int on)
@@ -53,6 +60,30 @@ static void bcmring_gpio_change(void __iomem *reg, u32 bit, int on)
 	v = readl(reg);
 	writel(on ? v | bit : v & ~bit, reg);
 	local_irq_restore(flags);
+}
+
+/* a pin is being taken as a GPIO: make it one */
+static int bcmring_gpio_request(struct gpio_chip *gc, unsigned int offset)
+{
+	struct bcmring_gpio *g = gpiochip_get_data(gc);
+	unsigned int pin = g->first + offset;
+	u32 mask = 0xfu << ((pin % 8) * 4);
+	void __iomem *chipc = ioremap(CHIPC_PHYS, 0x1000);
+	unsigned long flags;
+	u32 v;
+
+	if (!chipc)
+		return -ENOMEM;
+	local_irq_save(flags);
+	v = readl(chipc + CHIPC_GPIOMUX(pin));
+	if (v & mask)
+		writel(v & ~mask, chipc + CHIPC_GPIOMUX(pin));
+	local_irq_restore(flags);
+	iounmap(chipc);
+	if (v & mask)
+		dev_info(gc->parent, "pin %u had function %u, now plain GPIO\n",
+			 pin, (v & mask) >> ((pin % 8) * 4));
+	return 0;
 }
 
 static int bcmring_gpio_get(struct gpio_chip *gc, unsigned int offset)
@@ -185,15 +216,19 @@ static int bcmring_gpio_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct gpio_irq_chip *girq;
 	struct bcmring_gpio *g;
+	struct resource *res;
 	u32 ngpios = 32;
 	int irq;
 
 	g = devm_kzalloc(dev, sizeof(*g), GFP_KERNEL);
 	if (!g)
 		return -ENOMEM;
-	g->base = devm_platform_ioremap_resource(pdev, 0);
+	g->base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(g->base))
 		return PTR_ERR(g->base);
+	if (res->start < GPIO_BANK0_PHYS)
+		return -EINVAL;
+	g->first = (res->start - GPIO_BANK0_PHYS) / 0x800 * 32;
 	device_property_read_u32(dev, "ngpios", &ngpios);
 	if (!ngpios || ngpios > 32)
 		return -EINVAL;
@@ -203,6 +238,7 @@ static int bcmring_gpio_probe(struct platform_device *pdev)
 	g->gc.owner = THIS_MODULE;
 	g->gc.base = -1;
 	g->gc.ngpio = ngpios;
+	g->gc.request = bcmring_gpio_request;
 	g->gc.get = bcmring_gpio_get;
 	g->gc.set = bcmring_gpio_set;
 	g->gc.get_direction = bcmring_gpio_get_direction;

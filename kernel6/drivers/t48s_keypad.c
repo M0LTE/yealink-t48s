@@ -5,7 +5,11 @@
  * Keys: the SoC's own keypad controller (KEYC) at 0x8000D000 scans a matrix
  * on GPIO43-58 and keeps the result in five status words, two columns of nine
  * row bits per word, a 0 bit meaning pressed. U-Boot (and Yealink's kernel)
- * leave it running, so normally there is nothing to set up.
+ * leave it running, so normally there is nothing to set up; if it is found
+ * off it is started here.
+ *   echo 1 > /sys/module/t48s_keypad/parameters/cold
+ * tests that: it resets the controller, gates its bus clock and gives its
+ * pins back, then starts it again.
  *
  * Hook: plain input GPIO29.
  *
@@ -217,7 +221,8 @@ static void t48s_keypad_poll(struct timer_list *unused)
 /*
  * Start the controller from nothing, in the order Yealink's driver and U-Boot
  * do it. Not needed after U-Boot or a kexec from Yealink (it is found
- * running); here for a boot path that skips both. Never exercised so far.
+ * running); here for a boot path that skips both. Exercised by the "cold"
+ * test hook below.
  */
 static int t48s_keypad_start(void)
 {
@@ -246,13 +251,58 @@ static int t48s_keypad_start(void)
 	writel(v, keyc + KEYC_CTRL);
 	writel(KEYC_REG18_VAL, keyc + KEYC_REG18);
 	writel(KEYC_PRESCALE_VAL, keyc + KEYC_PRESCALE);
-	v |= KEYC_CTRL_EN;
-	writel(v, keyc + KEYC_CTRL);
-	v |= KEYC_CTRL_IRQEN;
+	v |= KEYC_CTRL_EN;	/* its interrupt stays off: we poll */
 	writel(v, keyc + KEYC_CTRL);
 	msleep(50);	/* let it scan once before the first read */
 	return 0;
 }
+
+/* Test of the start above with no cold boot: reset the controller, gate its
+ * bus clock, make its pins plain GPIO, then start it again. Polling is held
+ * off meanwhile (a register of a block without its clock does not answer). */
+#define CHIPC_SOFTRESET1	0x80
+#define CHIPC_SOFTRESET1_KEYC	0x08000000
+
+static int cold_set(const char *val, const struct kernel_param *kp)
+{
+	void __iomem *chipc;
+	unsigned long flags;
+	u32 v;
+	int pin, rc;
+
+	if (!keys_dev || val[0] != '1')
+		return -EINVAL;
+	chipc = ioremap(CHIPC_PHYS, 0x1000);
+	if (!chipc)
+		return -ENOMEM;
+	timer_delete_sync(&poll_timer);
+	local_irq_save(flags);
+	v = readl(chipc + CHIPC_SOFTRESET1);
+	writel(v | CHIPC_SOFTRESET1_KEYC, chipc + CHIPC_SOFTRESET1);
+	udelay(100);
+	writel(v & ~CHIPC_SOFTRESET1_KEYC, chipc + CHIPC_SOFTRESET1);
+	pr_info(DRV_NAME ": test: after the reset control 0x%x, prescaler 0x%x\n",
+		readl(keyc + KEYC_CTRL), readl(keyc + KEYC_PRESCALE));
+	writel(readl(chipc + CHIPC_BUSCLK) & ~CHIPC_BUSCLK_KEYC, chipc + CHIPC_BUSCLK);
+	for (pin = KEYC_FIRST_PIN; pin <= KEYC_LAST_PIN; pin++) {
+		v = readl(chipc + CHIPC_GPIOMUX(pin));
+		v &= ~(0xfu << ((pin % 8) * 4));
+		writel(v, chipc + CHIPC_GPIOMUX(pin));
+	}
+	local_irq_restore(flags);
+	iounmap(chipc);
+	msleep(20);
+	rc = t48s_keypad_start();
+	pr_info(DRV_NAME ": test: started again (%d): control 0x%x, prescaler 0x%x, columns %03x %03x %03x %03x %03x\n",
+		rc, readl(keyc + KEYC_CTRL), readl(keyc + KEYC_PRESCALE),
+		readl(keyc + KEYC_STATUS(0)), readl(keyc + KEYC_STATUS(1)), readl(keyc + KEYC_STATUS(2)),
+		readl(keyc + KEYC_STATUS(3)), readl(keyc + KEYC_STATUS(4)));
+	mod_timer(&poll_timer, jiffies + POLL_JIFFIES);
+	return rc;
+}
+
+static const struct kernel_param_ops cold_ops = { .set = cold_set };
+module_param_cb(cold, &cold_ops, NULL, 0200);
 
 static int __init t48s_keypad_init(void)
 {
