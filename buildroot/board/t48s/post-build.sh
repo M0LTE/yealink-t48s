@@ -18,3 +18,8 @@ rm -f "$TARGET_DIR"/etc/dropbear
 # on /etc/t48-dev by the first stage.
 mkdir -p "$TARGET_DIR"/etc/t48-dev
 chmod 700 "$TARGET_DIR"/etc/t48-dev
+# What this image is, for About and the updater (docs/install.md): the first line
+# is the version. T48_VERSION names it (CI: the tag, or the date and commit of a
+# build of main); otherwise git says.
+V=${T48_VERSION:-$(git -C "$(dirname "$0")" describe --always --dirty 2>/dev/null)}
+printf '%s\nbuilt=%s\n' "${V:-development build}" "$(date -u +%Y-%m-%d)" > "$TARGET_DIR"/etc/t48-release

@@ -1,19 +1,38 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# t48-update: the two system slots of an installed phone (issue 31, docs/flash.md).
+# t48-update: updates for an installed phone (issue 31, docs/install.md).
+#
+# From a release channel:
+#   t48-update check                   ask the channel what its newest release is
+#   t48-update install                 download the channel's system image, check
+#                                      its SHA-256, write it to the slot that is
+#                                      not in use, mark it for one try
+#   t48-update kernel                  download the channel's kernel, check its
+#                                      SHA-256, write it with a read-back. Never
+#                                      done by "install": there is one kernel slot
+#   t48-update channel [stable|testing|URL]
+#                                      show or set the channel. stable is the
+#                                      newest release, testing the newest build of
+#                                      main, a URL the owner's own builds
+#   t48-update info                    everything the Settings screen and the web
+#                                      setup page show, as NAME=VALUE lines
+# By hand:
 #   t48-update status                  which slot is running, which starts next
 #   t48-update install FILE|URL [SHA256]
-#                                      write a system image to the slot that is not
-#                                      in use, read it back, and mark it to be tried
-#                                      once at the next start
-#   t48-update confirm                 run by rcS a minute after start: a slot on
-#                                      trial that got this far becomes the active one
-#                                      (so does a slot that had to stand in because
-#                                      the active one did not start)
+#   t48-update kernel FILE|URL SHA256
 #   t48-update switch                  try the other slot at the next start
-#   t48-update kernel FILE SHA256      write a kernel image to the kernel partition
-#                                      (rare; there is one kernel slot and no way
-#                                      back from a bad one but recovery mode)
+# Run by rcS:
+#   t48-update boot                    note an update that did not start
+#   t48-update confirm                 a minute after start: a slot on trial that
+#                                      got this far becomes the active one (so
+#                                      does a slot that had to stand in because
+#                                      the active one did not start)
+#
+# A channel is a folder on a web server holding four files:
+#   VERSION            one line, the release's name
+#   SHA256SUMS         sha256sum's output over the files below
+#   system.img         the system image
+#   T48S-kernel.uimg   the kernel with its first stage, as the kernel partition holds it
 #
 # A slot is tried once. If the phone does not stay up for a minute on it, the
 # next start goes back to the slot that worked. The rules are in
@@ -21,48 +40,246 @@
 . "${T48_SLOTS:-/usr/lib/t48/slots.sh}"
 RUN=${T48_RUN:-/run}
 TMP=${T48_TMP:-/tmp}
+CONF=${T48_UPDATE_CONF:-/data/config/update}
+KEEP=${T48_UPDATE_KEEP:-/data/phone}
+RELEASE=${T48_RELEASE:-/etc/t48-release}
+CA=${T48_CA:-/etc/ssl/certs/ca-certificates.crt}
+GITHUB=${T48_UPDATE_GITHUB:-https://github.com/M0LTE/yealink-t48s/releases}
+W=$RUN/t48-update
+KERNEL_MAX=2621440
+
 die() { echo "$*" >&2; exit 1; }
 booted() { sed -n 's/^slot=//p' "$RUN/t48-slot" 2>/dev/null; }
 installed() { slot_vol system-a >/dev/null && slot_vol system-b >/dev/null && slot_vol bootstate0 >/dev/null && slot_vol bootstate1 >/dev/null; }
+version() { head -n 1 "$RELEASE" 2>/dev/null | grep . || echo unknown; }
+now() { date +%s; }
+get() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n 1; }
+
+# what the screen shows while something runs, and when it has stopped
+state() { mkdir -p "$W"; printf 'state=%s\nmessage=%s\n' "$1" "$2" > "$W/state.new" && mv "$W/state.new" "$W/state"; }
+# the last result, kept across the restart that follows an update
+result() { mkdir -p "$KEEP" 2>/dev/null; printf 'result=%s\ntime=%s\n' "$1" "$(now)" > "$KEEP/update-result" 2>/dev/null; }
+# stop: the reason on stderr, on the screen and as the last result
+stop() { state failed "$1"; result "$1"; unlock; die "$1"; }
+
+# one at a time
+lock() {
+    mkdir -p "$W"
+    if ! mkdir "$W/lock" 2>/dev/null; then
+        kill -0 "$(cat "$W/lock/pid" 2>/dev/null)" 2>/dev/null && die "Update already running"
+        rm -rf "$W/lock"; mkdir "$W/lock" || die "Update already running"
+    fi
+    echo $$ > "$W/lock/pid"
+    LOCKED=1
+}
+unlock() { [ -z "$LOCKED" ] || rm -rf "$W/lock"; LOCKED=; }
+
+channel() { c=$(get "$CONF" channel); echo "${c:-stable}"; }
+base() {
+    case "$(channel)" in
+    stable) echo "$GITHUB/latest/download" ;;
+    testing) echo "$GITHUB/download/system-latest" ;;
+    *) channel | sed 's|/*$||' ;;
+    esac
+}
+fetch() { curl -fsSL --connect-timeout 20 --max-time 900 --cacert "$CA" -o "$2" "$1"; }
+# sum_of FILE: its line in the channel's SHA256SUMS
+sum_of() { sed -n "s/^\([0-9a-f]\{64\}\)  *\*\{0,1\}$1\$/\1/p" "$W/SHA256SUMS" | head -n 1; }
+
+# the kernel partition's image as a file would hold it: the size is in its header
+kernel_mtd() { sed -n 's/^mtd\([0-9]*\):.*"t48kernel"$/\1/p' "${T48_PROC:-/proc}/mtd" 2>/dev/null; }
+kernel_sum() {
+    _m=$(kernel_mtd); [ -n "$_m" ] || return 1
+    _k=$T48_DEV/mtd$_m
+    [ "$(head -c 4 "$_k" | od -An -tx1 | tr -d ' ')" = 27051956 ] || return 1
+    _n=$(( 0x$(head -c 16 "$_k" | tail -c 4 | od -An -tx1 | tr -d ' ') + 64 ))
+    [ "$_n" -le $KERNEL_MAX ] || return 1
+    head -c "$_n" "$_k" | sha256sum | cut -d' ' -f1
+}
+
+# do_check: fetch the channel's VERSION and SHA256SUMS and write down what they say
+do_check() {
+    b=$(base)
+    state checking ""
+    rm -f "$W/latest"
+    fetch "$b/VERSION" "$W/VERSION.new" && fetch "$b/SHA256SUMS" "$W/SHA256SUMS.new" || { rm -f "$W"/*.new; return 1; }
+    mv "$W/VERSION.new" "$W/VERSION"; mv "$W/SHA256SUMS.new" "$W/SHA256SUMS"
+    latest=$(head -n 1 "$W/VERSION" | tr -cd 'A-Za-z0-9._+-' | head -c 60)
+    sys=$(sum_of system.img)
+    [ -n "$latest" ] && [ -n "$sys" ] || return 1
+    ker=$(sum_of T48S-kernel.uimg)
+    cur=$(booted)
+    up=yes
+    case "$cur" in a|b) [ "$(slot_sum "$cur")" != "$sys" ] || up=no ;; esac
+    k=unknown
+    if [ -n "$ker" ] && ksum=$(kernel_sum); then
+        if [ "$ksum" = "$ker" ]; then k=same; else k=differs; fi
+    fi
+    printf 'latest=%s\nsystem=%s\nkernel_sum=%s\nupdate=%s\nkernel=%s\nchecked=%s\nbase=%s\n' \
+        "$latest" "$sys" "$ker" "$up" "$k" "$(now)" "$b" > "$W/latest"
+}
+
+# write_system FILE [SHA256] [NAME]: into the slot that is not in use
+write_system() {
+    f=$1
+    [ -f "$f" ] || { ERR="No such file: $f"; return 1; }
+    [ "$(head -c 4 "$f")" = hsqs ] || { ERR="Not a system image"; return 1; }
+    sum=$(sha256sum < "$f" | cut -d' ' -f1)
+    [ -z "$2" ] || [ "$sum" = "$2" ] || { ERR="Checksum mismatch"; return 1; }
+    state_read
+    cur=$(booted)
+    case "$cur" in a|b) target=$(slot_other "$cur") ;; *) target=$(slot_other "$S_ACTIVE") ;; esac
+    # never the slot that is running, never the one known to work
+    [ "$target" != "$S_ACTIVE" ] || { ERR="Slot $cur is on trial. Try again in a minute"; return 1; }
+    v=$(slot_vol "system-$target")
+    d=$T48_UBISYS/${v##*/}
+    room=$(( $(cat "$d/reserved_ebs") * $(cat "$d/usable_eb_size") ))
+    [ "$(wc -c < "$f")" -le "$room" ] || { ERR="Too large for a slot"; return 1; }
+    state writing ""
+    # no trial while the slot is being rewritten
+    [ "$S_TRIAL" = - ] || state_write "$S_ACTIVE" - 0 || { ERR="Flash write failed"; return 1; }
+    ubiupdatevol "$v" "$f" || { ERR="Flash write failed"; return 1; }
+    [ "$(slot_sum "$target")" = "$sum" ] || { ERR="Slot $target does not read back"; return 1; }
+    state_write "$S_ACTIVE" "$target" 1 || { ERR="Flash write failed"; return 1; }
+    # for the result once it has started, or has not
+    mkdir -p "$KEEP" 2>/dev/null
+    printf 'slot=%s\nversion=%s\n' "$target" "${3:-$(echo "$sum" | cut -c1-12)}" > "$KEEP/update-pending" 2>/dev/null
+    TARGET=$target
+}
+
+# write_kernel FILE SHA256
+write_kernel() {
+    grep -qw t48boot=live "${T48_PROC:-/proc}/cmdline" && { ERR="Started without installing: the flash is left alone"; return 1; }
+    M=$(kernel_mtd)
+    [ -n "$M" ] || { ERR="This kernel cannot write the kernel partition"; return 1; }
+    [ "$(sha256sum < "$1" | cut -d' ' -f1)" = "$2" ] || { ERR="Checksum mismatch"; return 1; }
+    [ "$(head -c 4 "$1" | od -An -tx1 | tr -d ' ')" = 27051956 ] || { ERR="Not a kernel image"; return 1; }
+    [ "$(wc -c < "$1")" -le $KERNEL_MAX ] || { ERR="Too large for the kernel partition"; return 1; }
+    # U-Boot reads as much as the header says: that must be the whole file
+    [ $(( 0x$(head -c 16 "$1" | tail -c 4 | od -An -tx1 | tr -d ' ') + 64 )) = "$(wc -c < "$1")" ] || { ERR="Not a kernel image"; return 1; }
+    L=${T48_LOCK:-/sys/module/t48s_nand/parameters/lock}
+    state writing ""
+    echo open-kernel > "$L" || { ERR="Lock did not open"; return 1; }
+    nandrestore -b "$T48_DEV/mtd$M" < "$1"
+    rc=$?
+    echo close-kernel > "$L"
+    [ $rc = 0 ] && [ "$(kernel_sum)" = "$2" ] || { ERR="KERNEL WRITE FAILED. Do not restart: write it again, or restore (docs/install.md)"; return 1; }
+}
 
 case "$1" in
 status)
     installed || { echo "Not installed"; exit 0; }
     state_read
+    echo "Version: $(version)"
     echo "Running: $(booted)"
     echo "Active: $S_ACTIVE"
     [ "$S_TRIAL" = - ] || echo "On trial: $S_TRIAL, tries left $S_TRIES"
     note=$(sed -n 's/^note=//p' "$RUN/t48-slot" 2>/dev/null)
     case "$note" in failed=*) echo "Last update failed: slot ${note#failed=} did not start, went back" ;; esac
-    for s in a b; do echo "Slot $s: $(slot_sum $s || echo unreadable)"; done ;;
+    for s in a b; do echo "Slot $s: $(slot_sum $s || echo unreadable)"; done
+    echo "Channel: $(channel)"
+    r=$(get "$KEEP/update-result" result); [ -z "$r" ] || echo "Last result: $r" ;;
+info)
+    if installed; then
+        state_read
+        printf 'installed=yes\nslot=%s\nactive=%s\ntrial=%s\n' "$(booted)" "$S_ACTIVE" "$S_TRIAL"
+    else
+        echo "installed=no"
+    fi
+    echo "version=$(version)"
+    echo "channel=$(channel)"
+    echo "url=$(base)"
+    # what the last check found, if it was this channel
+    if [ "$(get "$W/latest" base)" = "$(base)" ]; then
+        grep -E '^(latest|update|kernel|checked)=' "$W/latest"
+    else
+        printf 'latest=\nupdate=unknown\nkernel=unknown\nchecked=\n'
+    fi
+    st=$(get "$W/state" state); msg=$(get "$W/state" message)
+    # a run that died without saying so
+    case "$st" in checking|downloading|writing)
+        kill -0 "$(cat "$W/lock/pid" 2>/dev/null)" 2>/dev/null || { st=failed; msg="Update stopped"; } ;;
+    esac
+    # a slot written and waiting for the restart
+    [ "$st" = restart ] || [ "${S_TRIAL:--}" = - ] || [ "$S_TRIES" != 1 ] || st=restart
+    echo "state=${st:-idle}"
+    echo "message=$msg"
+    echo "result=$(get "$KEEP/update-result" result)"
+    echo "result_time=$(get "$KEEP/update-result" time)" ;;
+channel)
+    [ -n "$2" ] || { channel; exit 0; }
+    case "$2" in
+    stable|testing) ;;
+    http://?*|https://?*) case "$2" in *[!A-Za-z0-9:/._~%+-]*) die "Not a URL" ;; esac ;;
+    *) die "usage: t48-update channel [stable|testing|URL]" ;;
+    esac
+    mkdir -p "${CONF%/*}"
+    { grep -v '^channel=' "$CONF" 2>/dev/null; echo "channel=$2"; } > "$CONF.new" && mv "$CONF.new" "$CONF" || die "Not saved"
+    rm -f "$W/latest"
+    echo "Channel: $2" ;;
+check)
+    lock
+    do_check || stop "No release found"
+    state idle ""
+    unlock
+    echo "Latest: $(get "$W/latest" latest)"
+    case "$(get "$W/latest" update)" in yes) echo "Update available" ;; *) echo "Up to date" ;; esac
+    [ "$(get "$W/latest" kernel)" != differs ] || echo "Kernel differs: t48-update kernel" ;;
 install)
-    [ -n "$2" ] || die "usage: t48-update install FILE|URL [SHA256]"
     installed || die "Not installed: no system slots"
-    f=$2
+    lock
+    f=$2; want=$3; name=
+    if [ -z "$f" ]; then
+        # from the channel
+        do_check || stop "No release found"
+        want=$(get "$W/latest" system); name=$(get "$W/latest" latest)
+        [ "$(get "$W/latest" update)" = yes ] || { state idle ""; unlock; echo "Up to date"; exit 0; }
+        f=$(base)/system.img
+    fi
     case "$f" in
     http://*|https://*)
-        f=$TMP/t48-update.img
-        curl -fsSL --cacert /etc/ssl/certs/ca-certificates.crt -o "$f" "$2" || die "Download failed" ;;
+        state downloading ""
+        fetch "$f" "$TMP/t48-update.img" || { rm -f "$TMP/t48-update.img"; stop "Download failed"; }
+        f=$TMP/t48-update.img ;;
     esac
-    [ -f "$f" ] || die "No such file: $f"
-    [ "$(head -c 4 "$f")" = hsqs ] || die "Not a system image"
-    sum=$(sha256sum < "$f" | cut -d' ' -f1)
-    [ -z "$3" ] || [ "$sum" = "$3" ] || die "Checksum mismatch"
-    state_read
-    cur=$(booted)
-    case "$cur" in a|b) target=$(slot_other "$cur") ;; *) target=$(slot_other "$S_ACTIVE") ;; esac
-    # never the slot that is running, never the one known to work
-    [ "$target" != "$S_ACTIVE" ] || die "Slot $cur is on trial. Try again in a minute"
-    v=$(slot_vol "system-$target")
-    d=$T48_UBISYS/${v#/dev/}
-    room=$(( $(cat "$d/reserved_ebs") * $(cat "$d/usable_eb_size") ))
-    [ "$(wc -c < "$f")" -le "$room" ] || die "Too large for a slot"
-    # no trial while the slot is being rewritten
-    [ "$S_TRIAL" = - ] || state_write "$S_ACTIVE" - 0 || die "Flash write failed"
-    ubiupdatevol "$v" "$f" || die "Flash write failed"
-    [ "$(slot_sum "$target")" = "$sum" ] || die "Slot $target does not read back"
-    state_write "$S_ACTIVE" "$target" 1 || die "Flash write failed"
-    echo "Slot $target written. Restart to try it" ;;
+    write_system "$f" "$want" "$name" || { rm -f "$TMP/t48-update.img"; stop "$ERR"; }
+    rm -f "$TMP/t48-update.img"
+    state restart ""
+    unlock
+    echo "Slot $TARGET written. Restart to try it" ;;
+kernel)
+    lock
+    f=$2; want=$3
+    if [ -z "$f" ]; then
+        do_check || stop "No release found"
+        want=$(get "$W/latest" kernel_sum)
+        [ -n "$want" ] || stop "No kernel in this release"
+        [ "$(get "$W/latest" kernel)" != same ] || { state idle ""; unlock; echo "Kernel up to date"; exit 0; }
+        f=$(base)/T48S-kernel.uimg
+    fi
+    [ -n "$want" ] || { unlock; die "usage: t48-update kernel [FILE|URL SHA256]"; }
+    case "$f" in
+    http://*|https://*)
+        state downloading ""
+        fetch "$f" "$TMP/t48-update.kernel" || { rm -f "$TMP/t48-update.kernel"; stop "Download failed"; }
+        f=$TMP/t48-update.kernel ;;
+    esac
+    [ -f "$f" ] || stop "No such file: $f"
+    write_kernel "$f" "$want" || { rm -f "$TMP/t48-update.kernel"; stop "$ERR"; }
+    rm -f "$TMP/t48-update.kernel" "$W/latest"
+    result "Kernel written"
+    state restart ""
+    unlock
+    echo "Kernel written. Restart to use it" ;;
+boot)
+    installed || exit 0
+    note=$(sed -n 's/^note=//p' "$RUN/t48-slot" 2>/dev/null)
+    case "$note" in
+    failed=*)
+        v=$(get "$KEEP/update-pending" version)
+        result "${v:-Update} did not start, went back"
+        rm -f "$KEEP/update-pending" ;;
+    esac ;;
 confirm)
     installed || exit 0
     cur=$(booted)
@@ -72,7 +289,12 @@ confirm)
     [ "$cur" = "$S_TRIAL" ] || { [ "$S_TRIAL" = - ] && [ "$cur" != "$S_ACTIVE" ]; } || { [ "$S_VALID" = 0 ] && [ "$cur" = "$S_ACTIVE" ]; } || exit 0
     # well enough: the shell is up
     [ -n "$T48_NO_SV" ] || sv status /run/service/shell 2>/dev/null | grep -q '^run:' || exit 1
+    was=$S_TRIAL
     state_write "$cur" - 0 || die "Flash write failed"
+    if [ "$cur" = "$was" ]; then
+        result "$(version) installed"
+        rm -f "$KEEP/update-pending"
+    fi
     echo "Slot $cur confirmed" ;;
 switch)
     installed || die "Not installed: no system slots"
@@ -81,20 +303,5 @@ switch)
     [ -n "$(slot_sum "$o")" ] || die "Slot $o is empty or unreadable"
     state_write "$S_ACTIVE" "$o" 1 || die "Flash write failed"
     echo "Slot $o will be tried at the next start" ;;
-kernel)
-    [ -f "$2" ] && [ -n "$3" ] || die "usage: t48-update kernel FILE SHA256"
-    grep -qw t48boot=live /proc/cmdline && die "Started without installing: the flash is left alone"
-    M=$(sed -n 's/^mtd\([0-9]*\):.*"t48kernel"$/\1/p' /proc/mtd)
-    [ -n "$M" ] || die "This kernel cannot write the kernel partition"
-    [ "$(sha256sum < "$2" | cut -d' ' -f1)" = "$3" ] || die "Checksum mismatch"
-    [ "$(head -c 4 "$2" | od -An -tx1 | tr -d ' ')" = 27051956 ] || die "Not a kernel image"
-    [ "$(wc -c < "$2")" -le 2621440 ] || die "Too large for the kernel partition"
-    L=/sys/module/t48s_nand/parameters/lock
-    echo open-kernel > $L || die "Lock did not open"
-    nandrestore -b "/dev/mtd$M" < "$2"
-    rc=$?
-    echo close-kernel > $L
-    [ $rc = 0 ] || die "KERNEL WRITE FAILED. Do not restart: write it again, or restore (docs/install.md)"
-    echo "Kernel written. Restart to use it" ;;
-*)  echo "usage: t48-update status | install FILE|URL [SHA256] | confirm | switch | kernel FILE SHA256" >&2; exit 2 ;;
+*)  echo "usage: t48-update status | info | check | install [FILE|URL [SHA256]] | kernel [FILE|URL SHA256] | channel [stable|testing|URL] | switch" >&2; exit 2 ;;
 esac

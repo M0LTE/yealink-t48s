@@ -3,6 +3,12 @@ mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev 2>/dev/null
 mkdir -p /dev/pts && mount -t devpts devpts /dev/pts   # SSH logins need ptys
+# The serial port's interrupt (issue 59): after U-Boot alone the SoC counts the
+# port as a secure device and sends its interrupt where Linux never sees it, so
+# the serial shell is deaf and its output stops when the FIFO fills. One bit in the
+# TrustZone block register makes it an ordinary device. Kernels from 2026-11-25
+# do this themselves (kernel6/drivers/t48s_secure.c); this is for the ones before.
+grep -q 't48boot=' /proc/cmdline && ( devmem 0x80008004 32 0x8 ) >/dev/null 2>&1
 # The system image is read-only; the first stage has put /run and /tmp in RAM
 # (docs/boot.md). root's password file changes (the Access page's password door), so a
 # copy in /run goes over it.
@@ -50,6 +56,8 @@ t48-access boot
 t48-live boot
 # the services runsvdir is about to start (inittab)
 t48-services
+# an update that did not start is written down for the Update screen
+t48-update boot
 # a system slot on its one try becomes the phone's own once it has run for a
 # minute with the shell up (issue 31, t48-update)
 ( sleep 60; t48-update confirm ) >/dev/null 2>&1 &

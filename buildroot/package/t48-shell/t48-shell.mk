@@ -11,7 +11,7 @@ T48_SHELL_SITE_METHOD = local
 T48_SHELL_LICENSE = AGPL-3.0-or-later
 T48_SHELL_DEPENDENCIES = libt48
 # what Settings, About shows: the copy of the source Buildroot builds from has no git
-T48_SHELL_GIT_VERSION = $(shell git -C $(BR2_EXTERNAL_T48S_PATH) describe --always --dirty 2>/dev/null)
+T48_SHELL_GIT_VERSION = $(if $(T48_VERSION),$(T48_VERSION),$(shell git -C $(BR2_EXTERNAL_T48S_PATH) describe --always --dirty 2>/dev/null))
 
 # linked against the libt48 in staging (LIB=...), not a copy built here; the
 # audio service's control header comes from audiod/include

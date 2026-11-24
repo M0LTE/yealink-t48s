@@ -1,0 +1,139 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# test-update.sh: the updater's network side on any PC, no root (issue 31,
+# docs/install.md). The phone's own t48-update and slots.sh run against files
+# standing in for the UBI volumes and the kernel partition, and a web server on
+# this machine standing in for a release channel. What it shows: check, install
+# and kernel from a channel, the checksums, what the Settings screen is told,
+# and every refusal. The flash itself and the start after an update are
+# tools/test-install.sh's business.
+set -e
+HERE=$(cd "$(dirname "$0")/.." && pwd)
+T=$(mktemp -d)
+trap 'kill $SRV 2>/dev/null; rm -rf "$T"' EXIT
+pass() { echo "ok   $*"; }
+fail() { echo "FAIL $*" >&2; exit 1; }
+sum() { sha256sum < "$1" | cut -d' ' -f1; }
+
+# the phone: four volumes, a kernel partition, a lock
+mkdir -p "$T/sys" "$T/dev" "$T/proc" "$T/run" "$T/tmp" "$T/data/config" "$T/data/phone" "$T/bin" "$T/chan"
+n=0
+for v in system-a system-b bootstate0 bootstate1; do
+    mkdir "$T/sys/ubi0_$n"; echo $v > "$T/sys/ubi0_$n/name"
+    echo 160 > "$T/sys/ubi0_$n/reserved_ebs"; echo 126976 > "$T/sys/ubi0_$n/usable_eb_size"
+    : > "$T/dev/ubi0_$n"; n=$((n + 1))
+done
+printf 'mtd7: 00280000 00020000 "t48kernel"\n' > "$T/proc/mtd"
+echo "console=ttyAMA0 t48boot=flash" > "$T/proc/cmdline"
+cat > "$T/bin/ubiupdatevol" <<'EOS'
+#!/bin/sh
+cp "$2" "$1"
+EOS
+# the plain file, then ff to the end of the partition, as the flash reads back
+cat > "$T/bin/nandrestore" <<'EOS'
+#!/bin/sh
+[ "$1" = -b ] || exit 2
+[ "$(cat "$T48_LOCK")" = open-kernel ] || exit 1
+cat > "$2"
+EOS
+chmod +x "$T/bin/"*
+export PATH="$T/bin:$PATH" T48_SLOTS="$HERE/buildroot/board/t48s/rootfs-overlay/usr/lib/t48/slots.sh"
+export T48_UBISYS="$T/sys" T48_DEV="$T/dev" T48_PROC="$T/proc" T48_RUN="$T/run" T48_TMP="$T/tmp" T48_LOCK="$T/lock"
+export T48_UPDATE_CONF="$T/data/config/update" T48_UPDATE_KEEP="$T/data/phone" T48_RELEASE="$T/release" T48_CA=/dev/null T48_NO_SV=1
+UPD="sh $HERE/buildroot/board/t48s/rootfs-overlay/usr/bin/t48-update"
+info() { $UPD info | sed -n "s/^$1=//p"; }
+
+# images: a system image is anything that starts hsqs; a kernel is a U-Boot image
+mksys() { { printf hsqs; echo "$1"; head -c 3000 /dev/zero; } > "$2"; }
+mkker() { python3 -c "
+import struct,sys
+body=sys.argv[1].encode()*500
+sys.stdout.buffer.write(struct.pack('>7I',0x27051956,0,0,len(body),0x408000,0x408000,0)+bytes(36)+body)" "$1" > "$2"; }
+publish() { # VERSION SYSTEM KERNEL
+    echo "$1" > "$T/chan/VERSION"; cp "$2" "$T/chan/system.img"; cp "$3" "$T/chan/T48S-kernel.uimg"
+    ( cd "$T/chan" && sha256sum system.img T48S-kernel.uimg > SHA256SUMS )
+}
+mksys one "$T/sys1.img"; mksys two "$T/sys2.img"; mkker k1 "$T/k1.uimg"; mkker k2 "$T/k2.uimg"
+
+# installed: version one in slot a, kernel k1
+. "$T48_SLOTS"
+cp "$T/sys1.img" "$T/dev/ubi0_0"; cp "$T/k1.uimg" "$T/dev/mtd7"
+state_read; state_write a - 0
+printf 'slot=a\nnote=\n' > "$T/run/t48-slot"
+echo "v1" > "$T/release"
+
+PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+( cd "$T" && exec python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 ) &
+SRV=$!
+for i in 1 2 3 4 5 6 7 8 9 10; do curl -fs "http://127.0.0.1:$PORT/" >/dev/null 2>&1 && break; sleep 0.3; done
+URL=http://127.0.0.1:$PORT/chan
+
+[ "$($UPD channel)" = stable ] && pass "the channel is stable until the owner says otherwise" || fail "default channel"
+[ "$(info url)" = https://github.com/M0LTE/yealink-t48s/releases/latest/download ] && pass "stable is the newest release on GitHub" || fail "stable url"
+$UPD channel testing >/dev/null
+[ "$(info url)" = https://github.com/M0LTE/yealink-t48s/releases/download/system-latest ] && pass "testing is the rolling build of main" || fail "testing url"
+if $UPD channel "ftp://x" 2>/dev/null || $UPD channel 'http://x/$(reboot)' 2>/dev/null; then fail "a bad channel was accepted"; fi
+pass "a channel that is not stable, testing or a plain URL is refused"
+$UPD channel "$URL/" >/dev/null
+[ "$(info url)" = "$URL" ] && [ "$(info update)" = unknown ] && pass "the owner's own URL; nothing known before a check" || fail "own url"
+
+if $UPD check 2>/dev/null; then fail "a check with nothing published passed"; fi
+[ "$(info state)" = failed ] && [ "$(info message)" = "No release found" ] && pass "nothing published: No release found" || fail "empty channel"
+
+publish v1 "$T/sys1.img" "$T/k1.uimg"
+$UPD check | sed 's/^/     /'
+[ "$(info latest)" = v1 ] && [ "$(info update)" = no ] && [ "$(info kernel)" = same ] && [ "$(info state)" = idle ] && pass "check: the channel holds what is running: up to date, kernel the same" || fail "check up to date"
+[ "$($UPD install)" = "Up to date" ] && pass "install with nothing new does nothing" || fail "install up to date"
+
+publish v2 "$T/sys2.img" "$T/k2.uimg"
+$UPD check >/dev/null
+[ "$(info latest)" = v2 ] && [ "$(info update)" = yes ] && [ "$(info kernel)" = differs ] && pass "check: v2 published: update available, kernel differs" || fail "check v2"
+
+# a download that is not what SHA256SUMS says
+cp "$T/chan/system.img" "$T/keep"; mksys evil "$T/chan/system.img"
+if $UPD install 2>/dev/null; then fail "an image that does not match SHA256SUMS was installed"; fi
+[ "$(info message)" = "Checksum mismatch" ] && [ ! -s "$T/dev/ubi0_1" ] && pass "an image that does not match SHA256SUMS: Checksum mismatch, nothing written" || fail "checksum"
+grep -q "result=Checksum mismatch" "$T/data/phone/update-result" && pass "and that is kept as the last result" || fail "result kept"
+cp "$T/keep" "$T/chan/system.img"
+
+$UPD install | sed 's/^/     /'
+state_read
+[ "$S_ACTIVE $S_TRIAL $S_TRIES" = "a b 1" ] && cmp -s "$T/dev/ubi0_1" "$T/sys2.img" && pass "install: v2 downloaded, checked, in slot b, on trial" || fail "install"
+[ "$(info state)" = restart ] && pass "the screen is told a restart is wanted" || fail "restart state"
+cmp -s "$T/dev/mtd7" "$T/k1.uimg" && pass "install leaves the kernel alone" || fail "kernel touched by install"
+
+# the restart: slot b on its try, then a healthy minute
+rm -rf "$T/run/t48-update"; state_write a b 0; printf 'slot=b\nnote=trial\n' > "$T/run/t48-slot"; echo v2 > "$T/release"
+$UPD boot; $UPD confirm >/dev/null
+state_read; [ "$S_ACTIVE $S_TRIAL" = "b -" ] && [ "$(info result)" = "v2 installed" ] && pass "after the restart and a minute: slot b active, last result v2 installed" || fail "confirm"
+
+# the next one does not start: back on b with the note
+mksys three "$T/sys3.img"; publish v3 "$T/sys3.img" "$T/k2.uimg"
+$UPD install >/dev/null
+rm -rf "$T/run/t48-update"; state_read; state_write b - 0; printf 'slot=b\nnote=failed=a\n' > "$T/run/t48-slot"
+$UPD boot
+[ "$(info result)" = "v3 did not start, went back" ] && pass "an update that did not start: v3 did not start, went back" || fail "failed note: $(info result)"
+printf 'slot=b\nnote=\n' > "$T/run/t48-slot"
+
+# the kernel
+if $UPD kernel "$T/k2.uimg" 0000 2>/dev/null; then fail "a kernel with the wrong checksum was written"; fi
+head -c 1000 "$T/k2.uimg" > "$T/short.uimg"
+if $UPD kernel "$T/short.uimg" "$(sum "$T/short.uimg")" 2>/dev/null; then fail "a kernel cut short was written"; fi
+if $UPD kernel "$T/sys2.img" "$(sum "$T/sys2.img")" 2>/dev/null; then fail "a system image was written as a kernel"; fi
+cmp -s "$T/dev/mtd7" "$T/k1.uimg" && pass "kernel: wrong checksum, cut short, not a kernel: all refused, partition untouched" || fail "kernel refusals"
+$UPD kernel | sed 's/^/     /'
+cmp -s "$T/dev/mtd7" "$T/k2.uimg" && [ "$(cat "$T/lock")" = close-kernel ] && pass "kernel from the channel: downloaded, checked, written, read back, lock closed" || fail "kernel write"
+$UPD check >/dev/null; [ "$(info kernel)" = same ] && pass "check: kernel the same" || fail "kernel same"
+[ "$($UPD kernel)" = "Kernel up to date" ] && pass "kernel with nothing new does nothing" || fail "kernel up to date"
+echo "console=ttyAMA0 t48boot=live" > "$T/proc/cmdline"
+if $UPD kernel "$T/k1.uimg" "$(sum "$T/k1.uimg")" 2>/dev/null; then fail "a kernel was written on a live start"; fi
+pass "started without installing: the kernel is refused"
+echo "console=ttyAMA0 t48boot=flash" > "$T/proc/cmdline"
+
+# two at once
+mkdir -p "$T/run/t48-update/lock"; echo $$ > "$T/run/t48-update/lock/pid"
+if $UPD check 2>/dev/null; then fail "two updates ran at once"; fi
+pass "a second run while one is going is refused"
+echo 999999 > "$T/run/t48-update/lock/pid"
+$UPD check >/dev/null && pass "a lock left by a run that died is taken over" || fail "stale lock"
+echo "all updater tests passed"

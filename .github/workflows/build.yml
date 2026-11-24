@@ -42,6 +42,9 @@ jobs:
       - name: Web setup page tests (the handlers, then with the shell)
         run: make -C webconfig check
 
+      - name: Updater tests (check, install and kernel from a channel, on files)
+        run: sh tools/test-update.sh
+
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 150

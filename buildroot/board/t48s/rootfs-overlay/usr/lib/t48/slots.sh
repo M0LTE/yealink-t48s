@@ -21,13 +21,14 @@
 # finds trial set with no tries left, drops it, and starts active again.
 T48_UBI=${T48_UBI:-0}
 T48_UBISYS=${T48_UBISYS:-/sys/class/ubi}
+T48_DEV=${T48_DEV:-/dev}
 T48_SLOT_LEBS=160        # 20 MB a slot
 
 # slot_vol NAME: the device of the volume with that name
 slot_vol() {
     for _d in "$T48_UBISYS"/ubi"${T48_UBI}"_*; do
         if [ "$(cat "$_d/name" 2>/dev/null)" = "$1" ]; then
-            echo "/dev/${_d##*/}"
+            echo "$T48_DEV/${_d##*/}"
             return 0
         fi
     done
