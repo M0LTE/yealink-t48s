@@ -1,0 +1,290 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# t48-install: install our firmware from the USB stick the phone was started from,
+# and go back (issue 33, docs/installer.md). Run by Settings, Install; by hand too.
+#
+#   t48-install status     what is there: the stick, a backup, what the flash holds
+#   t48-install backup     copy the whole flash to the stick, spare bytes included,
+#                          and check the copy three ways
+#   t48-install install    write the kernel and app partitions. Only with a
+#                          checked backup of this phone on the stick
+#   t48-install restore    put the backup's kernel and app partitions back
+#   t48-install restart    restart the phone
+#
+# Only on a phone started through recovery mode (t48boot=live): nothing of the
+# flash is in use then. What is written: the kernel partition and the app
+# partition, and nothing else; the flash driver cannot write anything else
+# (kernel6/drivers/t48s_nand.c). Every step can be run again after a power cut.
+#
+# On the stick: the three files the phone started from, install/ (the kernel
+# file, the system image, SHA256SUMS) and, made here, t48s-backup/.
+#
+# With --machine as the first word, progress goes out as lines for the shell:
+#   step PERCENT text      done text      error text
+# T48_* variables are for the rehearsal on a PC (tools/test-owner.sh).
+set -u
+MACHINE=0; [ "${1:-}" = --machine ] && { MACHINE=1; shift; }
+PROC=${T48_PROC:-/proc}
+PARAM=${T48_PARAM:-/sys/module/t48s_nand/parameters}
+BM=${T48_BOOTMODE:-/sys/kernel/t48s_bootmode}
+LIB=${T48_LIB:-/usr/lib/t48}
+WORK=${T48_WORK:-/tmp/t48install}
+MNT=${T48_MNT:-/run/t48-stick}
+DEV=${T48_DEV:-/dev}
+NEED_KB=160000           # room a backup needs on the stick
+# number:name:bytes of data, as the kernel lists them; together the whole chip
+PARTS="0:ubl:131072 1:uboot:1048576 2:env:1048576 3:userenv:1048576 4:logo:1048576
+5:smkern:2621440 6:smrfs:15728640 7:kernel:2621440 8:rfs:15728640 10:app:78512128
+11:cfg:4194304 12:data:10485760"
+# never written by us (userenv is left out: U-Boot rewrites it on a recovery start)
+NEVER="0:ubl 1:uboot 2:env 4:logo 5:smkern 6:smrfs 8:rfs 11:cfg 12:data"
+
+say() { if [ $MACHINE = 1 ]; then echo "step $PCT $*"; else echo "$*"; fi; }
+die() { if [ $MACHINE = 1 ]; then echo "error $*"; else echo "STOPPED: $*" >&2; fi; exit 1; }
+finish() { if [ $MACHINE = 1 ]; then echo "done $*"; else echo "$*"; fi; exit 0; }
+PCT=0
+sum() { sha256sum | cut -d' ' -f1; }
+mtd() { sed -n "s/^mtd\([0-9]*\):.*\"$1\"\$/\1/p" "$PROC/mtd"; }
+live() { tr ' ' '\n' < "$PROC/cmdline" | grep -qx t48boot=live; }
+
+# ---- the stick ----
+stick() {
+    [ -n "${T48_STICK:-}" ] && { S=$T48_STICK; return 0; }
+    S=$MNT
+    if grep -q " $MNT vfat rw" "$PROC/mounts" 2>/dev/null && [ -f "$MNT/T48S.rom" ]; then return 0; fi
+    mkdir -p "$MNT"
+    for d in "$DEV"/sd?1 "$DEV"/sd?; do
+        [ -b "$d" ] || continue
+        umount "$MNT" 2>/dev/null
+        mount -t vfat -o rw,noatime,flush "$d" "$MNT" 2>/dev/null || continue
+        [ -f "$MNT/T48S.rom" ] && return 0
+    done
+    umount "$MNT" 2>/dev/null
+    return 1
+}
+free_kb() { df -k "$S" | tail -n 1 | awk '{print $4}'; }
+B() { echo "$S/t48s-backup"; }
+
+# ---- the backup on the stick ----
+# 0 if the folder holds a finished, checked backup (its files are not read here)
+backup_marked() {
+    [ -f "$(B)/SHA256SUMS" ] && [ -f "$(B)/VERIFIED" ] &&
+        [ "$(sed -n 1p "$(B)/VERIFIED")" = "$(sum < "$(B)/SHA256SUMS")" ]
+}
+# compare a partition of the phone with a backup file, all 2112 bytes of every page; reads only
+same() { nandrestore -c "$DEV/mtd$1" < "$2" > "$WORK/cmp" 2>&1; }
+# is the backup this phone's? What nothing ever writes must be identical
+backup_is_ours() {
+    for p in 0:ubl 1:uboot 2:env 4:logo 5:smkern 6:smrfs; do
+        same "${p%%:*}" "$(B)/mtd${p%%:*}-${p#*:}.dataoob" || return 1
+    done
+}
+backup_files_ok() {
+    ( cd "$(B)" && sha256sum -c SHA256SUMS >/dev/null 2>&1 )
+}
+# one read of a partition, written to the stick (or nowhere), its checksum printed
+dump() {
+    if [ -n "$2" ]; then nandread -o "$DEV/mtd$1" 2> "$WORK/log" | tee "$2" | sum
+    else nandread -o "$DEV/mtd$1" 2> "$WORK/log" | sum; fi
+}
+dump_clean() {
+    grep -q " 0 bad blocks, 0 read errors" "$WORK/log" || return 1
+    if grep -q "kernel ECC" "$WORK/log"; then grep -q "0 bit errors corrected, 0 failed" "$WORK/log" || return 1; fi
+}
+
+do_backup() {
+    live || die "Not started from a stick"
+    stick || die "No stick"
+    if backup_marked; then
+        backup_is_ours && finish "Backup already on the stick"
+        die "The stick holds another phone's backup"
+    fi
+    if [ -d "$(B)" ]; then
+        # one that was cut short: kept aside, never deleted
+        n=1; while [ -e "$(B).part$n" ]; do n=$((n + 1)); done
+        mv "$(B)" "$(B).part$n" || die "Stick is read-only"
+    fi
+    [ "$(free_kb)" -ge $NEED_KB ] || die "Stick needs 160 MB free"
+    mkdir -p "$(B)" || die "Stick is read-only"
+    : > "$WORK/sums"; i=0
+    for p in $PARTS; do
+        n=${p%%:*}; r=${p#*:}; name=${r%%:*}; size=${r#*:}
+        f="$(B)/mtd$n-$name.dataoob"
+        PCT=$((i * 4)); say "Reading $name"
+        s=$(dump "$n" "$f") || die "Reading $name failed"
+        dump_clean || die "Flash has a bad block or read error in $name"
+        [ "$(wc -c < "$f")" = $((size / 2048 * 2112)) ] || die "Stick write failed ($name)"
+        cp "$WORK/log" "$(B)/mtd$n-$name.log"
+        echo "$s  mtd$n-$name.dataoob" >> "$WORK/sums"
+        i=$((i + 1))
+    done
+    {
+        echo "T48S flash backup, taken on the phone $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "phone kernel: $(uname -r)"
+        echo "MAC: $(cat /sys/class/net/eth0/address 2>/dev/null)"
+        echo "format: per page 2048 data bytes then 64 spare bytes (nandread -o)"
+        echo; cat "$PROC/mtd"
+    } > "$(B)/MANIFEST"
+    echo "$(sum < "$(B)/MANIFEST")  MANIFEST" >> "$WORK/sums"
+    cp "$WORK/sums" "$(B)/SHA256SUMS"
+    sync
+    # the three checks. 1: the stick gives back what was written to it (the page
+    # cache is dropped first, so this is the stick and not our memory of it)
+    echo 3 > "${T48_DROP_CACHES:-/proc/sys/vm/drop_caches}" 2>/dev/null
+    i=0
+    for p in $PARTS; do
+        n=${p%%:*}; r=${p#*:}; name=${r%%:*}
+        f="$(B)/mtd$n-$name.dataoob"
+        want=$(sed -n "s/  mtd$n-$name.dataoob\$//p" "$WORK/sums")
+        PCT=$((48 + i * 4)); say "Checking $name"
+        [ "$(sum < "$f")" = "$want" ] || die "Stick does not read back ($name). Try another stick"
+        # 2: a second read of the flash is the same bytes
+        [ "$(dump "$n" "")" = "$want" ] && dump_clean || die "Two reads of $name differ"
+        # 3: the error-correction bytes are right, so a restore writes exactly this
+        nandrestore -n < "$f" > "$WORK/n" 2>&1 && grep -q ": identical" "$WORK/n" || die "Backup of $name fails its check"
+        i=$((i + 1))
+    done
+    { sum < "$(B)/SHA256SUMS"; date -u +%Y-%m-%dT%H:%M:%SZ; } > "$(B)/VERIFIED"
+    sync
+    PCT=100
+    finish "Backup checked"
+}
+
+# before any write: a checked backup of this phone, files intact
+need_backup() {
+    stick || die "No stick"
+    backup_marked || die "No checked backup on the stick"
+    say "Checking the backup"
+    backup_files_ok || die "Backup on the stick is damaged"
+    for p in $NEVER; do
+        n=${p%%:*}; name=${p#*:}
+        same "$n" "$(B)/mtd$n-$name.dataoob" && continue
+        case $name in cfg|data) ;; *) die "Backup is not this phone's ($name differs)" ;; esac
+    done
+}
+# afterwards: nothing we never write has changed
+untouched() {
+    for p in $NEVER; do
+        n=${p%%:*}; name=${p#*:}
+        if [ -f "$WORK/before-$name" ]; then
+            [ "$(dump "$n" "")" = "$(cat "$WORK/before-$name")" ] || die "$name changed. Stop and ask"
+        else
+            same "$n" "$(B)/mtd$n-$name.dataoob" || die "$name changed. Stop and ask"
+        fi
+    done
+}
+# cfg and data may differ from the backup already (Yealink ran since): note how they are now
+note_moving() {
+    for p in 11:cfg 12:data; do
+        n=${p%%:*}; name=${p#*:}
+        rm -f "$WORK/before-$name"
+        same "$n" "$(B)/mtd$n-$name.dataoob" || dump "$n" "" > "$WORK/before-$name"
+    done
+}
+preflight() {
+    live || die "Not started from a stick"
+    K=$(mtd t48kernel); A=$(mtd t48app)
+    [ -n "$K" ] && [ -n "$A" ] || die "This kernel cannot write the flash"
+    [ "$(cat "$PARAM/selftest" 2>/dev/null || echo 0)" -gt 0 ] || die "Flash driver self-test did not run"
+    [ "$(cat "$PARAM/write_errors" 2>/dev/null || echo 1)" = 0 ] || die "Flash write errors this session. Restart first"
+    bad=$( { nandread -b "$DEV/mtd7" 2>&1; nandread -b "$DEV/mtd10" 2>&1; } | grep -c "^bad block")
+    [ "$bad" = 0 ] || die "Bad block in kernel or app. Not supported yet"
+}
+lock() { echo "$1" > "$PARAM/lock" || die "Flash lock did not open"; }
+bootmode() {
+    m=$(cat "$BM/mode" 2>/dev/null) || m=unreadable
+    case "$m" in none|unreadable|"") ;; *) echo BOOTMODE > "$BM/clear" 2>/dev/null; m=$(cat "$BM/mode" 2>/dev/null) ;; esac
+    echo "${m:-unreadable}"
+}
+
+do_install() {
+    PCT=2
+    need_backup
+    preflight
+    I="$S/install"
+    [ -f "$I/T48S-kernel.uimg" ] && [ -f "$I/system.img" ] && [ -f "$I/SHA256SUMS" ] || die "No install files on the stick"
+    ( cd "$I" && sha256sum -c SHA256SUMS >/dev/null 2>&1 ) || die "Install files on the stick are damaged"
+    [ "$(wc -c < "$I/T48S-kernel.uimg")" -le 2621440 ] || die "Kernel file too large"
+    [ "$(head -c 4 "$I/system.img")" = hsqs ] || die "Not a system image"
+    note_moving
+    R="${WORK:?}/run"
+    mkdir -p "$R"
+    cp "$LIB/t48-flash.sh" "$LIB/slots.sh" "$R/" && cp "$I/system.img" "$R/system.img" || die "No room in RAM"
+    [ "$(sum < "$R/system.img")" = "$(sum < "$I/system.img")" ] || die "Stick read error"
+    PCT=15; say "Writing the kernel"
+    lock open-kernel
+    nandrestore -b "$DEV/mtd$K" < "$I/T48S-kernel.uimg" > "$WORK/k" 2>&1; rc=$?
+    lock close-kernel
+    [ $rc = 0 ] || die "Kernel not written. Do not restart. Install again"
+    PCT=25; say "Writing the system"
+    # all of app, unless its last 60 blocks already hold a /data of ours
+    lower=599
+    [ "$(dd if="$DEV/mtd$A" bs=4 skip=$((539 * 32768)) count=1 2>/dev/null)" = "UBI#" ] && lower=539
+    lock open-app
+    T48_LOWER=$lower sh "$R/t48-flash.sh" app > "$WORK/app" 2>&1 || die "System not written. Install again"
+    sh "$R/t48-flash.sh" quiet >> "$WORK/app" 2>&1
+    PCT=85; say "Checking"
+    untouched
+    [ "$(cat "$PARAM/write_errors")" = 0 ] || die "Flash write errors. Install again"
+    PCT=100
+    case "$(bootmode)" in
+    none) finish "Installed" ;;
+    *) finish "Installed. Take the stick out before restarting" ;;
+    esac
+}
+
+do_restore() {
+    PCT=2
+    need_backup
+    preflight
+    note_moving
+    PCT=15; say "Restoring Yealink's system"
+    [ -f "$LIB/t48-flash.sh" ] && sh "$LIB/t48-flash.sh" quiet >/dev/null 2>&1
+    # app first: cut short, the phone still starts our kernel, which shows rescue. Kernel last
+    lock open-app
+    nandrestore "$DEV/mtd$A" < "$(B)/mtd10-app.dataoob" > "$WORK/a" 2>&1 || die "System not restored. Restore again"
+    PCT=75; say "Restoring Yealink's kernel"
+    lock open-kernel
+    nandrestore "$DEV/mtd$K" < "$(B)/mtd7-kernel.dataoob" > "$WORK/k" 2>&1; rc=$?
+    lock close-kernel
+    [ $rc = 0 ] || die "Kernel not restored. Do not restart. Restore again"
+    PCT=85; say "Checking"
+    same 7 "$(B)/mtd7-kernel.dataoob" || die "Kernel differs from the backup. Do not restart. Restore again"
+    same 10 "$(B)/mtd10-app.dataoob" || die "System differs from the backup. Restore again"
+    untouched
+    PCT=100
+    case "$(bootmode)" in
+    none) finish "Restored" ;;
+    *) finish "Restored. Take the stick out before restarting" ;;
+    esac
+}
+
+do_status() {
+    echo "live=$(live && echo yes || echo no)"
+    if stick; then
+        echo "stick=yes"
+        echo "free_mb=$(( $(free_kb) / 1024 ))"
+        if backup_marked; then echo "backup=checked"; echo "backup_date=$(sed -n 2p "$(B)/VERIFIED")"
+        elif [ -d "$(B)" ]; then echo "backup=unfinished"
+        else echo "backup=none"; fi
+        [ -f "$S/install/T48S-kernel.uimg" ] && echo "files=yes" || echo "files=no"
+    else
+        echo "stick=no"
+    fi
+    A=$(mtd t48app)
+    if [ -n "$A" ] && [ "$(dd if="$DEV/mtd$A" bs=4 count=1 2>/dev/null)" = "UBI#" ]; then echo "flash=ours"; else echo "flash=other"; fi
+    echo "bootmode=$(cat "$BM/mode" 2>/dev/null || echo unreadable)"
+}
+
+mkdir -p "$WORK"
+case "${1:-}" in
+status) do_status ;;
+backup) do_backup ;;
+install) do_install ;;
+restore) do_restore ;;
+restart)
+    sync; umount "$MNT" 2>/dev/null
+    [ -d /run/service/watchdog ] && sv -w 5 down /run/service/watchdog >/dev/null 2>&1
+    exec t48-watchdog reset ;;
+*)  sed -n '5,12p' "$0" | sed 's/^# //' >&2; exit 2 ;;
+esac
