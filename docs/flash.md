@@ -11,7 +11,7 @@ Issue [#29](https://github.com/M0LTE/yealink-t48s/issues/29). The design is in [
 | Holds | settings and the SIP account (`/data/config`), SSH host key and the owner's keys (`/data/access`), installed apps, call history, a random seed, the owner's own changes (`/data/local`) |
 | Room | about 5 MB, compressed as it is written |
 
-Why there and not the whole `app` partition, as the design has it: **the phone cannot yet start without Yealink's firmware.** Our kernel is started from Yealink's running system (kexec), and it relies on Yealink having set up the audio hardware and the Ethernet switch first. The hook that lets us in lives in `app` itself (`/phone/scripts/phone.sh`). Turn all of `app` into ours today and the phone would boot to a broken Yealink with no way in but recovery mode.
+Why there and not the whole `app` partition, as the design has it: **the phone cannot yet start without Yealink's firmware.** Our kernel is started from Yealink's running system (kexec). Until 2026-11-24 it also relied on Yealink having set up the audio hardware and the Ethernet switch; it now sets both up itself (step 1 under "Next"), but that has not yet been seen after U-Boot alone. The hook that lets us in lives in `app` itself (`/phone/scripts/phone.sh`). Turn all of `app` into ours today and the phone would boot to a broken Yealink with no way in but recovery mode.
 
 Those 60 blocks are the part of `app` Yealink never used: its filesystem fills blocks 0 to 538, mounts read-only, and reports the rest as "60 erased blocks". It decides that from the spare bytes of each block's first page, which UBI never writes, so it goes on seeing 60 erased blocks and never looks inside them. Checked on the phone after writing (below).
 
@@ -53,7 +53,7 @@ The kernel has UBI and UBIFS and still no other way to the flash: no block devic
 
 The rest of the layout (our kernel in the `kernel` partition, all of `app` as UBI with two system slots) waits on the phone starting cold. In order:
 
-1. **Bring the hardware up from cold.** The audio block's start-up sequence is known from Yealink's code but untested ([audio.md](audio.md)); the Ethernet switch needs its ports and address table set up. Both can be worked on through recovery-mode boots (U-Boot loads our kernel from TFTP: no flash involved), which need someone at the phone.
+1. **Bring the hardware up from cold.** Written and proved from our own kernel (2026-11-24): the audio block is switched off and started again ([audio.md](audio.md#cold-start-2026-11-24-issues-7-and-29)), the Ethernet switch is reset, its clocks gated and our address removed, and brought up again ([live-image.md](live-image.md#the-switch-from-cold)), and the touch chip's SPI clock, which U-Boot leaves off, is switched on. **Left: one recovery-mode boot to see it after U-Boot alone** ([the test](live-image.md#cold-boot-test-2-the-b6-cold-set)); it needs someone at the phone.
 2. **A kernel that fits.** Kernel plus first stage must be under 2.5 MB compressed for the `kernel` partition; the first stage is about 1 MB before compression ([boot.md](boot.md)).
 3. **The first stage finds the system image in flash**: a UBI volume per slot, read into RAM and mounted the same way as today.
 4. **Then write**: add `kernel` and all of `app` to the driver's ranges, restore-test them with `nandrestore`, write a kernel that has already booted through recovery mode. Recovery mode and safe mode stay as the ways back.

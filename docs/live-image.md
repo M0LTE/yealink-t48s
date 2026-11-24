@@ -74,7 +74,7 @@ Limits: the kernel file under 4 MB (or the ramdisk lands on its end; `kernel/bui
 
 ## The same with Linux 6.18
 
-Issue [#55](https://github.com/M0LTE/yealink-t48s/issues/55). The stick or TFTP folder is the same three files; only `T48S.bin` differs. **Linux 6.18 is the default since 2026-11-24**: CI builds this set and the release carries it as `t48s-live.tar.gz`. The 3.6 set described above is the fallback and is built by hand. **Built and checked on a PC (2026-11-23); not yet started on the phone**: the [cold-boot test](#cold-boot-test-for-linux-618) below is that first start.
+Issue [#55](https://github.com/M0LTE/yealink-t48s/issues/55). The stick or TFTP folder is the same three files; only `T48S.bin` differs. **Linux 6.18 is the default since 2026-11-24**: CI builds this set and the release carries it as `t48s-live.tar.gz`. The 3.6 set described above is the fallback and is built by hand. **Started on the phone through U-Boot on 2026-11-24**: the kernel and the screen came up, then two drivers met hardware U-Boot leaves switched off. What happened and the second test are in [Cold-boot test 2](#cold-boot-test-2-the-b6-cold-set).
 
 ```
 ROOTFS=firststage.cpio LIVE=1 sh kernel6/build.sh WORKDIR     # in the kernel6 container: WORKDIR/T48S.bin
@@ -222,15 +222,32 @@ On a recovery boot the chain is **boot ROM -> U-Boot -> our kernel**; Yealink's 
 | Driver | On the live (U-Boot only) path | Cold-start code |
 |---|---|---|
 | LCD (`t48s_fb`) | U-Boot sets the PL111 up and keeps scanning out the framebuffer | none needed; works cold |
-| Keypad (`t48s_keypad`) | U-Boot runs the keypad controller (it scans keys for the recovery menu), so it is found enabled | `t48s_keypad_start()` sets pin mux, bus clock, prescaler and control if `KEYC_CTRL_EN` is clear. Present, guarded, **untested from true cold** |
+| Keypad (`t48s_keypad`) | U-Boot runs the keypad controller (it scans keys for the recovery menu), so it is found enabled (seen 2026-11-24) | `t48s_keypad_start()` sets pin mux, bus clock, prescaler and control if `KEYC_CTRL_EN` is clear. Run by its test hook: after a reset the controller comes back with U-Boot's values and idle columns. No key pressed after it yet |
 | Hook switch | GPIO29 read only | works cold |
 | Backlight (`t48s_backlight`) | U-Boot leaves the lamp on at level 8; the driver starts from what it finds | works cold |
-| LEDs (`t48s_leds`) | U-Boot state unknown; the driver sets the mux to plain GPIO, directions to output and the pins high unconditionally | cold-safe already |
-| Touch (`t48s_touch`) | U-Boot does not use SPI, so this is the real cold case; the driver sets the pin mux, SPI-host bus clock, chip-select and pen-down direction unconditionally, then probes the PL022 | present; **untested from true cold** (U-Boot may leave the SPI clock gated) |
-| Ethernet (`t48s_eth`) | over TFTP, U-Boot's own transfer has just used the switch. **From a stick U-Boot makes no network transfer**, so the switch may not be in the state our driver expects | works on the TFTP path; a full switch bring-up is not written. **To find out on the first USB boot** |
-| Audio APM (`t48s_audio`) | **truly cold.** U-Boot does no audio, so the APM codecs are not enabled. The driver detects this and warns "cold start is not supported yet" | **not implemented.** Needs the APM reset, clock, sample-rate, FIFO and codec-enable sequence, and the voice-DSP firmware for echo cancelling. Blind replay is unsafe without the phone |
+| LEDs (`t48s_leds`; `gpio-leds` under 6.18) | U-Boot state unknown; the pins are switched to plain GPIO, made outputs and set high whatever is found (under 6.18 the GPIO driver does the pin mux for any pin it is asked for) | cold-safe |
+| Touch (`t48s_touch`) | U-Boot does not use SPI and leaves its clock gated: on 2026-11-24 every transfer timed out and there was no touch | **fixed under 6.18:** the driver now switches the SPI clock on as well as the pins and the bus clock. Its test hook puts everything back as U-Boot leaves it (same register values as that boot's log) and the chip answers again |
+| Ethernet (`t48s_eth`) | over TFTP, U-Boot's own transfer has just used the switch. **From a stick or from flash U-Boot makes no network transfer**, so the switch may be untouched | **written for 6.18:** every "up" sets the switch up from whatever it finds (clocks, reset, ports forwarding, our address in its table, the CPU port's speed, Yealink's settings). Proved by resetting the switch, gating its clocks and removing our address from our own kernel: [below](#the-switch-from-cold) |
+| Audio APM (`t48s_audio`) | **truly cold.** U-Boot does no audio and the block has no clock: on 2026-11-24 the driver's first read of it stopped the kernel | **written for both kernels:** the driver sees from chip control that the block is off, starts it, and cannot stop the boot again. Proved by switching the block off from our own kernel: [audio.md](audio.md#cold-start-2026-11-24-issues-7-and-29) |
 
-So a live boot should show the UI, keypad, touch, screen and LEDs with no Yealink. Calls need the audio cold start, and on the USB route the network is an open question; neither blocks "try the phone's interface".
+So a live boot should now come up whole: screen, keys, touch, lamps, network and sound. None of it has been seen after U-Boot alone since these changes; that is [the next cold-boot test](#cold-boot-test-2-the-b6-cold-set).
+
+### The switch from cold
+
+The switch has no "off" a power-up would not also have, so the test makes one: with the interface down, `echo 1 > /sys/module/t48s_eth/parameters/cold` removes our address from the switch's address table (which survives a reset), stops the CPU-side FIFOs, puts the switch in reset and gates its clocks. The next `ip link set eth0 up` is then the driver's own bring-up and nothing else.
+
+It was driven from the serial console by a script that goes back to Yealink's firmware if the gateway does not answer within 90 s. Result, twice:
+
+```
+t48s_eth: test: our address removed from the address table (0)
+t48s_eth: test: switch in reset, clocks gated (reset 0x00000060, clock 0x00000014, bus clocks 0x334be2fd)
+t48s_eth: switch was off (bus clocks 0x334be2fd, clock 0x00000014, reset 0x00000060): started
+t48s_eth: switch: 18 settings were not as wanted and have been set
+```
+
+The gateway answered about 8 s later, when the link had come back; `tools/arp-test.sh` passed from another host at once and after 45 s idle, and SSH worked. On an ordinary kexec start the same code finds nothing to change.
+
+What a reset undoes, and the driver puts back: the two external ports' forwarding state (page 0, registers 0 and 1), the switching enable (page 0, 0x0b), the group addresses for spanning tree, 802.1X and LLDP (page 4), the VLAN settings (page 0x34), the CPU port's enables, and our address on the CPU port (page 5). The PHYs come back by themselves with the chip's defaults. One trap: a reset while the CPU-side FIFOs run leaves the receive side dead until they are stopped and started, so "down" now stops them. Not tried: a link below 1000 Mbit/s (the CPU port's speed register is set as Yealink's driver sets it).
 
 ## Test plan for a daytime session
 
@@ -318,6 +335,33 @@ tools/mkliveimage.py build B6i bin=W/T48S-inplace.bin system=system.img kernel=6
 **Going back.** From a stick: power off, stick out, power on. After TFTP the flag U-Boot saved is `resumemode`, and Yealink's next start would reset its settings and with them the kexec boot hook in `/config`. So before any normal power-up, do one more recovery start with the rescue set (`tools/mkrescue.sh`, as on 2026-11-22), which clears the flag; then power up normally.
 
 **What to bring back:** the serial log from `Rom check ok` to the prompt, which set started (B6 or B6i), and what worked of network, keys, touch, lamps and sound.
+
+## Cold-boot test 2: the B6-cold set
+
+**The first test (2026-11-24, set `B6`).** U-Boot accepted the label, copied the kernel to 0x00408000 and started it; Linux 6.18 unpacked the ramdisk and the screen came up. Two things failed, both because U-Boot leaves a clock off that Yealink's kernel turns on: touch (every SPI transfer timed out) and audio (the kernel stopped 2.6 s in). Both are fixed above, and the network no longer depends on U-Boot either.
+
+**The set** is `dumps/live6/B6-cold/` on the development machine (not in the repository: it is built from this tree with `LIVE=1`, no keys inside). The routine is two recovery starts, as before:
+
+1. Serial log on screen: `ssh root@proxmox0 tail -f /root/t48s/session4.log`.
+2. `sudo tools/tftpd.py dumps/live6/B6-cold 69 --rom-once` on 10.45.0.183.
+3. Power off. Hold **Speakerphone**, power on, let go at the menu, press **1**, enter the addresses (phone 10.45.0.214, mask 255.255.255.0, gateway 10.45.0.1, server 10.45.0.183).
+4. **Listen** from `Starting kernel` for about three seconds: any click from the loudspeaker or handset is worth knowing.
+5. When the clock is on the screen: touch it, press a few keys, lift the handset. On the serial shell: `dmesg | grep -e t48s_ -e switch`, `t48rec -d 1 -s 3 -o /tmp/b.wav` (the rate should be 16000), `ping -c 3 10.45.0.1`.
+6. A call, if there is time: Settings, account `t48s` at `10.45.0.147` (password in `~/.config/yealink-t48s/sip-account`), then 600 and Speaker, at a low volume first.
+7. Going back: stop the TFTP server, start it with the rescue set (`sudo tools/tftpd.py dumps/rescue 69 --rom-once`), and do step 3 again. The rescue set clears the flag U-Boot saved and resets; the phone then starts Yealink's firmware as usual.
+
+**Lines to look for**
+
+| Line | Means |
+|---|---|
+| `t48s_touch: SPI clock was off, switched on`, then `TSC2046 temp0 ...` | touch found its chip |
+| `t48s_audio: chip control as found: ...` | what U-Boot leaves; please keep this line |
+| `t48s_audio: audio block is off (...): starting it`, then `audio block started from cold` | the audio cold start ran |
+| `t48s_audio: no sound: the audio block could not be started (...)` | it did not, and the phone carries on without sound |
+| `t48s_audio: PLL2 is not set as expected` | the sample rate may be wrong: see what `t48rec` prints |
+| `eth0: switch: N settings were not as wanted and have been set` | how much of the switch U-Boot had left undone (no such line: nothing) |
+
+**What to bring back:** the serial log from `Rom check ok` to the prompt, whether there was a click, and what worked of touch, keys, lamps, network and sound.
 
 ## Decisions (Tom, 2026-11-23)
 

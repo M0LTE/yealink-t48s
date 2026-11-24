@@ -73,10 +73,10 @@ The loader copies the file to 0x00408000 and jumps to it. This file is a self-ex
 | Key lamps | the kernel's `gpio-leds`, same names | by reading the pins back, not by eye |
 | Holtek chip, message lamp | `drivers/t48s_holtek.c` | the chip answers and its watchdog is turned off; the lamp not by eye |
 | Backlight | `drivers/t48s_backlight.c` | yes, by reading the register back |
-| Keypad, hook switch | `drivers/t48s_keypad.c` | found running; test presses reach the shell; no real key pressed yet |
-| Touchscreen | `drivers/t48s_touch.c` | the chip answers; a test touch opens Settings; no finger yet |
-| Ethernet | `drivers/t48s_eth.c`, bound from the device tree | yes: DHCP, SSH, a 138 MB transfer |
-| Audio | `drivers/t48s_audio.c`, bound from the device tree | recording yes (16000.9 frames/s, no errors); playback not tried |
+| Keypad, hook switch | `drivers/t48s_keypad.c` | found running; test presses reach the shell; no real key pressed yet. From cold: its test hook (2026-11-24) |
+| Touchscreen | `drivers/t48s_touch.c` | the chip answers; a test touch opens Settings; no finger yet. From cold: switches its own SPI clock on (2026-11-24) |
+| Ethernet | `drivers/t48s_eth.c`, bound from the device tree | yes: DHCP, SSH, a 138 MB transfer. From cold: sets the whole switch up itself (2026-11-24) |
+| Audio | `drivers/t48s_audio.c`, bound from the device tree | recording yes (16000.9 frames/s, no errors); playback not tried. From cold: starts the audio block itself (2026-11-24) |
 | Flash | `drivers/t48s_nand.c`: reads everything, writes only `/data`'s range; UBI and UBIFS | yes: see [Flash](#flash) |
 | U-Boot's BOOTMODE flag | `kernel/drivers/t48s_bootmode.c`, the same file as under 3.6 | reads `none`, as it should after a kexec start; a live start not tried |
 
@@ -111,7 +111,7 @@ Done: the flash, the watchdog from userspace, the boot-mode reader, one root fil
 
 Still needs someone at the phone:
 
-- a cold start through U-Boot. Only the kexec start has been run on the phone. The live build exists (`LIVE=1`) and passes its checks on a PC; the test to run, with what to watch on the serial port, is "Cold-boot test for Linux 6.18" in [docs/live-image.md](../docs/live-image.md).
+- a cold start through U-Boot that comes up whole. The first one (2026-11-24) started the kernel and the screen, then stopped in the audio driver, with touch dead as well: U-Boot leaves the audio and SPI clocks off. The drivers now start their own hardware (audio, touch, Ethernet switch, keypad), each with a test hook, `/sys/module/t48s_*/parameters/cold`, that puts its hardware back into the cold state from a running kernel. The second test, with what to watch, is "Cold-boot test 2" in [docs/live-image.md](../docs/live-image.md).
 
 When the fallback goes, after one release: move `t48s_bootmode.c` here, build the root filesystem against 6.18 headers (`buildroot/configs/kernel6.fragment`; it is built against 3.6 headers until then so that one root filesystem runs on both), drop the `/dev/mem` half of `t48-watchdog`, and remove `kernel/`.
 

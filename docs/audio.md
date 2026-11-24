@@ -14,7 +14,9 @@ Recommended path: write a small ALSA driver for our 3.6 kernel that drives the A
 
 **Update, night of 2026-11-23 (issue #24): the capture half of that driver exists and works.** `kernel/drivers/t48s_audio.c` gives an ALSA card with one capture device per codec and mixer controls for the capture side. See "The capture driver" below.
 
-**Update, daytime 2026-11-23: playback works too.** Both codecs play, the outputs, gains, sidetone and loudspeaker amplifier are mixer controls, and the driver starts with everything off. Measured with the phone's own microphones as the listener; see "Playback" at the end. Cold start is still to do.
+**Update, daytime 2026-11-23: playback works too.** Both codecs play, the outputs, gains, sidetone and loudspeaker amplifier are mixer controls, and the driver starts with everything off. Measured with the phone's own microphones as the listener; see "Playback" at the end.
+
+**Update, 2026-11-24: cold start.** The driver starts the audio block itself when Yealink's firmware has not run, on both kernels, and can no longer stop the boot. See "Cold start" at the end.
 
 ## How Yealink's audio is put together
 
@@ -143,13 +145,13 @@ An ALSA driver (`kernel/drivers/t48s_audio.c`), not a private character device: 
 | 1 | **Done 2026-11-23.** ALSA capture: one card, two capture devices (codec A, codec B), 16 kHz, 16-bit mono, 5 ms periods, DMA0 channels 3 and 5 with their block interrupts (IRQ 3, 5), error interrupt (IRQ 28). Leaves the analog setup as Yealink left it. | 1 to 2 days | `arecord` from codec B, compare with `apmcap` | no |
 | 2 | **Done 2026-11-23, tested on codec A only.** Capture controls: input select, preamp gain, ADC digital gain, ADC power, microphone bias, as ALSA mixer controls. Port of five short `ApmHw_*` functions. | 1 day | record each input | mostly no, see note |
 | 3 | **Done 2026-11-23, see "Playback" below.** Playback: two playback devices on DMA0 channels 2 and 4, DAC digital gain, output mode and mute, amplifier power-down, GPIO31, ramp-down on stop (`ApmHw_AmpDacRampDown`) to avoid clicks. What the audio service expects of it, including control names, is in [audiod.md](audiod.md#what-the-kernel-driver-must-add). | 1 to 2 days | tone to each output at low level | **yes** |
-| 4 | **Not started: cannot be tested in silence** (see below). Cold start, so the live image (#7) works without Yealink having run first: clocks, chipc audio enable, APM soft reset, the `ApmHw_init` table (about 70 constant writes, already extracted), sample rate, FIFO setup. | 1 to 2 days | boot through U-Boot recovery, record and play | **yes** (possible click) |
+| 4 | **Done 2026-11-24, see "Cold start" at the end; a start through U-Boot is still to be seen.** Cold start, so the live image (#7) works without Yealink having run first: clocks, chipc audio enable, APM soft reset, the `ApmHw_init` table (about 70 constant writes, already extracted), sample rate, FIFO setup. | 1 to 2 days | boot through U-Boot recovery, record and play | **yes** (possible click) |
 | 5 | Paths as named ALSA controls ("Handset", "Headset", "Speaker"), sidetone for handset and headset, 8 kHz as a second rate. | 1 day | switch during a call | **yes** |
 | 6 | In user space, with the SIP stack (#12): G.711/G.722 on the ARM, echo cancelling for the speakerphone (speexdsp is the first thing to try on this 500 MHz ARM11), ringer through the loudspeaker. | with #12 | calls | **yes** |
 
 Note on step 2: capture-side writes are silent unless sidetone is on and an output is live, because sidetone feeds the microphone into the earpiece. The driver should switch sidetone off and mute the outputs before touching input settings in a night-time test; I did not try it tonight because I could not prove every output stage was off.
 
-Why step 4 waits for daytime: a cold start begins with a soft reset of the whole APM block, and after a kexec boot codec B's output B is switched on and unmuted. What the analog output stage does across that reset is unknown (a click is likely), `ApmHw_init` then writes the DAC digital gains to full (0x2c and 0x5c = 0x00337fff), and it never writes the output mode and mute registers (0x134, 0x138), so their state after reset is whatever the chip's defaults are. None of that can be shown to be silent beforehand. The sequence is known: clocks, `chipcHw_audioChannelEnable`, `chipcHw_softReset(APM)`, the `ApmHw_init` writes (`tools/regsum.py ... c003f3e4 c003fa84` lists them), `ApmHw_SampleFreqSet`, `ApmHw_ChEnable`.
+Why step 4 waited for daytime: a cold start begins with a soft reset of the whole APM block, and after a kexec boot codec B's output B is switched on and unmuted. What the analog output stage does across that reset is unknown (a click is likely), `ApmHw_init` then writes the DAC digital gains to full (0x2c and 0x5c = 0x00337fff), and it never writes the output mode and mute registers (0x134, 0x138), so their state after reset is whatever the chip's defaults are. None of that can be shown to be silent beforehand. The sequence is known: clocks, `chipcHw_audioChannelEnable`, `chipcHw_softReset(APM)`, the `ApmHw_init` writes (`tools/regsum.py ... c003f3e4 c003fa84` lists them), `ApmHw_SampleFreqSet`, `ApmHw_ChEnable`.
 
 Risks: the equaliser coefficients (`ApmHw_WriteCoeff`) are loaded by Yealink at start-up and will be lost on a cold start; flat is fine to begin with. The speakerphone will need real echo-cancelling work. Codec C and the I2S/PCM ports are out of scope.
 
@@ -327,3 +329,42 @@ t48play -d 1 -s 2 -l -30            # the same in the handset earpiece
 t48mix "Codec B Sidetone Switch" 1  # now blow across the handset microphone: you should hear it
 t48mix "Codec B Sidetone Switch" 0; t48mix "Codec B Output B Playback Switch" 0
 ```
+
+## Cold start (2026-11-24, issues #7 and #29)
+
+**What went wrong.** On the first start of Linux 6.18 through U-Boot's recovery mode the kernel stopped 2.6 s in, inside this driver. U-Boot does nothing with audio, so the block's clocks are off, and a register of a block without its clock does not answer: the bus raises an external abort and the kernel has nobody to give it to. The driver had read the block before asking whether it was on.
+
+**What the driver does now** (`kernel6/drivers/t48s_audio.c`, and the same code in `kernel/drivers/t48s_audio.c`):
+
+1. It reads chip control (0x80000000), never the block, to see whether the block is on: the two APM clocks (0x44, 0x58), the audio channel enables (0x7c), the soft reset (0x84) and DMA controller 0's bus clock (0x5c). The values found are one line in the boot log.
+2. If anything is off it starts the block: the amplifier pin low, clocks on, audio channels enabled, a soft reset, the `ApmHw_init` table, 16 kHz on both codecs (`ApmHw_SampleFreqSet`), the codec enables (`ApmHw_ChEnable`), then the analog side as Yealink idles. All four outputs are muted, switched off and at their lowest gain before anything runs, and the DACs are powered last.
+3. The first accesses are made with the external abort caught. A block that still does not answer costs the sound, not the boot: the log says `no sound: the audio block could not be started` and no card is registered.
+
+**The test hook.** `echo 1 > /sys/module/t48s_audio/parameters/cold` (audio service stopped, no stream open) puts the block back where a power-on leaves it (in reset, clocks gated, channels disabled, DMA controller off), reads it once to show that the read is refused and caught, and starts it again:
+
+```
+t48s_audio: test: audio block switched off (clocks gated)
+t48s_audio: test: a read of the block while off was refused, and caught
+t48s_audio: audio block is off (switched off for the test): starting it
+t48s_audio: audio block started from cold
+```
+
+**Measured** on the phone after that forced cold start, from a kexec start (so not yet after U-Boot alone):
+
+| Check | Before (as Yealink left it) | After the cold start |
+|---|---|---|
+| Rate, both codecs | 15999.7 to 15999.9 frames/s | 15999.8 to 16002.0 frames/s |
+| Handset microphone, quiet room (codec B input B, daytime test 2 settings) | -67.2 dBFS | -66.4, -66.1 dBFS |
+| Base microphone (codec A input A) | -67.1 dBFS | -67.7, -67.8 dBFS |
+| Codec A input B (nothing connected) | -87.9 dBFS | -91.5, -91.8 dBFS |
+| Loudspeaker to base microphone, tones at -30 dBFS, the "Playback" settings: 300 / 500 / 1000 / 2000 / 3000 Hz | -28.0 / -33.1 / -33.0 / -17.4 / -36.4 dBFS | -31.1 / -33.3 / -36.3 / -16.9 / -27.3, then -31.3 / -32.4 / -37.5 / -17.8 / -26.5 dBFS |
+| A call to the echo service, speaker route, G.722, 13 and 15 s | | 785 and 679 frames each way; the far end's level follows the microphone's second by second, 210 ms later, within 0.1 dB overall |
+| Under Linux 3.6 | | read refused and caught, block started, 16000.1 frames/s, 2 kHz loop tone at -17.5 dBFS |
+
+Nobody was talking during the call, so the comparison is of room noise: the levels track, but the correlation is low (0.2 to 0.5). It wants a voice.
+
+**Clicks.** With both microphones recording after the cold start: powering the DACs down and up (the last step of the start), switching the earpiece on and off, and switching the loudspeaker and its amplifier on and off left nothing above the microphones' noise. The reset itself cannot be heard this way, because the microphones belong to the block being reset; that needs an ear at the first real cold start. The amplifier pin is low throughout.
+
+**What is different after a cold start.** The equalisers are off (flat). Yealink loads its own tuning into them, and a phone started by kexec still has it; a phone started from cold does not. That is the 3 dB at 1 kHz and the 9 dB at 3 kHz in the loop row above. The loudspeaker's limit ([audiod.md](audiod.md#the-loudspeakers-limit)) was measured with Yealink's tuning in place, so it should be checked again on a phone started from cold.
+
+**Still to be seen:** a start through U-Boot with this driver. What U-Boot leaves in chip control is not known beyond "the block does not answer"; the boot log line `chip control as found` will say. If U-Boot's PLL2 setting differs from the one the 200 MHz clock divider assumes, the driver warns and the sample rate will be off: `t48rec` prints the rate.
