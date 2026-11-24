@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Not a phone: the QEMU test machine with the command line of an installed
+ * phone's kernel (kernel6/qemu-rescue-test.sh). It has no flash, so the first
+ * stage finds no system slot and must end in rescue.
+ */
+#include "qemu-versatilepb-test.dts"
+
+/ {
+	chosen {
+		bootargs = "console=ttyAMA0,115200 earlycon t48boot=flash loglevel=8";
+	};
+};

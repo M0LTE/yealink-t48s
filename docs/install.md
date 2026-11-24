@@ -61,17 +61,36 @@ Not possible by construction: writing U-Boot, its settings, or the recovery part
 
 ## Updates and fallback
 
+Settings, Update on the phone ([settings.md](settings.md)) and the Update page of web setup ([web.md](web.md)) are front ends for one command:
+
 ```
 t48-update status
-t48-update install FILE-or-URL [SHA256]     # writes the slot not in use, marks it for one try
+t48-update channel [stable|testing|URL]     # where updates come from; stable unless changed
+t48-update check                            # ask the channel; writes nothing
+t48-update install                          # the channel's system image, into the slot not in use
+t48-update kernel                           # the channel's kernel, only when asked
+t48-update install FILE-or-URL [SHA256]     # by hand
+t48-update kernel FILE-or-URL SHA256
 t48-update switch                           # try the other slot once
 ```
 
-A new system image is written to the other slot and read back. At the next start it gets one try, and the try is counted before it starts. If the phone is still up a minute later with the shell running, that slot becomes the active one. If not (it hangs and the watchdog resets it, it does not mount, or the phone is restarted within the minute) the next start goes back to the slot that worked. Nobody has to be at the phone.
+Nothing is automatic: the phone checks when asked and installs when asked.
 
-The kernel has one slot, because U-Boot's boot command is fixed. `t48-update kernel FILE SHA256` writes it with the same read-back. A bad kernel is recovered through recovery mode.
+**Channels.** A channel is a folder on a web server with four files: `VERSION` (one line), `SHA256SUMS`, `system.img` and `T48S-kernel.uimg`.
 
-The same from the phone's screen: Settings, Update ([settings.md](settings.md#update)).
+| Channel | What | Where |
+|---|---|---|
+| `stable` | the newest `v*` release | `github.com/M0LTE/yealink-t48s/releases/latest/download` |
+| `testing` | the newest build of `main`, the rolling pre-release `system-latest` | `.../releases/download/system-latest` |
+| a URL | the owner's own builds | any `http://` or `https://` folder with the four files |
+
+Downloads use HTTPS with the image's own certificate list, and each file is compared with its SHA-256 in `SHA256SUMS` before anything is written. Releases are not signed yet: the check proves the download is whole, and HTTPS that it came from GitHub.
+
+**System image.** It is written to the other slot and read back. At the next start it gets one try, and the try is counted before it starts. If the phone is still up a minute later with the shell running, that slot becomes the active one. If not (it hangs and the watchdog resets it, it does not mount, or the phone is restarted within the minute) the next start goes back to the slot that worked. Nobody has to be at the phone. The result is kept and shown as the last result: `20261124-ac7a8f4 installed`, or `20261124-ac7a8f4 did not start, went back`.
+
+**Kernel.** One slot, because U-Boot's boot command is fixed, so `install` never writes it. `check` compares the kernel partition with the channel's kernel and says when they differ; `t48-update kernel` (Install kernel on the screen) then writes it, with the driver's page-by-page comparison and a second read-back of the whole image. A bad kernel is recovered through recovery mode. The kernel holds the first stage, so the rescue menu changes with it. One of our own test builds, with SSH keys in its first stage, always differs from the published kernel.
+
+Proved on Tom's phone on 2026-11-24, each step through the updater: see [the record](#self-update-on-the-phone-2026-11-24).
 
 ## Rescue
 
@@ -79,11 +98,23 @@ The same from the phone's screen: Settings, Update ([settings.md](settings.md#up
 |---|---|
 | The slot on trial does not start | the active slot starts, by itself |
 | The active slot is unreadable | the other slot starts |
-| No slot starts, or the install was cut short | the first stage stays up: rescue screen, DHCP, SSH, serial shell |
+| No slot starts, or the install was cut short | the rescue menu, then rescue by itself after 30 seconds: screen, DHCP, SSH, serial shell |
 | The kernel hangs | U-Boot's watchdog resets the phone after 90 seconds, and again; recovery mode gets out of it |
 | The kernel partition is unreadable | U-Boot stops at the logo; recovery mode |
 
-Recovery mode and safe mode are Yealink's and are untouched. The rescue menu on the X key (start without the owner's changes, wipe settings) is still to do.
+**The rescue menu.** Hold X while the phone starts (from power-on until the menu shows, about 3 seconds after the logo). Up, Down and OK, or the number:
+
+| | |
+|---|---|
+| Start | carry on as usual. Also what happens after a minute with no key |
+| Start slot b | the other slot, for this start only. Nothing is written down, and it does not become the active slot |
+| Start with settings wiped | asks first. Everything in `/data` (settings, account, keys, apps) is moved into `/data/aside-1`, then `aside-2` and so on; nothing is deleted. The phone starts as new. Moving the files back restores them |
+| Rescue | the first stage stays up: address on the screen, SSH (a one-time password on the screen, or the built-in keys on one of our test builds), serial shell |
+| Restore help | how to go back to Yealink's firmware |
+
+When no slot starts, the menu has Rescue, Restart and Restore help.
+
+Recovery mode and safe mode are Yealink's and are untouched.
 
 ## The lock
 

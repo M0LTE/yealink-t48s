@@ -38,9 +38,9 @@ If there is no system image, or it does not mount, the first stage stays up by i
 
 - a message on the screen saying why, with the phone's address;
 - the network by DHCP, and SSH as root: with the built-in keys on one of our test builds, otherwise with a password made up at that moment and shown only on the screen;
-- a shell on the serial port.
+- a shell on the serial port. After a start from U-Boot it needs the serial port's interrupt, which the SoC sends to its secure side until told otherwise: the kernel does that (`kernel6/drivers/t48s_secure.c`, issue #59), and `rcS` does it for kernels built before 2026-11-25.
 
-On an installed phone it is also where a start ends when neither slot starts, or when an install was cut short; the installer can be run again from the PC against it. To see it: build a kernel with the first stage alone (`ROOTFS=firststage.cpio` and no `SYSTEM`) and boot it. A live boot whose ramdisk is missing or damaged ends here too. The menu (other slot, start without the owner's changes, wipe) is issue #32.
+On an installed phone it is also where a start ends when neither slot starts, or when an install was cut short; the installer can be run again from the PC against it. To see it: build a kernel with the first stage alone (`ROOTFS=firststage.cpio` and no `SYSTEM`) and boot it. A live boot whose ramdisk is missing or damaged ends here too. On an installed phone the rescue menu comes first: when no slot starts, and when X is held at power-on ([install.md](install.md#rescue), issue #32). The menu is `firststage/menu.sh`, with `t48-keys` reading the keypad.
 
 ## Services
 

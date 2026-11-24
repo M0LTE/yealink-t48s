@@ -7,6 +7,10 @@
 # v* tag. The SDK
 # is built only for tags and runs started by hand (gh workflow run build.yml), and
 # each of those also updates the rolling pre-release "sdk-latest" (sdk/README.md).
+# Every build of main, and every run started by hand, also updates the rolling
+# pre-release "system-latest": the system image and the kernel for the kernel
+# partition, with VERSION and SHA256SUMS. That is the updater's testing channel;
+# its stable channel is the newest v* release (t48-update, docs/install.md).
 # No SSH keys go into anything built here, so what it builds starts with SSH off
 # (docs/access.md).
 # A separate quick job, check, runs the shell's and the web setup page's tests.
@@ -74,6 +78,17 @@ jobs:
           key: br-ccache-${{ github.run_id }}
           restore-keys: br-ccache-
 
+      # What the image calls itself (/etc/t48-release, About, the updater): the tag
+      # for a release, otherwise the date and the commit
+      - name: Version
+        run: |
+          case "$GITHUB_REF" in
+          refs/tags/v*) v=$GITHUB_REF_NAME ;;
+          *) v=$(date -u +%Y%m%d)-$(echo "$GITHUB_SHA" | cut -c1-7) ;;
+          esac
+          echo "T48_VERSION=$v" >> "$GITHUB_ENV"
+          echo "version: $v"
+
       - name: Root filesystem
         run: buildroot/build.sh "$RUNNER_TEMP/br" all
 
@@ -121,6 +136,9 @@ jobs:
           k6() { docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src:ro" -v "$RUNNER_TEMP/k6:/w" -e ROOTFS=/w/firststage.cpio "$@" t48s-kbuild6:trixie sh /src/kernel6/build.sh /w; }
           # what would go in the kernel partition: the kernel with the first stage alone
           k6 -e SLOT=1 -e OUT=zImage6-slot
+          # what the kernel partition of an installed phone holds, and what the
+          # updater writes there (t48-update kernel): a U-Boot image, no keys
+          k6 -e FLASH=1 -e OUT=T48S-kernel.uimg
           # what kexec starts: the same with the system image beside the first stage
           k6 -e SYSTEM=/w/system.img -e OUT=Image-kexec
           # what U-Boot's recovery mode starts (docs/live-image.md). The build checks
@@ -132,7 +150,8 @@ jobs:
       - name: Collect outputs
         run: |
           mkdir out
-          cp "$RUNNER_TEMP/k6/Image-kexec" "$RUNNER_TEMP/k/Image-kexec-linux3.6" out/
+          cp "$RUNNER_TEMP/k6/Image-kexec" "$RUNNER_TEMP/k/Image-kexec-linux3.6" "$RUNNER_TEMP/k6/T48S-kernel.uimg" out/
+          echo "$T48_VERSION" > out/VERSION
           tar -C "$RUNNER_TEMP" -czf out/t48s-live.tar.gz t48s-live
           cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" "$RUNNER_TEMP/br/output/images/system.img" out/
           if [ -f "$RUNNER_TEMP/t48s-sdk.tar.gz" ]; then cp "$RUNNER_TEMP/t48s-sdk.tar.gz" out/; fi
@@ -162,10 +181,31 @@ jobs:
           gh release upload sdk-latest out/t48s-sdk.tar.gz out/t48s-sdk.tar.gz.sha256 --clobber
           rm out/t48s-sdk.tar.gz.sha256
 
+      # The updater's testing channel. No SSH keys in either file (docs/access.md).
+      - name: System image and kernel as the rolling pre-release system-latest
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir latest
+          cp out/VERSION out/system.img out/T48S-kernel.uimg latest/
+          (cd latest && sha256sum VERSION system.img T48S-kernel.uimg > SHA256SUMS)
+          git push -f origin "$GITHUB_SHA:refs/tags/system-latest"
+          notes="The newest build of the system image and the kernel, for testing: $T48_VERSION, built from $GITHUB_REF_NAME at $GITHUB_SHA. An installed phone follows it with: t48-update channel testing (docs/install.md). No SSH keys inside."
+          if gh release view system-latest >/dev/null 2>&1; then
+            gh release edit system-latest --prerelease --latest=false --title "System (latest build, testing)" --notes "$notes"
+          else
+            gh release create system-latest --prerelease --latest=false --verify-tag --title "System (latest build, testing)" --notes "$notes"
+          fi
+          # the checksums last: a phone that checks half way through an upload
+          # finds files that do not match them yet and refuses
+          gh release upload system-latest latest/VERSION latest/system.img latest/T48S-kernel.uimg --clobber
+          gh release upload system-latest latest/SHA256SUMS --clobber
+
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
-            --notes "Image-kexec (Linux 6.18) boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). t48s-live.tar.gz is the same system as the three files for a USB stick or TFTP (docs/live-image.md); it has not been cold-started on a phone yet. Image-kexec-linux3.6 is the same system on the old kernel, kept as a fallback for this release only. Image-kexec carries no SSH keys and no password, and SSH is off until it is turned on at the phone's screen (Settings, Access; docs/access.md). system.img is the system image built into it (docs/boot.md) and rootfs.cpio.gz the same files as an archive; t48s-sdk.tar.gz is the app SDK (sdk/README.md)."
+            --notes "Image-kexec (Linux 6.18) boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). t48s-live.tar.gz is the same system as the three files for a USB stick or TFTP (docs/live-image.md); it has not been cold-started on a phone yet. Image-kexec-linux3.6 is the same system on the old kernel, kept as a fallback for this release only. Image-kexec carries no SSH keys and no password, and SSH is off until it is turned on at the phone's screen (Settings, Access; docs/access.md). system.img is the system image built into it (docs/boot.md) and rootfs.cpio.gz the same files as an archive; t48s-sdk.tar.gz is the app SDK (sdk/README.md). An installed phone on the stable channel updates itself from system.img, and from T48S-kernel.uimg when asked (t48-update, docs/install.md)."
