@@ -13,15 +13,19 @@ mount -t devtmpfs devtmpfs /dev
 
 say() { echo "t48 boot: $*" > /dev/console; }
 
-rescue() {
-    say "RESCUE: $1"
-    # the loader's watchdog would reset the phone in a minute: turn it off
-    # (through the kernel's driver where there is one: V and a close stop it)
+# the loader's watchdog would reset the phone in a minute: turn it off
+# (through the kernel's driver where there is one: V and a close stop it)
+wd_off() {
     if [ -c /dev/watchdog ]; then
         printf V > /dev/watchdog
     else
         devmem 0x80017c00 32 0x1ACCE551; devmem 0x80017808 32 0; devmem 0x80017c00 32 0
     fi
+}
+
+rescue() {
+    say "RESCUE: $1"
+    wd_off
     hostname t48s-rescue
     ifconfig lo 127.0.0.1 up
     ifconfig eth0 up
@@ -64,7 +68,7 @@ rescue() {
 # The installed phone (issues 8 and 29, docs/flash.md): the kernel came from the
 # flash (t48boot=flash) and the system image is in one of two slots in UBI on the
 # app partition. Which one, and the one try a new slot gets: /lib/t48-slots.sh.
-SLOT=
+SLOT= SLOT_NOTE=
 flash_slot() {
     APP=$(sed -n 's/^mtd\([0-9]*\):.*"t48app"$/\1/p' /proc/mtd)
     [ -n "$APP" ] || { WHY="This kernel has no flash."; return 1; }
@@ -77,7 +81,27 @@ flash_slot() {
     [ -n "$found" ] || { WHY="The install is not finished. Run the installer again."; return 1; }
     ubiattach -m "$APP" -d 0 /dev/ubi_ctrl >/dev/null 2>&1 || { WHY="The flash does not attach."; return 1; }
     . /lib/t48-slots.sh
-    slot_plan
+    # X held at power-on: the rescue menu (issue 32), before any try is counted
+    if [ -n "$MENU" ]; then
+        wd_off
+        state_read
+        first=$S_ACTIVE
+        [ "$S_TRIAL" = - ] || [ "$S_TRIES" -lt 1 ] || first=$S_TRIAL
+        MENU_OTHER=$(slot_other "$first")
+        menu_main key
+        say "rescue menu: $MENU_CHOICE"
+        case "$MENU_CHOICE" in
+        rescue) rescue "Rescue chosen at the menu." ;;
+        wipe) data_aside && say "settings put aside in /data/$DATA_ASIDE" || say "settings could not be put aside" ;;
+        esac
+    fi
+    if [ "$MENU_CHOICE" = other ]; then
+        # this start only: nothing is written down, and it is not made the active slot
+        SLOT_ORDER="$MENU_OTHER $first"
+        SLOT_NOTE=menu
+    else
+        slot_plan
+    fi
     for s in $SLOT_ORDER; do
         if slot_load "$s" /system.img && mount -t squashfs -o loop,ro /system.img /sysroot 2>/dev/null; then
             [ -x /sysroot/sbin/init ] && { SLOT=$s; return 0; }
@@ -97,7 +121,20 @@ if [ -f /system.img ]; then
     mount -t squashfs -o loop,ro "$IMG" /sysroot 2>/dev/null || rescue "The system image is damaged: it does not mount."
     [ -x /sysroot/sbin/init ] || rescue "The system image has no init."
 elif grep -qw t48boot=flash /proc/cmdline; then
-    flash_slot || rescue "$WHY"
+    MENU= MENU_CHOICE=
+    if [ -f /lib/t48-menu.sh ]; then
+        . /lib/t48-menu.sh
+        t48-keys held x 2>/dev/null && MENU=key
+    fi
+    if ! flash_slot; then
+        # nothing starts: the menu, which ends in rescue by itself
+        if [ -f /lib/t48-menu.sh ]; then
+            wd_off
+            menu_main failed "$WHY"
+            [ "$MENU_CHOICE" != restart ] || { sync; reboot -f; sleep 10; }
+        fi
+        rescue "$WHY"
+    fi
     IMG="slot $SLOT"
 else
     rescue "No system image was found."

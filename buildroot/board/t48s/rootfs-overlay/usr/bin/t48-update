@@ -285,6 +285,8 @@ confirm)
     cur=$(booted)
     state_read
     case "$cur" in a|b) ;; *) exit 0 ;; esac
+    # started from the rescue menu for this once: nothing changes
+    [ "$(sed -n 's/^note=//p' "$RUN/t48-slot" 2>/dev/null)" != menu ] || exit 0
     # on trial; or running because the active slot did not start, or the note was lost
     [ "$cur" = "$S_TRIAL" ] || { [ "$S_TRIAL" = - ] && [ "$cur" != "$S_ACTIVE" ]; } || { [ "$S_VALID" = 0 ] && [ "$cur" = "$S_ACTIVE" ]; } || exit 0
     # well enough: the shell is up

@@ -7,6 +7,9 @@ config GPIO_BCMRING
 	depends on GPIOLIB
 	select GPIOLIB_IRQCHIP
 
+config T48S_SECURE
+	bool "T48S: serial port interrupt after a start from U-Boot"
+
 config T48S_KEYPAD
 	bool "T48S keypad and hook switch"
 	depends on INPUT
