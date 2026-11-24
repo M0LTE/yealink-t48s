@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /*
- * The T48 app protocol, API level 2: what goes over the socket between the
+ * The T48 app protocol, API level 3: what goes over the socket between the
  * shell and an app. The written description is docs/app-protocol.md; this
  * header is the same thing for C programs.
  *
@@ -13,7 +13,10 @@
 
 #include <stdint.h>
 
-#define T48_API_LEVEL 2   /* 2 added THEME and the font file; a level 1 app or shell skips both */
+/* 2 added THEME and the font file; a level 1 app or shell skips both.
+ * 3 added flipping (FLIPINFO, FLIP, FLIPPED, the flip buffers), times on KEY
+ * and TOUCH, and the soft keys; an older app or shell sees none of it. */
+#define T48_API_LEVEL 3
 
 /* The shell starts the app with these in its environment. */
 #define T48_ENV_SOCKET "T48_SOCKET_FD"   /* number of the socket file descriptor */
@@ -21,6 +24,7 @@
 #define T48_ENV_APP_ID "T48_APP_ID"      /* the id from the manifest */
 #define T48_ENV_APP_DATA "T48_APP_DATA"  /* the app's own writable folder */
 #define T48_ENV_FONTS "T48_FONTS_FD"     /* level 2: number of the font file's descriptor (struct t48_fonts_hdr) */
+#define T48_ENV_FLIP "T48_FLIP_FD"       /* level 3: number of the flip buffers' descriptor (struct t48_msg_flipinfo) */
 
 struct t48_msg_hdr {
     uint16_t type;
@@ -37,12 +41,15 @@ struct t48_msg_hdr {
 #define T48_MSG_RESUME 7    /* no payload: in front again, redraw everything */
 #define T48_MSG_QUIT 8      /* no payload: exit within one second or be killed */
 #define T48_MSG_THEME 9     /* level 2: struct t48_msg_theme; before START, and whenever the owner changes the look */
+#define T48_MSG_FLIPINFO 10 /* level 3: struct t48_msg_flipinfo; before START */
+#define T48_MSG_FLIPPED 11  /* level 3: struct t48_msg_flipped: the answer to FLIP */
 
 /* app to shell */
 #define T48_MSG_READY 0x81   /* struct t48_msg_ready; the answer to START */
 #define T48_MSG_DAMAGE 0x82  /* struct t48_msg_rect: this part of the buffer changed */
 #define T48_MSG_PAUSED 0x83  /* no payload: optional answer to PAUSE, "freeze me now" */
 /* 0x84 is kept for asking for an audio stream (a later API level) */
+#define T48_MSG_FLIP 0x85    /* level 3: struct t48_msg_flip: show this flip buffer at the next refresh */
 
 #define T48_FORMAT_XRGB8888 0  /* one 32-bit word per pixel, 0x00RRGGBB */
 
@@ -69,6 +76,49 @@ struct t48_msg_touch {
     uint8_t state;      /* T48_TOUCH_* */
     uint8_t pad;
     int16_t x, y;       /* screen pixels */
+};
+
+/* Level 3. An app that answered READY with 3 or more gets KEY and TOUCH in
+ * these longer forms: the same start, then when it happened, in microseconds
+ * of CLOCK_MONOTONIC. */
+struct t48_msg_key3 {
+    uint16_t code;
+    uint8_t state;
+    uint8_t pad[5];
+    uint64_t time_us;
+};
+
+struct t48_msg_touch3 {
+    uint8_t state;
+    uint8_t pad;
+    int16_t x, y;
+    uint16_t pad2;
+    uint64_t time_us;
+};
+
+/* Flipping (level 3). T48_ENV_FLIP names a descriptor holding `count` pictures
+ * of the screen one after another, each `size` bytes, laid out as HELLO says
+ * (width, height, stride, format). The app draws a whole picture into one and
+ * sends FLIP; the shell shows it at the screen's next refresh, without
+ * tearing, and answers FLIPPED. On the phone the screen is pointed at the
+ * buffer itself: nothing is copied. count 0: this shell cannot flip. */
+struct t48_msg_flipinfo {
+    uint16_t count;     /* buffers */
+    uint16_t pad;
+    uint32_t size;      /* bytes from one buffer to the next */
+    uint32_t period_us; /* one refresh of the screen, in microseconds */
+};
+
+struct t48_msg_flip {
+    uint16_t buffer;    /* 0 to count - 1 */
+    uint16_t pad;
+};
+
+struct t48_msg_flipped {
+    uint16_t buffer;    /* the buffer of the FLIP this answers */
+    uint16_t pad;
+    uint32_t frame;     /* the screen's refreshes, counted: a step of more than one is a missed refresh */
+    uint64_t time_us;   /* when it reached the screen: microseconds of CLOCK_MONOTONIC */
 };
 
 /* The look: colours by what they are for, shapes, and the font family. A later
@@ -143,6 +193,10 @@ struct t48_msg_rect {
 #define T48_KEY_RIGHT 0x103
 #define T48_KEY_OK 0x104
 #define T48_KEY_BACK 0x105   /* a short press on X; a long press is Home and never reaches the app */
+#define T48_KEY_SOFT1 0x110  /* level 3: the four soft keys under the screen of a phone that has them, left to right */
+#define T48_KEY_SOFT2 0x111
+#define T48_KEY_SOFT3 0x112
+#define T48_KEY_SOFT4 0x113
 
 #define T48_TOUCH_UP 0
 #define T48_TOUCH_DOWN 1

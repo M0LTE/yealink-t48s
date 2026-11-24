@@ -1,0 +1,9 @@
+{
+  "id": "fliptest",
+  "name": "Screen test",
+  "version": "0.1.0",
+  "description": "A moving bar and a frame count, to check flipping for tearing",
+  "api": 3,
+  "exec": "fliptest",
+  "permissions": []
+}

@@ -47,6 +47,7 @@ enum screen { SCR_IDLE, SCR_LAUNCHER, SCR_APP, SCR_CALL, SCR_MESSAGE, SCR_HISTOR
 static const char *const screen_names[] = {"idle", "launcher", "app", "call", "message", "history", "settings", "contacts"};
 
 static const struct backend *be;
+long long shell_input_us;
 static uint32_t ui_px[SW * SH];
 t48_surface ui = {ui_px, SW, SH, SW};
 static t48_surface app_surface = {NULL, SW, SH, SW};
@@ -91,6 +92,7 @@ void shell_mkdirs(const char *path)
 }
 
 const char *shell_screen_name(void) { return screen_names[scr]; }
+const struct backend *shell_backend(void) { return be; }
 unsigned shell_app_frames(void) { return app_frames; }
 void shell_stop(int status) { stopping = 1; exit_status = status; }
 
@@ -328,11 +330,25 @@ static void draw_starting(void)
     t48_text_centre(&ui, SW / 2, 210, &t48_font_head, C_DIM, b);
 }
 
+/* The screen shows the shell's own frame again, not an app's flip buffer.
+ * Called after that frame has been drawn, so nothing stale is seen. */
+static void screen_home(void)
+{
+    if (be->flip_show) be->flip_show(-1);
+}
+
+void shell_screen_flush(const uint32_t *src)
+{
+    be->flush(src, SW, 0, 0, SW, SH);
+    screen_home();
+}
+
 static void redraw(void)
 {
     idle_text(idle_shown, sizeof idle_shown);
     if (scr == SCR_APP && app_shown && app_pixels()) {
-        be->flush(app_pixels(), SW, 0, 0, SW, SH);
+        if (app_flip() >= 0) app_flip_show();   /* its last whole picture, wherever that is kept */
+        else shell_screen_flush(app_pixels());
         return;
     }
     switch (scr) {
@@ -347,7 +363,7 @@ static void redraw(void)
     }
     phone_draw_overlay();
     if (scr != SCR_CALL) watch_draw_overlay();
-    be->flush(ui_px, SW, 0, 0, SW, SH);
+    shell_screen_flush(ui_px);
 }
 
 static void show(enum screen s)
@@ -464,6 +480,21 @@ void shell_app_damage(int x, int y, int w, int h)
     if (x + w > SW) w = SW - x;
     if (y + h > SH) h = SH - y;
     be->flush(app_pixels(), SW, x, y, w, h);
+    screen_home();
+}
+
+/* The app has sent a whole picture to show. 1: it is in front, show it. */
+int shell_app_flip(void)
+{
+    app_frames++;
+    if (scr != SCR_APP) return 0;
+    app_shown = 1;
+    return 1;
+}
+
+void shell_flipped(int n, unsigned frame, long long time_us)
+{
+    app_flipped(n, frame, time_us);
 }
 
 void shell_app_gone(const char *name, const char *why)
@@ -521,8 +552,9 @@ void shell_key(int code, int down)
         return;
     }
     if (code >= SK_SOFT1 && code <= SK_SOFT4) {
-        /* the bottom row of buttons, where a screen has one */
-        if (down && scr == SCR_HISTORY) phone_history_soft(code - SK_SOFT1);
+        /* the bottom row of buttons, where a screen has one; in an app, the app's (level 3) */
+        if (scr == SCR_APP) app_key(T48_KEY_SOFT1 + code - SK_SOFT1, down);
+        else if (down && scr == SCR_HISTORY) phone_history_soft(code - SK_SOFT1);
         else if (down && scr == SCR_CONTACTS) contacts_soft(code - SK_SOFT1);
         return;
     }
@@ -682,6 +714,7 @@ const char *shell_state(const char *key)
     if (!strcmp(key, "screen")) return screen_names[scr];
     if (!strcmp(key, "app")) return app_states[app_state()];
     if (!strcmp(key, "appid")) return app_id()[0] ? app_id() : "-";
+    if (!strcmp(key, "flip")) return app_flip() >= 0 ? "on" : "off";
     if (!strcmp(key, "theme")) return T->name;
     if (!strcmp(key, "font")) return T->font;
     const char *v = contacts_state(key);

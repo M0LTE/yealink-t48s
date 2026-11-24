@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /* t48-shell: the one running app. Starts it with a socket and a shared screen
  * buffer, speaks the shell side of the app protocol (docs/app-protocol.md),
- * pauses, freezes, resumes and stops it, and notices when it dies. */
+ * pauses, freezes, resumes and stops it, and notices when it dies.
+ *
+ * Flipping (level 3): the app is also lent whole pictures of the screen. Where
+ * the screen can show them itself (the phone: be_fb.c, /dev/t48flip) a FLIP
+ * costs no copy and FLIPPED follows the screen's own refresh. Anywhere else
+ * (the simulator, a screen the picture is fitted to) they are a file in
+ * memory, a FLIP is one copy, and FLIPPED comes sixty times a second. */
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -20,6 +26,9 @@
 #define START_MS 5000   /* an app that has not answered START by then is killed */
 #define GRACE_MS 1000   /* between PAUSE and freezing, and between QUIT and killing */
 #define BUF_BYTES (SW * SH * 4)
+#define COPY_BUFFERS 3       /* flip buffers where the screen has none of its own: as many as the phone */
+#define COPY_PERIOD_US 16667 /* and how often they are shown */
+#define FLIP_LATE_US 100000  /* a screen that has not shown a flip by then is not going to say */
 
 static struct {
     enum app_state state;
@@ -32,6 +41,15 @@ static struct {
     ino_t dir_ino;
     long long deadline;       /* for STARTING, PAUSING and QUITTING */
     const char *kill_reason;  /* set when the shell kills it for misbehaving */
+    int api;                  /* the level it answered READY with */
+    uint32_t *flip_map;       /* the flip buffers, where the shell copies them; NULL: the screen shows them itself */
+    int flip_count;
+    size_t flip_size;
+    unsigned flip_period;     /* microseconds */
+    int flip_now;             /* the buffer of its last FLIP, -1: it draws by DAMAGE */
+    int flip_wait;            /* the buffer whose FLIPPED is owed, -1: none */
+    long long flip_due;       /* microseconds: when a copied flip is shown, or when we stop waiting for the screen */
+    unsigned flip_frame;
     unsigned char rx[1024];
     size_t rx_n;
 } app = {.sock = -1};
@@ -124,9 +142,60 @@ static void send_msg(int type, const void *payload, size_t len)
     /* any other error: the app has gone, and SIGCHLD will tell us */
 }
 
+/* ---------- flipping ---------- */
+
+int app_flip(void) { return app.state == APP_NONE ? -1 : app.flip_now; }
+
+static const uint32_t *flip_pixels(int n) { return (const uint32_t *)((const char *)app.flip_map + (size_t)n * app.flip_size); }
+
+static void send_flipped(int n, unsigned frame, long long time_us)
+{
+    struct t48_msg_flipped f = {(uint16_t)n, 0, frame, (uint64_t)time_us};
+    send_msg(T48_MSG_FLIPPED, &f, sizeof f);
+    app.flip_wait = -1;
+}
+
+/* the app's last flip, on the screen: now, as it comes back to the front */
+void app_flip_show(void)
+{
+    if (app.state == APP_NONE || app.flip_now < 0) return;
+    if (app.flip_map) shell_screen_flush(flip_pixels(app.flip_now));
+    else shell_backend()->flip_show(app.flip_now);
+}
+
+static void flip(int n)
+{
+    long long now = t48_now_us();
+    if (app.flip_wait >= 0) send_flipped(app.flip_wait, app.flip_frame, now);   /* overtaken: never shown */
+    app.flip_now = n;
+    if (app.state != APP_RUNNING || !shell_app_flip()) {
+        /* off the screen: nothing to wait for. It is shown when the app is back in front. */
+        send_flipped(n, app.flip_frame, now);
+        return;
+    }
+    app.flip_wait = n;
+    if (app.flip_map) {
+        app.flip_due = (now / app.flip_period + 1) * app.flip_period;
+    } else {
+        shell_backend()->flip_show(n);
+        app.flip_due = now + FLIP_LATE_US;
+    }
+}
+
+/* the screen says buffer n is showing */
+void app_flipped(int n, unsigned frame, long long time_us)
+{
+    if (app.state == APP_NONE) return;
+    app.flip_frame = frame;
+    if (app.flip_wait == n) send_flipped(n, frame, time_us);
+}
+
 int app_launch(const struct manifest *m)
 {
-    int sv[2], buf_fd, fonts_fd;
+    int sv[2], buf_fd, fonts_fd, flip_fd = -1, flip_count = 0, flip_ours = 0;
+    size_t flip_size = 0;
+    unsigned flip_period = 0;
+    uint32_t *flip_map = NULL;
     char path[400], data[400], conf[400];
 
     if (app.state != APP_NONE) { snprintf(errbuf, sizeof errbuf, "Another app is running"); return -1; }
@@ -147,6 +216,18 @@ int app_launch(const struct manifest *m)
         return -1;
     }
 
+    /* flip buffers: the screen's own if it has them, otherwise a file as big as three screens, which uses no
+     * memory until an app draws in it */
+    const struct backend *be = shell_backend();
+    if (be->flip_info && be->flip_info(&flip_fd, &flip_count, &flip_size, &flip_period) == 0) {
+        be->flip_clear();   /* the last app's pictures */
+    } else if ((flip_fd = make_file("flip", COPY_BUFFERS * (size_t)BUF_BYTES)) >= 0) {
+        flip_map = mmap(NULL, COPY_BUFFERS * (size_t)BUF_BYTES, PROT_READ, MAP_SHARED, flip_fd, 0);
+        if (flip_map == MAP_FAILED) { close(flip_fd); flip_fd = -1; flip_map = NULL; }
+        else { flip_ours = 1; flip_count = COPY_BUFFERS; flip_size = BUF_BYTES; flip_period = COPY_PERIOD_US; }
+    }
+    if (flip_fd < 0) flip_count = 0;
+
     /* the app's own folder */
     uid_t uid = uid_for(m->id);
     mkdir(opt.data, 0755);
@@ -160,17 +241,20 @@ int app_launch(const struct manifest *m)
         munmap(buf, BUF_BYTES);
         close(buf_fd); close(sv[0]); close(sv[1]);
         if (fonts_fd >= 0) close(fonts_fd);
+        if (flip_ours) { munmap(flip_map, COPY_BUFFERS * (size_t)BUF_BYTES); close(flip_fd); }
         return -1;
     }
     if (pid == 0) {
         char num[16];
         setpgid(0, 0);
-        /* socket on 3, buffer on 4, fonts on 5, nothing else of ours */
+        /* socket on 3, buffer on 4, fonts on 5, flip buffers on 6, nothing else of ours */
         int s = fcntl(sv[1], F_DUPFD, 10), b = fcntl(buf_fd, F_DUPFD, 10), f = fonts_fd < 0 ? -1 : fcntl(fonts_fd, F_DUPFD, 10);
+        int fl = flip_fd < 0 ? -1 : fcntl(flip_fd, F_DUPFD, 10);
         dup2(s, 3);
         dup2(b, 4);
         if (f >= 0) dup2(f, 5); else close(5);
-        for (int fd = 6; fd < 256; fd++) close(fd);
+        if (fl >= 0) dup2(fl, 6); else close(6);
+        for (int fd = 7; fd < 256; fd++) close(fd);
         if (geteuid() == 0 && (setgroups(0, NULL) < 0 || setgid(uid) < 0 || setuid(uid) < 0)) _exit(126);
         prctl(PR_SET_PDEATHSIG, SIGKILL);  /* an app is no use without its shell (set after the change of user, which clears it) */
         if (chdir(m->dir) < 0) _exit(126);
@@ -179,6 +263,7 @@ int app_launch(const struct manifest *m)
         snprintf(num, sizeof num, "%d", 4);
         setenv(T48_ENV_BUFFER, num, 1);
         if (f >= 0) setenv(T48_ENV_FONTS, "5", 1);
+        if (fl >= 0) setenv(T48_ENV_FLIP, "6", 1);
         setenv(T48_ENV_APP_ID, m->id, 1);
         setenv(T48_ENV_APP_DATA, data, 1);
         setenv("HOME", data, 1);
@@ -191,8 +276,14 @@ int app_launch(const struct manifest *m)
     close(sv[1]);
     close(buf_fd);
     if (fonts_fd >= 0) close(fonts_fd);   /* the app's copy keeps the file for as long as the app lives */
+    if (flip_ours) close(flip_fd);
 
     memset(&app, 0, sizeof app);
+    app.flip_map = flip_map;
+    app.flip_count = flip_count;
+    app.flip_size = flip_size;
+    app.flip_period = flip_period;
+    app.flip_now = app.flip_wait = -1;
     app.state = APP_STARTING;
     app.pid = pid;
     app.sock = sv[0];
@@ -208,6 +299,8 @@ int app_launch(const struct manifest *m)
 
     struct t48_msg_hello h = {T48_API_LEVEL, SW, SH, T48_FORMAT_XRGB8888, SW * 4, BUF_BYTES};
     send_msg(T48_MSG_HELLO, &h, sizeof h);
+    struct t48_msg_flipinfo fi = {(uint16_t)flip_count, 0, (uint32_t)flip_size, flip_period};
+    send_msg(T48_MSG_FLIPINFO, &fi, sizeof fi);
 
     /* settings: the manifest's defaults, unless the owner has set them (config.c) */
     snprintf(conf, sizeof conf, "apps/%s", m->id);
@@ -234,6 +327,7 @@ void app_theme(void)
 void app_pause(void)
 {
     if (app.state != APP_RUNNING) return;
+    if (app.flip_wait >= 0) send_flipped(app.flip_wait, app.flip_frame, t48_now_us());   /* the screen is no longer its own */
     send_msg(T48_MSG_PAUSE, NULL, 0);
     app.state = APP_PAUSING;
     app.deadline = t48_now_ms() + GRACE_MS;
@@ -271,16 +365,29 @@ void app_kill_now(void)
     kill_app(SIGKILL);
 }
 
+/* A level 3 app gets the time with each key and touch, and the soft keys. */
 void app_key(int code, int down)
 {
-    struct t48_msg_key k = {(uint16_t)code, (uint8_t)down, 0};
-    if (app.state == APP_RUNNING) send_msg(T48_MSG_KEY, &k, sizeof k);
+    if (app.state != APP_RUNNING) return;
+    if (app.api >= 3) {
+        struct t48_msg_key3 k = {(uint16_t)code, (uint8_t)down, {0}, (uint64_t)shell_input_us};
+        send_msg(T48_MSG_KEY, &k, sizeof k);
+    } else if (code < T48_KEY_SOFT1 || code > T48_KEY_SOFT4) {
+        struct t48_msg_key k = {(uint16_t)code, (uint8_t)down, 0};
+        send_msg(T48_MSG_KEY, &k, sizeof k);
+    }
 }
 
 void app_touch(int state, int x, int y)
 {
-    struct t48_msg_touch t = {(uint8_t)state, 0, (int16_t)x, (int16_t)y};
-    if (app.state == APP_RUNNING) send_msg(T48_MSG_TOUCH, &t, sizeof t);
+    if (app.state != APP_RUNNING) return;
+    if (app.api >= 3) {
+        struct t48_msg_touch3 t = {(uint8_t)state, 0, (int16_t)x, (int16_t)y, 0, (uint64_t)shell_input_us};
+        send_msg(T48_MSG_TOUCH, &t, sizeof t);
+    } else {
+        struct t48_msg_touch t = {(uint8_t)state, 0, (int16_t)x, (int16_t)y};
+        send_msg(T48_MSG_TOUCH, &t, sizeof t);
+    }
 }
 
 void app_readable(void)
@@ -303,6 +410,7 @@ void app_readable(void)
         if (h.type == T48_MSG_READY && h.len >= sizeof(struct t48_msg_ready)) {
             struct t48_msg_ready r;
             memcpy(&r, p, sizeof r);
+            app.api = r.api;
             if (app.state == APP_STARTING) {
                 app.state = APP_RUNNING;
                 logmsg("app %s ready (API level %d)", app.id, r.api);
@@ -310,7 +418,21 @@ void app_readable(void)
         } else if (h.type == T48_MSG_DAMAGE && h.len >= sizeof(struct t48_msg_rect)) {
             struct t48_msg_rect r;
             memcpy(&r, p, sizeof r);
-            if (app.state == APP_RUNNING) shell_app_damage(r.x, r.y, r.w, r.h);
+            if (app.state == APP_RUNNING && app.flip_now >= 0) {
+                /* back from flipping to the shared buffer: all of it */
+                if (app.flip_wait >= 0) send_flipped(app.flip_wait, app.flip_frame, t48_now_us());
+                app.flip_now = -1;
+                shell_app_damage(0, 0, SW, SH);
+            } else if (app.state == APP_RUNNING) {
+                shell_app_damage(r.x, r.y, r.w, r.h);
+            } else {
+                app.flip_now = -1;   /* off the screen: it is the shared buffer that comes back */
+            }
+        } else if (h.type == T48_MSG_FLIP && h.len >= sizeof(struct t48_msg_flip)) {
+            struct t48_msg_flip f;
+            memcpy(&f, p, sizeof f);
+            if (f.buffer >= app.flip_count) { misbehaved("Protocol error"); return; }
+            if (app.state == APP_RUNNING || app.state == APP_PAUSING) flip(f.buffer);
         } else if (h.type == T48_MSG_PAUSED) {
             if (app.state == APP_PAUSING) freeze();
         }
@@ -320,15 +442,38 @@ void app_readable(void)
     }
 }
 
-int app_timeout(long long now)
+static int state_timeout(long long now)
 {
     if (app.state != APP_STARTING && app.state != APP_PAUSING && app.state != APP_QUITTING) return -1;
     return app.deadline > now ? (int)(app.deadline - now) : 0;
 }
 
+int app_timeout(long long now)
+{
+    int t = state_timeout(now);
+    if (app.state != APP_NONE && app.flip_wait >= 0) {
+        long long us = app.flip_due - t48_now_us();
+        int f = us > 0 ? (int)((us + 999) / 1000) : 0;
+        if (t < 0 || f < t) t = f;
+    }
+    return t;
+}
+
 void app_tick(long long now)
 {
-    if (app_timeout(now) != 0) return;
+    if (app.state != APP_NONE && app.flip_wait >= 0 && t48_now_us() >= app.flip_due) {
+        int n = app.flip_wait;
+        if (app.flip_map) {
+            /* a screen that copies: this is its refresh */
+            shell_screen_flush(flip_pixels(n));
+            app.flip_frame = (unsigned)(app.flip_due / app.flip_period);
+            send_flipped(n, app.flip_frame, app.flip_due);
+        } else {
+            logmsg("app %s: the screen did not say that a flip was shown", app.id);
+            send_flipped(n, app.flip_frame, t48_now_us());
+        }
+    }
+    if (state_timeout(now) != 0) return;
     if (app.state == APP_STARTING) {
         misbehaved("Did not start");
         app.deadline = now + GRACE_MS;
@@ -366,6 +511,7 @@ void app_reaped(pid_t pid, int status)
     snprintf(name, sizeof name, "%s", app.name);
     if (app.sock >= 0) close(app.sock);
     munmap(app.buf, BUF_BYTES);
+    if (app.flip_map) munmap(app.flip_map, COPY_BUFFERS * (size_t)BUF_BYTES);
     memset(&app, 0, sizeof app);
     app.sock = -1;
     shell_app_gone(name, reason);

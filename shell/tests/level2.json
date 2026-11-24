@@ -1,0 +1,7 @@
+{
+  "id": "level2",
+  "name": "Level two",
+  "version": "0.1.0",
+  "api": 2,
+  "exec": "level2"
+}
