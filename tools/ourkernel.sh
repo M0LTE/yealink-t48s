@@ -1,5 +1,7 @@
 #!/bin/sh
-# ourkernel.sh boot [IMAGE]   : start our kernel from Yealink and wait for its shell prompt
+# ourkernel.sh boot [IMAGE]   : start our kernel from Yealink and wait for its shell prompt.
+#                              IMAGE defaults to dumps/Image-kexec: Linux 6.18 (kernel6/) since issue 55.
+#                              The 3.6 fallback, Image-kexec-linux3.6, starts the same way.
 # ourkernel.sh cmd "COMMAND" [SECONDS] : run a command in its serial shell, print the output
 # ourkernel.sh ssh ["COMMAND"] : SSH into our kernel (DHCP + dropbear, key login; fresh host key each boot).
 #                              Needs a development build, the only kind with SSH on from boot (docs/access.md)

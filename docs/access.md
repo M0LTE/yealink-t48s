@@ -38,7 +38,7 @@ With the web setup page turned on ([web.md](web.md)) there is an easier way: pas
 
 ## Our own test builds
 
-`kernel/build.sh` adds `kernel/kexec-rootfs/root.authorized_keys`, if that file is in the build folder, to the image as `/etc/t48-dev/authorized_keys`. That makes it a **development build**:
+`kernel6/build.sh` adds the file named by `AUTHORIZED_KEYS` (or `root.authorized_keys` in its work folder), and `kernel/build.sh` for the 3.6 fallback adds `kernel/kexec-rootfs/root.authorized_keys` if that file is in the build folder, to the image as `/etc/t48-dev/authorized_keys`. That makes it a **development build**:
 
 - SSH is on from boot, whatever the setting says, and those keys can always log in. `tools/ourkernel.sh ssh` and `tools/phone-input.sh` work with nobody at the phone, as before.
 - The Access page says so, and its SSH switch cannot be moved. Removing keys removes only keys added later.

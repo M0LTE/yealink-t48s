@@ -1,6 +1,6 @@
-# kernel6: a current kernel for the T48S
+# kernel6: the phone's kernel
 
-Issue [#38](https://github.com/M0LTE/yealink-t48s/issues/38). A feasibility spike: can the phone leave Linux 3.6.11 (2012) for a kernel that is still maintained? **`kernel/` (3.6.11) is still the phone's kernel.** This one lives beside it until it can do everything the old one does.
+Issues [#38](https://github.com/M0LTE/yealink-t48s/issues/38) and [#55](https://github.com/M0LTE/yealink-t48s/issues/55). **Linux 6.18 is the phone's kernel since 2026-11-24**: it is what CI builds as `Image-kexec` and the live set, and what the release carries. It began as a spike to leave Linux 3.6.11 (2012) for a kernel that is still maintained. [`kernel/`](../kernel/README.md) (3.6.11) is kept as a fallback build, `Image-kexec-linux3.6`, for one release.
 
 ## Which kernel, which compiler (issue #39)
 
@@ -30,21 +30,23 @@ docker run --rm -u $(id -u):$(id -g) -v $PWD:/w -w /w -e ROOTFS=/w/rootfs.cpio.g
 `ROOTFS` is Buildroot's first stage or root filesystem (`buildroot/`), as for `kernel/build.sh`; the same one serves both kernels. The result is `work/zImage-t48s`: the compressed kernel with the device tree on the end and the root filesystem inside. A rebuild after changing a driver or the device tree takes well under a minute, because the source tree is kept.
 
 ```
-ROOTFS=firststage.cpio SYSTEM=system.img OUT=Image6-kexec   # the whole system, for kexec (what CI publishes)
+ROOTFS=firststage.cpio SYSTEM=system.img OUT=Image-kexec    # the whole system, for kexec (what CI publishes)
 ROOTFS=firststage.cpio SLOT=1                               # first stage alone; fails if over the 2.5 MB kernel slot
 ROOTFS=firststage.cpio LIVE=1                               # T48S.bin for U-Boot's recovery mode (stick or TFTP)
 ```
 
 `LIVE=1` makes the kernel file of the live image ([docs/live-image.md](../docs/live-image.md), "The same with Linux 6.18"): a U-Boot image of the same kernel with `dts/bcm11188-yealink-t48s-live.dts`, which adds the ramdisk U-Boot loads and `t48boot=live` to the device tree. U-Boot's own hand-over (tags, no device tree) is not used. The build ends by checking the file's addresses (`tools/mkliveimage.py checkbin`).
 
-CI (`.github/workflows/build.yml`) builds all three after the 3.6 image, from the same first stage and system image, and publishes `Image6-kexec` beside `Image-kexec`.
+CI (`.github/workflows/build.yml`) builds all three and publishes `Image-kexec` and the live set (`t48s-live.tar.gz`). The 3.6 fallback, `Image-kexec-linux3.6`, is built from the same first stage and system image.
+
+A development build (SSH on from boot, with our keys) takes `AUTHORIZED_KEYS=FILE`, or a file `root.authorized_keys` in the work directory. Keys are never in this repository ([docs/access.md](../docs/access.md#our-own-test-builds)).
 
 ## Booting
 
-The same way as the old kernel, with the same loader and no changes to it:
+By kexec from Yealink's firmware, with the loader in `kmod/`:
 
 ```
-sh tools/ourkernel.sh boot work/zImage-t48s
+sh tools/ourkernel.sh boot work/Image-kexec
 ```
 
 The loader copies the file to 0x00408000 and jumps to it. This file is a self-extracting kernel: it finds the device tree on its own end, reads where RAM starts from it (0x00400000), unpacks itself there and starts. The loader passes no device tree and needs to know nothing about one.
@@ -55,7 +57,9 @@ The loader copies the file to 0x00408000 and jumps to it. This file is a self-ex
 
 `qemu-live-test.sh` does the same for a live start: it lays `T48S.bin` and `T48S.rfs` out in memory as the phone's U-Boot does, enters the kernel with U-Boot's registers and a copy of its tag list, and passes if the system image from the ramdisk ends up running, unchanged, with our command line.
 
-## Status (2026-11-23)
+## Status (2026-11-24)
+
+**Tom's hands-on test passed on 2026-11-24** (issue #55): every key and the hook switch give the right codes, touch works by finger, all four lamps are right steady and blinking, the backlight steps and goes off, and handset and speaker calls to the echo service sounded right. The table below is from the day before, when most of that had only been checked by reading registers back.
 
 **It runs on the phone, with `/data` in flash.** Started from Yealink's firmware by the unchanged loader, Linux 6.18.65 reaches the shell prompt about 10 seconds after the jump, and the whole system built against 6.18 headers (first stage, system image, `t48-shell` on the screen, the audio service, SSH) comes up on it. `reboot` works and lands in Yealink 55 seconds later.
 
@@ -103,13 +107,12 @@ A filesystem made fresh by 6.18 would be in a newer format (w5) that 3.6 can onl
 
 ## What is left before 3.6 can go (issue #55)
 
-Done here: the flash, the watchdog from userspace, CI, the boot-mode reader, one root filesystem for both kernels.
+Done: the flash, the watchdog from userspace, the boot-mode reader, one root filesystem for both kernels, the hands-on test at the phone (keys, hook, touch, lamps, sound: 2026-11-24), and 6.18 as the default in CI, the release and `tools/ourkernel.sh` (2026-11-24).
 
-Needs someone at the phone:
+Still needs someone at the phone:
 
-- real key presses, the hook, a finger on the screen, the lamps by eye, sound out of the handset and speaker (the hands-on list is in issue #55);
 - a cold start through U-Boot. Only the kexec start has been run on the phone. The live build exists (`LIVE=1`) and passes its checks on a PC; the test to run, with what to watch on the serial port, is "Cold-boot test for Linux 6.18" in [docs/live-image.md](../docs/live-image.md).
 
-Then: make 6.18 the default in CI and `tools/ourkernel.sh`, move `t48s_bootmode.c` here, build the root filesystem against 6.18 headers (`buildroot/configs/kernel6.fragment`), drop the `/dev/mem` half of `t48-watchdog`, and remove `kernel/`.
+When the fallback goes, after one release: move `t48s_bootmode.c` here, build the root filesystem against 6.18 headers (`buildroot/configs/kernel6.fragment`; it is built against 3.6 headers until then so that one root filesystem runs on both), drop the `/dev/mem` half of `t48-watchdog`, and remove `kernel/`.
 
 Found on the way, all fixed here: the kernel's unpacker ignores an appended device tree when it works out where RAM starts (`patches/0003`); this SoC's watchdog has its lock register at 0x400 and treats a load of 0 as 2^32 (`patches/0002`); the generic memory-mapped GPIO driver cannot share the pins with drivers that change them directly; programs built against 3.6 headers need `CONFIG_COMPAT_32BIT_TIME` or `sleep` returns at once.

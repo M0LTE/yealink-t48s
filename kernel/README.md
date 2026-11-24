@@ -1,4 +1,8 @@
-# Our kernel for the T48S
+# Linux 3.6.11 for the T48S: the fallback kernel
+
+**Since 2026-11-24 this is not the phone's kernel.** Linux 6.18 in [`kernel6/`](../kernel6/README.md) is (issue [#55](https://github.com/M0LTE/yealink-t48s/issues/55)). This one is still built by CI from the same root filesystem, as `Image-kexec-linux3.6`, for one release, in case 6.18 shows a fault the old kernel does not have. After that it goes. `kernel/build.sh` is also still where our development keys get into a 3.6 test build, and `drivers/t48s_bootmode.c` is shared with `kernel6/`.
+
+The rest of this page is as it was written while this was the only kernel.
 
 **Status (2026-11-22): boots to a busybox shell on the serial console.** U-Boot's recovery mode (option 1, TFTP) loads it with our ramdisk; it prints the full boot log on ttyAMA0, mounts the ext2 ramdisk, runs our init, draws a banner on the screen through `/dev/mem`, and gives a working shell (`t48s#`). Timekeeping is right (`sleep 10` takes 10.007 s); BogoMIPS reads 498.89, matching Yealink's 498.07 (see "CPU speed" below). Ethernet works (our driver, below); the kexec build gets an address by DHCP and runs dropbear for key-only SSH. The screen, keys, hook switch and touchscreen have drivers too (below); and sound in and out (ALSA capture and playback, [docs/audio.md](../docs/audio.md)); and the NAND flash, read-only (`docs/nand.md`).
 

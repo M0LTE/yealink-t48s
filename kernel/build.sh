@@ -1,4 +1,5 @@
 #!/bin/sh
+# Linux 3.6.11: the FALLBACK kernel since issue 55 (the phone's kernel is kernel6/).
 # Build the T48S kernel inside the t48s-kbuild:trusty container (gcc 4.7).
 # Run from the directory holding linux-3.6.11/ and this kernel/ directory.
 #   sh kernel/build.sh          -> T48S.bin   (U-Boot image, for recovery-mode TFTP boot)
@@ -12,7 +13,9 @@
 #                                  tools/mkliveimage.py makes from system.img. Keys
 #                                  go in only if AUTHORIZED_KEYS names a file.
 #   ROOTFS=firststage.cpio SYSTEM=system.img sh kernel/build.sh kexec
-#                               -> Image-kexec (raw Image for kmod/t48kexec). Its
+#                               -> Image-kexec-linux3.6 (raw Image for kmod/t48kexec;
+#                                  the fallback since issue 55: the phone's kernel
+#                                  is kernel6/, whose image is Image-kexec). Its
 #                                  initramfs is the first stage with the system
 #                                  image beside it as /system.img, both from
 #                                  buildroot/build.sh (docs/boot.md). Without
@@ -216,7 +219,7 @@ done
 grep -q "^CONFIG_MTD_NAND=y" .config
 if [ "$VARIANT" = kexec ]; then
     make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j12 Image 2>&1 | tail -n 3
-    cp arch/arm/boot/Image ../Image-kexec
+    cp arch/arm/boot/Image ../Image-kexec-linux3.6
     exit 0
 fi
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j12 zImage 2>&1 | tail -n 5

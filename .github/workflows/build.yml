@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Builds the root filesystem (Buildroot) and the kexec kernel images with that root
-# filesystem built in: Image-kexec (Linux 3.6, the default) and Image6-kexec (Linux
-# 6.18, kernel6/). Artifacts on pushes to main; a release on a v* tag. The SDK
+# Builds the root filesystem (Buildroot) and the kernel images with that root
+# filesystem built in. Linux 6.18 (kernel6/) is the phone's kernel since issue 55:
+# Image-kexec, and the live set for a USB stick or TFTP (t48s-live.tar.gz). Linux
+# 3.6 (kernel/) is still built from the same root filesystem as a fallback, for
+# one release: Image-kexec-linux3.6. Artifacts on pushes to main; a release on a
+# v* tag. The SDK
 # is built only for tags and runs started by hand (gh workflow run build.yml), and
 # each of those also updates the rolling pre-release "sdk-latest" (sdk/README.md).
 # No SSH keys go into anything built here, so what it builds starts with SSH off
@@ -83,7 +86,9 @@ jobs:
           path: linux-3.6.11.tar.xz
           key: linux-3.6.11
 
-      - name: "Kernel (kexec image: first stage and system image built in)"
+      # The fallback (issue 55): the old kernel with the same first stage and system
+      # image. To be dropped, with kernel/, after one release.
+      - name: "Fallback kernel, Linux 3.6 (kexec image: first stage and system image built in)"
         run: |
           [ -f linux-3.6.11.tar.xz ] || curl -fsSLO https://cdn.kernel.org/pub/linux/kernel/v3.x/linux-3.6.11.tar.xz
           echo "$LINUX_SHA256  linux-3.6.11.tar.xz" | sha256sum -c -
@@ -95,16 +100,16 @@ jobs:
           docker run --rm -u "$(id -u):$(id -g)" -v "$RUNNER_TEMP/k:/w" -w /w -e ROOTFS=firststage.cpio -e SYSTEM=system.img \
             t48s-kbuild:trusty sh kernel/build.sh kexec
 
-      # The current kernel (kernel6/, issue 38) beside 3.6, from the same first
-      # stage and system image. Stock Debian compiler in a container; the kernel
-      # source is cached, and kernel6/build.sh checks its SHA-256.
+      # The phone's kernel (kernel6/, issues 38 and 55), from the same first stage
+      # and system image. Stock Debian compiler in a container; the kernel source
+      # is cached, and kernel6/build.sh checks its SHA-256.
       - name: Linux 6.18 source cache
         uses: actions/cache@v4
         with:
           path: k6-src
           key: linux6-${{ hashFiles('kernel6/build.sh') }}
 
-      - name: "Kernel 6.18 (kexec image, the fit in the 2.5 MB kernel slot, and the live kernel)"
+      - name: "Kernel, Linux 6.18 (kexec image, the fit in the 2.5 MB kernel slot, and the live set)"
         run: |
           docker build -q --build-arg QEMU= -t t48s-kbuild6:trixie kernel6/
           mkdir -p "$RUNNER_TEMP/k6" k6-src
@@ -114,17 +119,18 @@ jobs:
           # what would go in the kernel partition: the kernel with the first stage alone
           k6 -e SLOT=1 -e OUT=zImage6-slot
           # what kexec starts: the same with the system image beside the first stage
-          k6 -e SYSTEM=/w/system.img -e OUT=Image6-kexec
-          # what U-Boot's recovery mode starts (docs/live-image.md): build only. The
-          # build checks the file's addresses; the generator then makes the set from it
-          k6 -e LIVE=1 -e OUT=T48S6.bin
-          python3 tools/mkliveimage.py build "$RUNNER_TEMP/live6" bin="$RUNNER_TEMP/k6/T48S6.bin" system="$RUNNER_TEMP/br/output/images/system.img" kernel=6.18
+          k6 -e SYSTEM=/w/system.img -e OUT=Image-kexec
+          # what U-Boot's recovery mode starts (docs/live-image.md). The build checks
+          # the file's addresses; the generator then makes the set from it
+          k6 -e LIVE=1 -e OUT=T48S.bin
+          python3 tools/mkliveimage.py build "$RUNNER_TEMP/t48s-live" bin="$RUNNER_TEMP/k6/T48S.bin" system="$RUNNER_TEMP/br/output/images/system.img" kernel=6.18
           ls k6-src/linux-*.tar.xz >/dev/null 2>&1 || cp "$RUNNER_TEMP"/k6/linux-*.tar.xz k6-src/
 
       - name: Collect outputs
         run: |
           mkdir out
-          cp "$RUNNER_TEMP/k/Image-kexec" "$RUNNER_TEMP/k6/Image6-kexec" out/
+          cp "$RUNNER_TEMP/k6/Image-kexec" "$RUNNER_TEMP/k/Image-kexec-linux3.6" out/
+          tar -C "$RUNNER_TEMP" -czf out/t48s-live.tar.gz t48s-live
           cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" "$RUNNER_TEMP/br/output/images/system.img" out/
           if [ -f "$RUNNER_TEMP/t48s-sdk.tar.gz" ]; then cp "$RUNNER_TEMP/t48s-sdk.tar.gz" out/; fi
           gzip -9 out/rootfs.cpio
@@ -159,4 +165,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
-            --notes "Image-kexec boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). Image6-kexec is the same system on Linux 6.18 instead of 3.6, started the same way. It carries no SSH keys and no password, and SSH is off until it is turned on at the phone's screen (Settings, Access; docs/access.md). system.img is the system image built into it (docs/boot.md) and rootfs.cpio.gz the same files as an archive; t48s-sdk.tar.gz is the app SDK (sdk/README.md)."
+            --notes "Image-kexec (Linux 6.18) boots by kexec from Yealink's firmware (tools/ourkernel.sh boot). t48s-live.tar.gz is the same system as the three files for a USB stick or TFTP (docs/live-image.md); it has not been cold-started on a phone yet. Image-kexec-linux3.6 is the same system on the old kernel, kept as a fallback for this release only. Image-kexec carries no SSH keys and no password, and SSH is off until it is turned on at the phone's screen (Settings, Access; docs/access.md). system.img is the system image built into it (docs/boot.md) and rootfs.cpio.gz the same files as an archive; t48s-sdk.tar.gz is the app SDK (sdk/README.md)."

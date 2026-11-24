@@ -2,6 +2,8 @@
 
 Issue [#17](https://github.com/M0LTE/yealink-t48s/issues/17). Design: [architecture.md](architecture.md#1-userspace-base).
 
+The kernel is Linux 6.18 ([`kernel6/`](../kernel6/README.md)) since 2026-11-24 (issue [#55](https://github.com/M0LTE/yealink-t48s/issues/55)). Linux 3.6 ([`kernel/`](../kernel/README.md)) is still built from the same two files as a fallback, `Image-kexec-linux3.6`, for one release. Everything below is the same on both.
+
 A boot is made of two files, both from one Buildroot run:
 
 | File | What | Size |
@@ -23,7 +25,7 @@ A boot is made of two files, both from one Buildroot run:
 
 The first stage looks, in this order:
 
-1. **In RAM beside the kernel**, as the file `/system.img`. That is how a kexec boot works (`kernel/build.sh kexec` packs it next to the first stage), and a recovery-mode (live) boot too: U-Boot loads a second file as a ramdisk, `T48S.rfs`, and that is a cpio archive holding `system.img`, which lands in the same place ([live-image.md](live-image.md#what-is-in-the-two-files-and-why)).
+1. **In RAM beside the kernel**, as the file `/system.img`. That is how a kexec boot works (`kernel6/build.sh` with `SYSTEM=system.img` packs it next to the first stage; `kernel/build.sh kexec` does the same for the 3.6 fallback), and a recovery-mode (live) boot too: U-Boot loads a second file as a ramdisk, `T48S.rfs`, and that is a cpio archive holding `system.img`, which lands in the same place ([live-image.md](live-image.md#what-is-in-the-two-files-and-why)).
 2. **In flash**, a system slot, once the phone is installed (issue #29). Not written yet; the script has the place for it.
 
 Either way it is the same file, mounted the same way (squashfs through a loop device), so there is one system image however the phone was started. It costs its own size in RAM, about 4 MB, against 7 MB when everything was unpacked.
@@ -69,7 +71,7 @@ While the phone is started by kexec from Yealink's firmware, a reset lands back 
 
 Before that, the loader's own 90-second watchdog covers the boot: `rcS` turns it off once the system image is up (`t48-watchdog off`), and rescue turns it off so that it can stay. `back-to-yealink` resets the phone with `t48-watchdog reset`.
 
-The same program works under both kernels and picks its way when it starts: through `/dev/watchdog` where the kernel has a driver for the timer (Linux 6.18, the standard ARM SP805 driver), and straight at the registers through `/dev/mem` where it has none (Linux 3.6). Its first line in `/var/log/t48/watchdog/current` says which.
+The same program works under both kernels and picks its way when it starts: through `/dev/watchdog` where the kernel has a driver for the timer (Linux 6.18, the standard ARM SP805 driver), and straight at the registers through `/dev/mem` where it has none (the 3.6 fallback). Its first line in `/var/log/t48/watchdog/current` says which.
 
 ## Sizes that matter
 

@@ -74,7 +74,7 @@ Limits: the kernel file under 4 MB (or the ramdisk lands on its end; `kernel/bui
 
 ## The same with Linux 6.18
 
-Issue [#55](https://github.com/M0LTE/yealink-t48s/issues/55). The stick or TFTP folder is the same three files; only `T48S.bin` differs. Linux 3.6 stays the default until #55 switches it. **Built and checked on a PC (2026-11-23); not yet started on the phone**: the [cold-boot test](#cold-boot-test-for-linux-618) below is that first start.
+Issue [#55](https://github.com/M0LTE/yealink-t48s/issues/55). The stick or TFTP folder is the same three files; only `T48S.bin` differs. **Linux 6.18 is the default since 2026-11-24**: CI builds this set and the release carries it as `t48s-live.tar.gz`. The 3.6 set described above is the fallback and is built by hand. **Built and checked on a PC (2026-11-23); not yet started on the phone**: the [cold-boot test](#cold-boot-test-for-linux-618) below is that first start.
 
 ```
 ROOTFS=firststage.cpio LIVE=1 sh kernel6/build.sh WORKDIR     # in the kernel6 container: WORKDIR/T48S.bin

@@ -11,11 +11,11 @@ buildroot/build.sh WORKDIR sdk      # Buildroot's SDK tarball, also in output/im
 
 `build.sh` downloads the pinned Buildroot release (the 2026.02.x long-term line), checks its SHA-256 and builds `t48s_defconfig`. Set `BR2_DL_DIR` and `BR2_CCACHE_DIR` to share downloads and the compiler cache between builds. The host needs Buildroot's usual packages and nothing else. A first build takes about half an hour on 8 cores.
 
-To boot it, build it into the kernel (`kernel/README.md`), then `tools/ourkernel.sh boot Image-kexec`.
+To boot it, build it into the kernel ([`kernel6/README.md`](../kernel6/README.md)), then `tools/ourkernel.sh boot Image-kexec`.
 
 ## What is in it
 
-musl, ARM1176 soft-float, Linux 3.6 headers, everything static. The same files run under Linux 6.18 (`kernel6/`), which CI builds from them too; the one program that cares which kernel it is on, `t48-watchdog`, finds out when it starts.
+musl, ARM1176 soft-float, Linux 3.6 headers, everything static. The phone's kernel is Linux 6.18 (`kernel6/`) since issue #55; the headers stay at 3.6 for one more release so that the same files also run on the 3.6 fallback (`kernel/`), which CI still builds from them. The one program that cares which kernel it is on, `t48-watchdog`, finds out when it starts.
 
 - busybox (init, DHCP, NTP from the DHCP servers), dropbear (off until the owner turns it on at the screen, key login only: [docs/access.md](../docs/access.md)), curl with mbedTLS and a CA bundle. runit from busybox supervises the services. busybox's UBI tools for `/data` in flash ([docs/flash.md](../docs/flash.md)); no mtd-utils and no raw flash applets, and the kernel driver writes only our own range.
 - `t48-shell` on the screen at boot, with the clock app in `/usr/share/t48/apps` (packages `t48-shell`, `libt48`). The same program is `t48-app` ([docs/apps.md](../docs/apps.md)) and `t48-config` ([docs/settings.md](../docs/settings.md)); `t48-apply` makes the running phone follow a changed settings file. libt48's static library and headers are in staging, so the SDK has them.
@@ -37,6 +37,6 @@ musl, ARM1176 soft-float, Linux 3.6 headers, everything static. The same files r
 
 The screen fonts for `native/` are committed in `native/gen/`; `make -C native fonts` regenerates them (needs python3-pil and the DejaVu fonts).
 
-SSH keys never go into this output, and an image made from it alone starts with SSH off. `kernel/build.sh` adds our keys for our own test builds only, which also turns SSH on in them ([docs/access.md](../docs/access.md#our-own-test-builds)).
+SSH keys never go into this output, and an image made from it alone starts with SSH off. `kernel6/build.sh` (and `kernel/build.sh` for the fallback) adds our keys for our own test builds only, which also turns SSH on in them ([docs/access.md](../docs/access.md#our-own-test-builds)).
 
 Two things about HTTPS on this image, both found when the app manager first tried it (2026-11-23). curl is built with no default CA bundle, so `t48-app` and `/etc/profile` point it at `/etc/ssl/certs/ca-certificates.crt`. And Linux 3.6's `/dev/random` blocks for want of entropy, which hung curl for ever, so `rcS` replaces it with the non-blocking pool after stirring in what differs between phones and boots; that is weak just after boot, and a seed kept across boots needs issue #29.
