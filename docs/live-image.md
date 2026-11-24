@@ -4,6 +4,8 @@ Issue [#7](https://github.com/M0LTE/yealink-t48s/issues/7). This is the "try it"
 
 **Where this stands (2026-11-23).** Proven on the phone: our kernel and root filesystem boot through recovery mode over TFTP. Done offline since: a ROM file we are allowed to share, the stick generator and checker, the formatting script, the live boot step and its screen note, and the move onto the first stage and system image of [boot.md](boot.md) (built and checked; not yet started on the phone in this form). **Not working: the USB stick.** Two different sticks (a 4 GB one on 2026-11-22, a 32 GB SanDisk Ultra Fit on 2026-11-23) both froze U-Boot at the same line, before it read anything from them. It is not the files, the format or anything the stick says: see [Why the sticks froze](#why-the-sticks-froze). **Until a stick is seen to work, the way to try our firmware is TFTP** (menu option 1), which works.
 
+**Other models.** A set for the T46S (`T46S.rom`, `T46S.bin`, `T46S.rfs`) is built the same way with `MODEL=t46s` and `model=T46S`; it has not been started on a T46S yet. See [models.md](models.md), which also has the test plan for a T46S owner.
+
 ## The stick
 
 | File | What |
