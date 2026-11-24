@@ -28,7 +28,7 @@ MODE=$1; DIR=$2
 setup() {
     KREL=$($SSH uname -r)
     case "$KREL" in
-    3.6.*) NR=nandread; SUF= ;;
+    3.6.*|6.*) NR=nandread; SUF= ;;      # ours: Linux 3.6 or 6.18
     *)  # Yealink: read-only device nodes, our tool in /tmp
         NR=/tmp/nandread; SUF=ro
         scp -q -O -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \

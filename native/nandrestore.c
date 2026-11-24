@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /* nandrestore [-s BLOCKS] /dev/mtdN < BACKUP      put a backup back into a partition
- * nandrestore -n [-o OUT] < BACKUP               on any PC: what a restore would write
+ * nandrestore -b /dev/mtdN < FILE                 write a plain file (a kernel image)
+ * nandrestore -e BLOCKS [-s BLOCKS] /dev/mtdN     erase blocks, and check them erased
+ * nandrestore -c [-s BLOCKS] /dev/mtdN < BACKUP   compare only: nothing is written
+ * nandrestore -n [-o OUT] < BACKUP                on any PC: what a restore would write
+ * nandrestore -f CHIP -p NAME ...                 on any PC: any of the above against a
+ *                                                 file that stands in for the flash
  *
- * The other half of nandread -o (issue #30, docs/backup.md). BACKUP is a run of
- * pages, each 2048 data bytes followed by its 64 spare bytes; -s skips that many
- * 128 KB blocks of the partition first, and the restore covers as many whole blocks
- * as the input holds.
+ * The other half of nandread -o (issues #30 and #8, docs/backup.md, docs/install.md).
+ * BACKUP is a run of pages, each 2048 data bytes followed by its 64 spare bytes; -s
+ * skips that many 128 KB blocks of the partition first, and the restore covers as
+ * many whole blocks as the input holds.
  *
  * For each block: erase it, check that it reads back erased, then write every page
  * the backup has data in, with the backup's free spare bytes (where Yealink's
@@ -14,14 +19,30 @@
  * page again and compares all 2112 bytes with the backup, ECC included. It stops at
  * the first difference, write error or bad block.
  *
- * Our kernel's driver only writes the ranges compiled into it
- * (kernel/drivers/t48s_nand.c), so this cannot touch the loader, U-Boot or anything
- * else outside them, whatever it is asked.
+ * -b takes a plain file instead (pages without spare bytes): the whole partition is
+ * erased, the file written from its start, and each page compared with the file and
+ * with the ECC bytes this program works out for it. For the kernel partition.
+ *
+ * -e erases without writing: BLOCKS blocks, each checked erased, spare bytes too.
+ *
+ * -c opens the flash read-only and compares it with BACKUP, all 2112 bytes of every
+ * page. It prints how many pages differ.
+ *
+ * Our kernel's driver only writes the ranges compiled into it, and only while its
+ * lock for that range is open (kernel6/drivers/t48s_nand.c), so this cannot touch
+ * the loader, U-Boot or anything else outside them, whatever it is asked.
  *
  * -n needs no phone: it works out the bytes a restore would leave in the flash (the
  * data and free spare bytes from the backup, the ECC computed afresh the way the
  * driver does) and compares them with the backup. "identical" means a restore puts
- * back exactly what was read. -o also writes those bytes to a file. */
+ * back exactly what was read. -o also writes those bytes to a file.
+ *
+ * -f CHIP -p NAME needs no phone either. CHIP is a file holding the whole flash as
+ * nandread -o would dump it (the twelve partitions of a backup, one after another),
+ * and NAME is a partition of it. The file is treated as the driver treats the
+ * flash: only kernel and app can be erased or written, a page must be erased before
+ * it is written, and the ECC bytes are worked out here. For rehearsing an install
+ * and the way back on a PC (tools/test-install.sh). */
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -129,58 +150,202 @@ static int dry_run(const char *outpath)
     return differ ? 1 : 0;
 }
 
-static int read_page(int fd, unsigned a, uint8_t *rec)
+/* ---- the flash: a real MTD device, or a file standing in for the whole chip ---- */
+
+static const struct { const char *name; unsigned off, size; int ours; } parts[] = {
+    { "ubl", 0x00000000, 0x00020000, 0 }, { "uboot", 0x00020000, 0x00100000, 0 },
+    { "env", 0x00120000, 0x00100000, 0 }, { "userenv", 0x00220000, 0x00100000, 0 },
+    { "logo", 0x00320000, 0x00100000, 0 }, { "smkern", 0x00420000, 0x00280000, 0 },
+    { "smrfs", 0x006a0000, 0x00f00000, 0 }, { "kernel", 0x015a0000, 0x00280000, 1 },
+    { "rfs", 0x01820000, 0x00f00000, 0 }, { "app", 0x02720000, 0x04ae0000, 1 },
+    { "cfg", 0x07200000, 0x00400000, 0 }, { "data", 0x07600000, 0x00a00000, 0 },
+};
+
+static int fd = -1;
+static int model;                   /* fd is a chip file, not an MTD device */
+static unsigned part_off, part_size, model_ours;
+
+static void as_written(const uint8_t *rec, uint8_t *out);
+
+static int dev_read(unsigned a, uint8_t *rec)
 {
+    if (model) {
+        if (pread(fd, rec, REC, (off_t)((part_off + a) / PAGE) * REC) != REC) { perror("chip file"); return -1; }
+        return 0;
+    }
     struct mtd_oob_buf ob = { a, SPARE, rec + PAGE };
     if (pread(fd, rec, PAGE, a) != PAGE) { fprintf(stderr, "read at 0x%x: %s\n", a, strerror(errno)); return -1; }
     if (ioctl(fd, MEMREADOOB, &ob)) { fprintf(stderr, "spare read at 0x%x: %s\n", a, strerror(errno)); return -1; }
     return 0;
 }
 
+static int dev_bad(unsigned b)
+{
+    if (model) {
+        uint8_t rec[REC];
+        return dev_read(b, rec) ? -1 : rec[PAGE] != 0xff;
+    }
+    long long off = b;
+    return ioctl(fd, MEMGETBADBLOCK, &off) > 0;
+}
+
+static int dev_erase(unsigned b)
+{
+    if (model) {
+        static uint8_t ff[PPB * REC];
+        if (!model_ours) { fprintf(stderr, "erase at 0x%x refused: not ours to write\n", part_off + b); errno = EROFS; return -1; }
+        memset(ff, 0xff, sizeof(ff));
+        if (pwrite(fd, ff, sizeof(ff), (off_t)((part_off + b) / PAGE) * REC) != sizeof(ff)) { perror("chip file"); return -1; }
+        return 0;
+    }
+    struct erase_info_user ei = { b, PPB * PAGE };
+    if (ioctl(fd, MEMERASE, &ei)) { fprintf(stderr, "erase at 0x%x: %s\n", b, strerror(errno)); return -1; }
+    return 0;
+}
+
+/* one page with its free spare bytes; the ECC bytes are the driver's to work out */
+static int dev_write(unsigned a, const uint8_t *rec)
+{
+    if (model) {
+        uint8_t now[REC], out[REC];
+        if (!model_ours) { fprintf(stderr, "write at 0x%x refused: not ours to write\n", part_off + a); errno = EROFS; return -1; }
+        if (dev_read(a, now)) return -1;
+        if (!all_ff(now, REC)) { fprintf(stderr, "page at 0x%x is not erased; not written\n", part_off + a); errno = EIO; return -1; }
+        as_written(rec, out);
+        if (pwrite(fd, out, REC, (off_t)((part_off + a) / PAGE) * REC) != REC) { perror("chip file"); return -1; }
+        return 0;
+    }
+    struct mtd_write_req wr = { a, PAGE, SPARE, (uintptr_t)rec, (uintptr_t)(rec + PAGE), MTD_OPS_PLACE_OOB, {0} };
+    if (ioctl(fd, MEMWRITE, &wr)) { fprintf(stderr, "write at 0x%x: %s\n", a, strerror(errno)); return -1; }
+    return 0;
+}
+
+static int dev_open(const char *path, const char *part, int rw)
+{
+    fd = open(path, rw ? O_RDWR : O_RDONLY);
+    if (fd < 0) { perror(path); return -1; }
+    if (part) {
+        model = 1;
+        for (unsigned i = 0; i < sizeof(parts) / sizeof(parts[0]); i++)
+            if (!strcmp(parts[i].name, part)) {
+                part_off = parts[i].off; part_size = parts[i].size; model_ours = parts[i].ours;
+                if (lseek(fd, 0, SEEK_END) != (off_t)0x08000000 / PAGE * REC) { fprintf(stderr, "%s is not a whole chip\n", path); return -1; }
+                return 0;
+            }
+        fprintf(stderr, "no partition called %s\n", part);
+        return -1;
+    }
+    struct mtd_info_user mi;
+    if (ioctl(fd, MEMGETINFO, &mi)) { perror("MEMGETINFO"); return -1; }
+    if (mi.writesize != PAGE || mi.oobsize != SPARE || mi.erasesize != PPB * PAGE) {
+        fprintf(stderr, "not the flash this tool knows\n");
+        return -1;
+    }
+    part_size = mi.size;
+    return 0;
+}
+
+/* erase one block and see that all of it, spare bytes included, reads ff */
+static int erase_checked(unsigned b)
+{
+    uint8_t now[REC];
+    if (dev_bad(b)) { fprintf(stderr, "block at 0x%x is bad: stopping\n", b); return -1; }
+    if (dev_erase(b)) return -1;
+    for (int p = 0; p < PPB; p++) {
+        if (dev_read(b + p * PAGE, now)) return -1;
+        if (!all_ff(now, REC)) { fprintf(stderr, "block at 0x%x page %d is not erased after the erase: stopping\n", b, p); return -1; }
+    }
+    return 0;
+}
+
+/* one page of plain input: 1 read (the tail padded with ff), 0 end of input */
+static int get_plain(uint8_t *rec)
+{
+    size_t got = 0;
+    memset(rec, 0xff, REC);
+    while (got < PAGE) {
+        ssize_t r = read(0, rec + got, PAGE - got);
+        if (r < 0) { perror("read"); exit(1); }
+        if (r == 0) break;
+        got += r;
+    }
+    return got != 0;
+}
+
 int main(int argc, char **argv)
 {
-    int dry = 0, c;
+    int dry = 0, plain = 0, compare = 0, c;
+    long erase = -1;
     unsigned skip = 0;
-    const char *outpath = NULL;
-    while ((c = getopt(argc, argv, "no:s:")) != -1) {
+    const char *outpath = NULL, *chip = NULL, *part = NULL;
+    while ((c = getopt(argc, argv, "no:s:be:cf:p:")) != -1) {
         if (c == 'n') dry = 1;
         else if (c == 'o') outpath = optarg;
         else if (c == 's') skip = strtoul(optarg, NULL, 0);
+        else if (c == 'b') plain = 1;
+        else if (c == 'e') erase = strtol(optarg, NULL, 0);
+        else if (c == 'c') compare = 1;
+        else if (c == 'f') chip = optarg;
+        else if (c == 'p') part = optarg;
         else argc = 0;
     }
     ecc_init();
-    if (dry && argc == optind) return dry_run(outpath);
-    if (dry || outpath || argc - optind != 1) {
-        fprintf(stderr, "usage: nandrestore [-s BLOCKS] /dev/mtdN < BACKUP\n       nandrestore -n [-o OUT] < BACKUP\n");
+    if (dry && argc == optind && !chip) return dry_run(outpath);
+    if (dry || outpath || plain + compare + (erase >= 0) > 1 || !chip != !part ||
+        argc - optind != (chip ? 0 : 1) || (plain && skip)) {
+        fprintf(stderr, "usage: nandrestore [-s BLOCKS] [-b | -c | -e BLOCKS] /dev/mtdN < BACKUP\n"
+                        "       nandrestore -n [-o OUT] < BACKUP\n"
+                        "       nandrestore -f CHIP -p NAME [-s BLOCKS] [-b | -c | -e BLOCKS] < BACKUP\n");
         return 2;
     }
-    int fd = open(argv[optind], O_RDWR);
-    if (fd < 0) { perror(argv[optind]); return 1; }
-    struct mtd_info_user mi;
-    if (ioctl(fd, MEMGETINFO, &mi)) { perror("MEMGETINFO"); return 1; }
-    if (mi.writesize != PAGE || mi.oobsize != SPARE || mi.erasesize != PPB * PAGE) {
-        fprintf(stderr, "not the flash this tool knows\n");
-        return 1;
+    if (dev_open(chip ? chip : argv[optind], part, !compare)) return 1;
+    static uint8_t blk[PPB * REC], now[REC], want[REC];
+    unsigned blocks = 0, written = 0, differ = 0;
+    unsigned start = skip * PPB * PAGE;
+
+    if (erase >= 0) {
+        if (start + (unsigned long long)erase * PPB * PAGE > part_size) { fprintf(stderr, "more blocks than the partition has\n"); return 1; }
+        for (unsigned b = start; blocks < (unsigned)erase; b += PPB * PAGE, blocks++)
+            if (erase_checked(b)) return 1;
+        printf("%u blocks erased, and every page of them reads back erased\n", blocks);
+        return 0;
     }
-    static uint8_t blk[PPB * REC], now[REC];
-    unsigned blocks = 0, written = 0;
-    for (unsigned b = skip * mi.erasesize; get_block(blk); b += mi.erasesize, blocks++) {
-        long long off = b;
-        struct erase_info_user ei = { b, mi.erasesize };
-        if (b + mi.erasesize > mi.size) { fprintf(stderr, "the backup is longer than the partition\n"); return 1; }
-        if (ioctl(fd, MEMGETBADBLOCK, &off) > 0) { fprintf(stderr, "block at 0x%x is bad: stopping\n", b); return 1; }
-        if (ioctl(fd, MEMERASE, &ei)) { fprintf(stderr, "erase at 0x%x: %s\n", b, strerror(errno)); return 1; }
-        for (int p = 0; p < PPB; p++) {
-            if (read_page(fd, b + p * PAGE, now)) return 1;
-            if (!all_ff(now, REC)) { fprintf(stderr, "block at 0x%x page %d is not erased after the erase: stopping\n", b, p); return 1; }
+    if (compare) {
+        unsigned pages = 0;
+        for (unsigned b = start; get_block(blk); b += PPB * PAGE, blocks++) {
+            if (b + PPB * PAGE > part_size) { fprintf(stderr, "the backup is longer than the partition\n"); return 1; }
+            for (int p = 0; p < PPB; p++, pages++) {
+                if (dev_read(b + p * PAGE, now)) return 1;
+                if (memcmp(now, blk + p * REC, REC) && differ++ < 5)
+                    fprintf(stderr, "page at 0x%x differs\n", b + p * PAGE);
+            }
         }
+        printf("%u pages compared, data and spare bytes: %u differ: %s\n", pages, differ, differ ? "NOT IDENTICAL" : "identical");
+        return differ ? 1 : 0;
+    }
+    if (plain) {
+        /* the whole partition erased first, so nothing of the old contents is left */
+        for (unsigned b = 0; b < part_size; b += PPB * PAGE, blocks++)
+            if (erase_checked(b)) return 1;
+        for (unsigned a = 0; get_plain(blk); a += PAGE) {
+            if (a + PAGE > part_size) { fprintf(stderr, "the file is larger than the partition\n"); return 1; }
+            if (all_ff(blk, PAGE)) { fprintf(stderr, "the page at 0x%x of the file is all ff: not a file this can write\n", a); return 1; }
+            as_written(blk, want);
+            if (dev_write(a, blk) || dev_read(a, now)) return 1;
+            if (memcmp(now, want, REC)) { fprintf(stderr, "page at 0x%x does not read back as written: stopping\n", a); return 1; }
+            written++;
+        }
+        printf("%u blocks erased, %u pages written and read back identical, ECC bytes included\n", blocks, written);
+        return 0;
+    }
+    for (unsigned b = start; get_block(blk); b += PPB * PAGE, blocks++) {
+        if (b + PPB * PAGE > part_size) { fprintf(stderr, "the backup is longer than the partition\n"); return 1; }
+        if (erase_checked(b)) return 1;
         for (int p = 0; p < PPB; p++) {
             uint8_t *rec = blk + p * REC;
             unsigned a = b + p * PAGE;
             if (all_ff(rec, REC)) continue;
-            struct mtd_write_req wr = { a, PAGE, SPARE, (uintptr_t)rec, (uintptr_t)(rec + PAGE), MTD_OPS_PLACE_OOB, {0} };
-            if (ioctl(fd, MEMWRITE, &wr)) { fprintf(stderr, "write at 0x%x: %s\n", a, strerror(errno)); return 1; }
-            if (read_page(fd, a, now)) return 1;
+            if (dev_write(a, rec) || dev_read(a, now)) return 1;
             if (memcmp(now, rec, REC)) { fprintf(stderr, "page at 0x%x does not read back as the backup: stopping\n", a); return 1; }
             written++;
         }
