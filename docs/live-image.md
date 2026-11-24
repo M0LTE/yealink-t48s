@@ -2,7 +2,7 @@
 
 Issue [#7](https://github.com/M0LTE/yealink-t48s/issues/7). This is the "try it" path from [architecture.md](architecture.md): an owner copies four files to a USB stick, holds Speakerphone while powering the phone up, presses 2, and our firmware runs from RAM. Nothing of ours is written to the phone, and a normal power-up brings Yealink back. The same files also work from a TFTP server (menu option 1), which is how we tested first.
 
-**Where this stands (2026-11-23).** Proven on the phone: our kernel and root filesystem boot through recovery mode over TFTP. Done offline since: a ROM file we are allowed to share, the stick generator and checker, the formatting script, the live boot step and its screen note, and the move onto the first stage and system image of [boot.md](boot.md) (built and checked; not yet started on the phone in this form). **Not working: the USB stick.** Two different sticks (a 4 GB one on 2026-11-22, a 32 GB SanDisk Ultra Fit on 2026-11-23) both froze U-Boot at the same line, before it read anything from them. It is not the files, the format or anything the stick says: see [Why the sticks froze](#why-the-sticks-froze). **Until a stick is seen to work, the way to try our firmware is TFTP** (menu option 1), which works.
+**Where this stands (2026-11-24).** Works on the phone both ways: from a USB stick (menu option 2) and over TFTP (option 1), with Linux 6.18 and with Yealink's firmware never having run. The stick is the owner's route and the release's `t48s-stick.zip` is that stick ([guide.md](guide.md)). The USB freezes of 2026-11-22 and 23 were the power supply: on a supply that can give 1.5 A, U-Boot reads a stick ([Why the sticks froze](#why-the-sticks-froze)). The sections below are in the order the work was done, and the test plans in them are kept as the record.
 
 **Other models.** A set for the T46S (`T46S.rom`, `T46S.bin`, `T46S.rfs`) is built the same way with `MODEL=t46s` and `model=T46S`; it has not been started on a T46S yet. See [models.md](models.md), which also has the test plan for a T46S owner.
 
@@ -30,7 +30,7 @@ For TFTP, `tools/mkliveimage.py build OUT bin=... system=...` writes the same th
 
 ### What kind of stick, and how to format it
 
-What U-Boot 2.5.3.0-T48S needs is read from its code (`dumps/uboot.dis`); what it likes is Yealink's own advice plus caution. **No stick has worked on our phone yet**: two have frozen U-Boot before it looked at their contents ([Why the sticks froze](#why-the-sticks-froze)), so nothing in this section is proven and none of it can cure that freeze.
+What U-Boot 2.5.3.0-T48S needs is read from its code (`dumps/uboot.dis`); what it likes is Yealink's own advice plus caution. One stick is proven on our phone, a 32 GB SanDisk Ultra Fit, once the phone had a supply that could power it ([Why the sticks froze](#why-the-sticks-froze)). The rest of this section is from the code and has not been tried stick by stick.
 
 | | Needed (from the code) | Why |
 |---|---|---|
@@ -44,7 +44,7 @@ Recommended, to give the old USB code as little to dislike as possible:
 
 - **A plain, name-brand USB 2.0 stick of 4 to 32 GB.** Yealink's support notes say Kingston work best. Good buys today: SanDisk Cruzer Blade 16 or 32 GB (USB 2.0), Kingston DataTraveler SE9 or DT20 (USB 2.0). A few pounds each.
 - **One partition, FAT32, default cluster size, freshly formatted**, then only our four files copied on. That keeps each file in one piece at the start of the stick.
-- Avoid: USB 3 sticks (blue socket tongue), sticks over 32 GB (they come as exFAT and Windows will not make FAT32 on them), sticks with a built-in "CD" or security partition, multi-slot card readers, hubs and extension leads.
+- Avoid, untested: USB 3 sticks other than the one above, sticks over 32 GB (they come as exFAT and Windows will not make FAT32 on them), sticks with a built-in "CD" or security partition, multi-slot card readers, hubs and extension leads.
 - Fallbacks if a stick fails: another brand of USB 2.0 stick; an old small one from a drawer (1 to 8 GB); a single-slot USB 2.0 card reader with a 2 to 8 GB SD card.
 
 Formatting without Linux. Both of these erase the stick; check the disk number twice.
@@ -76,7 +76,7 @@ Limits: the kernel file under 4 MB (or the ramdisk lands on its end; `kernel/bui
 
 ## The same with Linux 6.18
 
-Issue [#55](https://github.com/M0LTE/yealink-t48s/issues/55). The stick or TFTP folder is the same three files; only `T48S.bin` differs. **Linux 6.18 is the default since 2026-11-24**: CI builds this set and the release carries it as `t48s-live.tar.gz`. The 3.6 set described above is the fallback and is built by hand. **Started on the phone through U-Boot on 2026-11-24**: the kernel and the screen came up, then two drivers met hardware U-Boot leaves switched off. What happened and the second test are in [Cold-boot test 2](#cold-boot-test-2-the-b6-cold-set).
+Issue [#55](https://github.com/M0LTE/yealink-t48s/issues/55). The stick or TFTP folder is the same three files; only `T48S.bin` differs. **Linux 6.18 is the default since 2026-11-24**: CI builds this set and the release carries it as `t48s-live.tar.gz`. The 3.6 set described above is the fallback and is built by hand. **Started on the phone through U-Boot on 2026-11-24.** At the first try the kernel and the screen came up, then two drivers met hardware U-Boot leaves switched off. With that fixed the second try passed: screen, touch, keys, network and sound, over TFTP and then from a stick. Both are in [Cold-boot test 2](#cold-boot-test-2-the-b6-cold-set).
 
 ```
 ROOTFS=firststage.cpio LIVE=1 sh kernel6/build.sh WORKDIR     # in the kernel6 container: WORKDIR/T48S.bin
@@ -111,7 +111,7 @@ From the code at 0x03B1581C, in order, with what the serial port and the screen 
 
 1. Speakerphone held: `scan key=40` twenty times, then the menu "1. TFTP / 2. USB" on the screen.
 2. **2** pressed: "Start Updating..." on the screen. Serial: `usb_detect start`, `USB: Port 1 has been brought up as Host`, `scanning bus 1 for devices...`, `2 USB Device(s) found` (the phone's own port and the stick).
-3. `scanning usb for storage devices...` then `1 Storage Device(s) found`. **This is where both sticks froze**, after the first of these two lines.
+3. `scanning usb for storage devices...` then `1 Storage Device(s) found`. **This is where both sticks froze** on Yealink's 0.6 A adapter, after the first of these two lines.
 4. `Usb detect,dev:0 part:1`. If instead it prints `Usb no detect` lines and the screen says **"Usb failed(-4)"**, the stick was read but has no usable partition: wrong format. "Usb failed(-1)" is the USB port failing to start. After "Usb failed" U-Boot just stops; power-cycle.
 5. It reads the first 128 bytes of `T48S.rom` and checks them: `Rom check ok`, or "Update failed(N)" on the screen.
 6. Only now does it write anything: `BOOTMODE=usbmode` into its settings partition (`userenv`), one save.
@@ -120,6 +120,8 @@ From the code at 0x03B1581C, in order, with what the serial port and the screen 
 So a stick that fails at steps 3 to 5 has changed nothing in the phone: power-cycle and it is an ordinary Yealink start. (If `T48S.bin` is missing from an otherwise good stick, U-Boot boots Yealink's safe-mode system instead, which then tries to install the `.rom`. The generator never makes such a stick and the checker rejects one.)
 
 ## Why the sticks froze
+
+**The cause, found 2026-11-24: the power supply.** Yealink's adapter is rated 5 V 0.6 A. The phone alone draws 0.65 A idle and 0.8 A while Yealink starts, measured on a bench supply (issue [#58](https://github.com/M0LTE/yealink-t48s/issues/58)), and a stick adds its own. On the bench supply U-Boot found the same SanDisk stick that had frozen it (`1 Storage Device(s) found`), read our files and started the live set. The rule for owners is a 5 V supply of 1.5 A or more. What follows is the investigation as it was written the day before, when the cause was not known; its second check, power, was the right one.
 
 **In short.** Two different sticks stop U-Boot dead at the same line. We have ruled out, with high confidence, everything a stick owner can change: the files, the partition table, the filesystem, and every answer the stick gives. U-Boot's own code, run on a PC with the second stick's real answers, finishes the scan and reports the stick. So the processor is being stopped by something below what software on a PC can see: how this U-Boot drives the phone's real USB controller once it starts talking to a stick's storage side. **Exactly what, we do not know**, and it cannot be found without the phone on the bench. No stick layout avoids it, and no U-Boot setting touches it.
 
@@ -253,6 +255,8 @@ What a reset undoes, and the driver puts back: the two external ports' forwardin
 
 ## Test plan for a daytime session
 
+Overtaken: the stick start works on a proper supply (above). Kept as the record of what was planned.
+
 **After the second freeze (2026-11-23):** the plan below was written when one stick had failed. Its first three rows are now a search for any stick that gets past `scanning usb for storage devices...`; do the three checks at the end of [Why the sticks froze](#why-the-sticks-froze) first, the empty socket before anything else. Row 3's "the format was the cause" is settled: it was not.
 
 Goal: find a stick U-Boot will read, see our firmware come up from it, and confirm the phone comes back with its settings. Allow an hour. The phone must not be in use by anything else, and it should be on Yealink's firmware with its settings backed up (`tools/nandbackup.sh` on the issue #29 branch) before starting.
@@ -365,6 +369,8 @@ tools/mkliveimage.py build B6i bin=W/T48S-inplace.bin system=system.img kernel=6
 
 **What to bring back:** the serial log from `Rom check ok` to the prompt, whether there was a click, and what worked of touch, keys, lamps, network and sound.
 
+**The result (2026-11-24).** Passed. U-Boot accepted the label; the kernel started the audio block, the touch SPI clock and the switch itself; the idle screen came up with the live note; touch, keys and handset worked, with dial tone on the handset and the loudspeaker, and the phone answered ping. The serial console stopped 7 seconds in, which was issue [#59](https://github.com/M0LTE/yealink-t48s/issues/59), since fixed.
+
 ## Decisions (Tom, 2026-11-23)
 
 1. The live image may clear `BOOTMODE` in `userenv`: yes, that one write.
@@ -372,4 +378,4 @@ tools/mkliveimage.py build B6i bin=W/T48S-inplace.bin system=system.img kernel=6
 3. The public image ships with SSH off until enabled at the screen.
 4. USB is the preferred route; TFTP stays as the developer's one.
 
-Note on 4 (2026-11-23): two sticks have frozen U-Boot and none has worked, so today TFTP is the only route that runs. The decision stands as the aim; it needs a stick that works before it can be the instruction.
+Note on 4: on 2026-11-23 two sticks had frozen U-Boot and TFTP was the only route that ran. Since 2026-11-24 the stick works, on a proper power supply, and it is the instruction.

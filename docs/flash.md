@@ -1,6 +1,6 @@
 # What we keep in flash
 
-**2026-11-24: the full layout, the installer and the way back are written and rehearsed, and wait for Tom's go-ahead: [install.md](install.md).** This page describes the phone as it is until then, and the driver.
+**Overtaken on 2026-11-24:** the phone is installed, and the whole `app` partition is ours ([install.md](install.md)). This page is the step before that, when `/data` lived beside Yealink's firmware, and the driver's first write range. Read it for how the write protection was built; read install.md for the layout of an installed phone.
 
 Issue [#29](https://github.com/M0LTE/yealink-t48s/issues/29). The design is in [architecture.md](architecture.md#flash-layout); how the chip is read and its error correction are in [nand.md](nand.md); the backup and the way back in [backup.md](backup.md).
 

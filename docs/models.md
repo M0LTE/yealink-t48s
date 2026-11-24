@@ -2,7 +2,7 @@
 
 Issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10). The T48S is the only phone this firmware has run on. This page is what we know of its sibling the SIP-T46S, how the firmware was made to tell the two apart, and how an owner can try it on a T46S without writing anything to the phone.
 
-**Where this stands (2026-11-24).** Nobody here has a T46S. Everything below was worked out from Yealink's and U-Boot's code, which is shared between the models and branches on a hardware id, and from Yealink's datasheet. A T46S live set is built and passes the same file checks as the T48S one. **It has never been started on a T46S.** The first start is the test plan at the end.
+**Where this stands (2026-11-24): try-only, and untried.** Nobody here has a T46S. Everything below was worked out from Yealink's and U-Boot's code, which is shared between the models and branches on a hardware id, and from Yealink's datasheet. A T46S live set is built and passes the same file checks as the T48S one. **It has never been started on a T46S.** The first start is the test plan at the end. The installer and the release's `t48s-stick.zip` are for the T48S only.
 
 ## What the T46S is
 
@@ -110,7 +110,7 @@ ROOTFS=firststage.cpio MODEL=t46s LIVE=1 sh kernel6/build.sh W         # in the 
 tools/mkliveimage.py build OUT bin=W/T46S.bin system=system.img model=T46S kernel=6.18
 ```
 
-`MODEL=t46s` refuses anything but a live build. The set is `T46S.rom` (our 4 KB label, which already listed id 66), `T46S.bin` and `T46S.rfs`. The one built for the first test is in `dumps/t46s/live/` on the development machine, with its checksums; it is not in a release yet.
+`MODEL=t46s` refuses anything but a live build. The set is `T46S.rom` (our 4 KB label, which already listed id 66), `T46S.bin` and `T46S.rfs`. The one built for the first test is in `dumps/t46s/live/` on the development machine, with its checksums. It is not in a release: build it as above, or ask for it on issue #10.
 
 ## Test plan for a T46S owner
 
@@ -118,7 +118,7 @@ tools/mkliveimage.py build OUT bin=W/T46S.bin system=system.img model=T46S kerne
 
 **What it costs.** One thing, and it is Yealink's doing, not ours: after a recovery start over the network, Yealink's firmware resets its own settings (account, passwords, language) the next time it starts. Use a phone whose settings you can lose, or export them first (Yealink's web page: Settings, Configuration, Export). The phone itself is not at risk: recovery mode lives in U-Boot, which nothing here touches.
 
-The installer for owners is being built separately. Do not use it on a T46S; this page's try-only start comes first.
+Do not use the T48S's stick or its Install page on a T46S: the kernel it writes is the T48S's. This page's try-only start comes first.
 
 **You need**
 

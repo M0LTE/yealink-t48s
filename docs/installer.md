@@ -2,7 +2,7 @@
 
 Issue [#33](https://github.com/M0LTE/yealink-t48s/issues/33). The owner's side is [guide.md](guide.md). The install it performs is the one in [install.md](install.md); this page is what is new around it.
 
-**Status, 2026-11-24: restore, then backup and install, ran end to end on Tom's phone.** The page was then reworked (issue [#61](https://github.com/M0LTE/yealink-t48s/issues/61)): one step at a time, progress in MB, and a restart when the stick comes out. That rework is rehearsed off the phone and has not run on one. What must be run on one is [at the end](#test-plan-for-a-real-phone).
+**Status, 2026-11-24: proven end to end on Tom's phone**, from the phone's own screen with a release stick (20261124-56eedca): Restore Yealink firmware, then from a clean stick Back up, Install and a restart into the installed firmware. The page was reworked the same day (issue [#61](https://github.com/M0LTE/yealink-t48s/issues/61)): one step at a time, progress in MB, and a restart when the stick comes out in place of a Restart button. The rework is what a release carries; it is rehearsed off the phone, and its restart has not been recorded on one. What is left to run is [at the end](#test-plan-for-a-real-phone).
 
 A phone on Yealink's firmware is started from a USB stick ([live-image.md](live-image.md)). Settings then has an Install page. It backs the whole flash up to the stick, installs only when that backup has been checked, and puts the backup back on request. No computer, no network, no keys.
 
@@ -50,7 +50,7 @@ t48s-backup/                                  made on the phone
 
 The socket is the SoC's USB controller 1: a standard EHCI whose registers start at 0x80410800, interrupt 17. The address is read from U-Boot's code (`ehci_hcd_init` at 0x03B24EC4). The interrupt is `IRQ_USBHD2` in Linux 3.6's `mach-bcmring` headers; Yealink's own kernel holds the pair as a table, 18 for controller 0 and 17 for controller 1. We first had 18, and the kernel then never heard from the controller (issue [#60](https://github.com/M0LTE/yealink-t48s/issues/60)). The kernel's own `ehci-platform` driver runs it, with USB storage, an MBR partition table and FAT. The flash kernel still fits its partition: 2,312,835 of 2,621,440 bytes.
 
-**On any start.** Clocks, the PHY and two pins are set up by U-Boot only when it reads a stick. `t48s_usb` reads three chip-control registers first: if the USB host's bus clock, the USB clock and host mode are all on, it leaves everything as U-Boot left it (`USB host is running`). If not, it does what U-Boot's routine at 0x03B24CD0 does, in the same order (`USB was off: started as a host`), and only then lets the EHCI driver in: a read of a block with no clock stops this SoC, as audio showed. Checked on the phone started from flash, 2026-11-24, by making the same writes by hand: the controller came up and counted frames, and its interrupt showed on line 17 and went away when acknowledged. Not yet seen: this kernel finding a stick.
+**On any start.** Clocks, the PHY and two pins are set up by U-Boot only when it reads a stick. `t48s_usb` reads three chip-control registers first: if the USB host's bus clock, the USB clock and host mode are all on, it leaves everything as U-Boot left it (`USB host is running`). If not, it does what U-Boot's routine at 0x03B24CD0 does, in the same order (`USB was off: started as a host`), and only then lets the EHCI driver in: a read of a block with no clock stops this SoC, as audio showed. Checked on the phone started from flash, 2026-11-24, by making the same writes by hand: the controller came up and counted frames, and its interrupt showed on line 17 and went away when acknowledged. With the fix the phone started from a stick finds it: that is how the install of 2026-11-24 ran. Not yet seen: a stick pushed into a phone started from flash or TFTP.
 
 ## The backup
 
@@ -123,6 +123,8 @@ make -C shell check                       # 11-install, 13-restore, 14-install-s
 | Kernels with USB and the userenv window build; the flash kernel fits | `kernel6/build.sh` with `LIVE=1` and `FLASH=1` |
 
 ## Test plan for a real phone
+
+Run on 2026-11-24: steps 7 to 10, with the Restart button the page then had. Left: step 6, the restart that follows the stick coming out (steps 7 and 10 as now written), step 11, and part C.
 
 Serial log running throughout (`ssh root@proxmox0 tail -f /root/t48s/session4.log`). A proper power supply. Tom's backup at hand.
 

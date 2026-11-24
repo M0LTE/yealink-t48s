@@ -58,4 +58,4 @@ tools/test-userenv.sh; tools/test-bootmode.sh; tools/test-live.sh
 - `shot.py`, `phone-input.sh`: a screenshot of the phone, and keys and touches sent to it.
 - `ylweb.py`, `ylweb82.py`, `diag82.py`, `tsh.py`, `push.py`: Yealink's own web UI and the root shell through firmware 66.82's ping box, from before the phone ran our kernel. Firmware 66.84 and later close that hole.
 
-Kernel code is GPL-2.0; everything else is AGPL-3.0-or-later.
+Kernel code is GPL-2.0; everything else is AGPL-3.0-or-later. New files carry an `SPDX-License-Identifier` line. Third-party code and the release's source archive: [NOTICE.md](../NOTICE.md). The first release's notes: [release-notes-draft.md](release-notes-draft.md).

@@ -2,11 +2,13 @@
 
 Issues [#8](https://github.com/M0LTE/yealink-t48s/issues/8) (installer), [#29](https://github.com/M0LTE/yealink-t48s/issues/29) (layout), [#30](https://github.com/M0LTE/yealink-t48s/issues/30) (way back), [#31](https://github.com/M0LTE/yealink-t48s/issues/31) (updates), [#32](https://github.com/M0LTE/yealink-t48s/issues/32) (rescue).
 
-**Status, 2026-11-24: everything is written and rehearsed. Nothing has been installed. The first write outside today's `/data` blocks waits for Tom's go-ahead.**
+**Status, 2026-11-24: installed on Tom's phone.** First from a PC with `tools/t48install.sh` (below), then restored and installed again from the phone's own screen ([installer.md](installer.md)), which is the owner's route ([guide.md](guide.md)). Every later change reached the phone through its own updater.
 
 After the install the phone starts our firmware by itself at power-on. Yealink's firmware is gone from the phone until it is restored from the backup.
 
-## The plan, for Tom
+## The install from a PC
+
+Written as the plan before the first install, and carried out as written.
 
 **What is written**
 
@@ -17,7 +19,7 @@ After the install the phone starts our firmware by itself at power-on. Yealink's
 
 Nothing else. The loader, U-Boot, both of its settings partitions, the logo, the safe-mode kernel and root filesystem, and Yealink's `rfs`, `cfg` and `data` are never written, and the driver cannot write them.
 
-**In what order, and how long.** One command on the PC, about 8 minutes, the phone stays on its normal screen throughout. The times are worked out from the flash's measured speed; only the checks have been timed on the phone (80 seconds):
+**In what order, and how long.** One command on the PC, about 8 minutes, the phone stays on its normal screen throughout:
 
 1. Checks, 2 minutes, nothing written: the backup against its checksums and the ones in [backup.md](backup.md); the phone's flash against the backup; the new kernel file as U-Boot will read it.
 2. The settings in `/data` are copied to the PC.
@@ -38,7 +40,6 @@ Nothing else. The loader, U-Boot, both of its settings partitions, the logo, the
 |---|---|---|
 | Power lost while `kernel` is written (a 10 second window) | U-Boot finds no kernel. The screen stays on the logo | Recovery mode over TFTP, then run install or restore again |
 | Power lost while `app` is written | The phone starts our kernel, which finds no system and shows the rescue screen with SSH | Run install again from the PC. Nothing at the phone |
-| Our kernel starts from flash but something differs from the recovery-mode start (it has only been started that way and by kexec) | Rescue screen, or no network | If SSH answers, fix or restore. If not, recovery mode and restore |
 | A write error or a bad block appears | The installer stops and says what to run | Run it again; it carries on from where it is |
 | Yealink's firmware meets U-Boot's leftover `BOOTMODE` flag after a restore | It resets its own settings at first start | Clear the flag first (the rescue TFTP set does it); the restore says so if the flag is set |
 
@@ -120,7 +121,7 @@ Recovery mode and safe mode are Yealink's and are untouched.
 
 The driver ([kernel6/README.md](../kernel6/README.md#flash)) can write `kernel` and `app` and nothing else, and both start every boot locked. `app` opens by itself only when the kernel was started from flash on an installed phone. Otherwise the installer opens what it needs and closes `kernel` again when it has finished. At every start the driver tries the writes it must refuse (549 attempts and questions), with the lock closed, with it open, and around the one `userenv` block of [installer.md](installer.md#the-bootmode-flag-the-one-write-outside-kernel-and-app), and gives no flash at all if one gets through.
 
-## What has been shown without writing
+## What was shown before writing
 
 | | How |
 |---|---|
@@ -131,7 +132,7 @@ The driver ([kernel6/README.md](../kernel6/README.md#flash)) can write `kernel` 
 | The way back gives the stock flash | on a copy of the whole flash in a file: after install and restore it is identical to the backup (`tools/test-install.sh bytes`) |
 | The phone as it is today | `tools/t48install.sh dry-run`, run 2026-11-24: backup matches its checksums and backup.md; ubl, uboot, env, userenv, logo, smkern, smrfs, rfs, kernel and app on the phone are identical to the backup; nothing written, lock never opened |
 
-Not shown, because it needs the write: our kernel started by U-Boot's normal boot command rather than recovery mode, and the first stage finding a slot on the phone itself (its rules are the ones rehearsed; its few lines around them have not run). Also not tried: a write to `kernel` or `app` from the phone's command line with the lock closed. The driver's self-test makes that attempt itself at every start, at all three layers.
+The write then showed the rest: U-Boot's normal boot command started our kernel from flash, and the first stage found slot a (2026-11-24, [picture](img/installed-first-boot.png)). Not tried: a write to `kernel` or `app` from the phone's command line with the lock closed. The driver's self-test makes that attempt itself at every start, at all three layers.
 
 ## Commands
 
@@ -147,9 +148,9 @@ sudo tools/test-install.sh ubi SET          # no phone
 
 `T48S-kernel.uimg` is `kernel6/build.sh` with `FLASH=1`. A phone with a bad block in `kernel` or `app` is refused for now.
 
-## The set that is ready for Tom's phone
+## The set of the first install
 
-Built 2026-11-24 from this branch, with our test builds' SSH keys in the kernel's first stage. On the development machine in `dumps/install/set/` (not in the repository). The dry run and both rehearsals above were run with exactly these files.
+Built 2026-11-24, with our test builds' SSH keys in the kernel's first stage. On the development machine in `dumps/install/set/` (not in the repository). The dry run, both rehearsals above and the install were run with exactly these files.
 
 ```
 bfe99abcb71c43b3ecaa6381d21f46b8946e0cda00b5639da53d75877cdcb7bb  T48S-kernel.uimg
@@ -177,5 +178,5 @@ Every change after the install reached Tom's phone through `t48-update` on the p
 
 The serial console, dead after every start from U-Boot until then (issue 59), answered from step 1 on.
 
-**Not done: the kernel.** The kernel with the rescue menu and the serial fix is built and its parts are tested (the menu on the phone's own screen with keys injected, [picture](img/rescue-menu.png); the first stage's nothing-starts path in QEMU; the register write on the running phone), but it has not been written to the kernel partition: that waits for one start through recovery mode, or Tom's word.
+**The kernel** with the rescue menu and the serial fix (issues #32, #59) reached the phone the same day in the kernel partition, written by the on-phone installer from the release stick 20261124-56eedca. Its parts were tested before that (the menu on the phone's own screen with keys injected, [picture](img/rescue-menu.png); the first stage's nothing-starts path in QEMU). Holding X at a real power-on has not been recorded as tried.
 
