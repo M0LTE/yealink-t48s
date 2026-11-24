@@ -115,3 +115,18 @@ sudo tools/test-install.sh ubi SET          # no phone
 ```
 
 `T48S-kernel.uimg` is `kernel6/build.sh` with `FLASH=1`. A phone with a bad block in `kernel` or `app` is refused for now.
+
+## The set that is ready for Tom's phone
+
+Built 2026-11-24 from this branch, with our test builds' SSH keys in the kernel's first stage. On the development machine in `dumps/install/set/` (not in the repository). The dry run and both rehearsals above were run with exactly these files.
+
+```
+bfe99abcb71c43b3ecaa6381d21f46b8946e0cda00b5639da53d75877cdcb7bb  T48S-kernel.uimg
+369ad67af9ee316210cf8f4f615b776a939c9a3ce4def938875d6b0e4f66dd6d  system.img
+dea5687047e26cb7348747a309299bda3b98db5dcf8ef45e375c9dde46d6ffab  kernel.dataoob
+98f22d9558e51923963bd079112456f2bd09f71df7276045782788809d1b2d94  nandrestore
+335207fc992419e162b225d2fa2a64c99a61e78642a3dbdaeb9d14fa2f7b8921  nandread
+```
+
+The backup is `dumps/stock-backup/`, with a second copy on studybox ([backup.md](backup.md)).
+
