@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /* t48-shell on the phone: the framebuffer, and the keypad, hook switch and
  * touchscreen input devices of our kernel (kernel/README.md), all grabbed so
- * nothing else sees them. */
+ * nothing else sees them.
+ *
+ * The shell draws one picture of SW x SH pixels, 32 bits each. On the T48S that
+ * is the screen, and rows are copied to it as they are. A phone with another
+ * screen (the T46S: 480x272, 16 bits, mounted upside down) gets the same
+ * picture made smaller, each screen pixel the average of the picture's pixels
+ * under it, turned if the device tree says so. See docs/models.md. */
 #include <fcntl.h>
+#include <glob.h>
 #include <linux/input.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -34,6 +42,8 @@ enum { DEV_KEYS, DEV_HOOK, DEV_TOUCH, NDEV };
 static int dev[NDEV] = {-1, -1, -1};
 static uint32_t *fb;
 static unsigned fb_stride;
+/* a screen that is not SW x SH at 32 bits: its size, depth, bytes per row, and whether it is upside down */
+static int scaled, pw, ph, pbpp, pline, turned;
 static long cal[7] = {14798, 13, -4134128, 53, 10207, -5441552, 65536};  /* factory values, from U-Boot */
 static int raw_x, raw_y, touching, was_touching, last_x, last_y;
 
@@ -67,8 +77,35 @@ static int key_code(int code)
     case KEY_AGAIN: return SK_REDIAL;
     case KEY_FORWARD: return SK_TRANSFER;
     case KEY_PROG2: return SK_SPEAKER;
+    /* the T46S's soft keys, left to right: KEY_MACRO1 to 4, by number as the
+     * root filesystem's kernel headers are older than the names */
+    case 0x290: return SK_SOFT1;
+    case 0x291: return SK_SOFT2;
+    case 0x292: return SK_SOFT3;
+    case 0x293: return SK_SOFT4;
     default: return 0;
     }
+}
+
+/* The device tree's word on how the panel is mounted: 0, or 180 for upside
+ * down. T48_ROTATE in the environment overrides it, for trying. */
+static int fb_rotation(void)
+{
+    const char *e = getenv("T48_ROTATE");
+    glob_t g;
+    int rot = 0;
+
+    if (e) return atoi(e);
+    if (glob("/proc/device-tree/framebuffer*/rotation", 0, NULL, &g) == 0 && g.gl_pathc) {
+        unsigned char b[4];
+        FILE *f = fopen(g.gl_pathv[0], "rb");
+        if (f) {
+            if (fread(b, 1, 4, f) == 4) rot = b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3];
+            fclose(f);
+        }
+    }
+    globfree(&g);
+    return rot;
 }
 
 static int fb_init(void)
@@ -79,12 +116,17 @@ static int fb_init(void)
 
     if (fd < 0) { perror(opt.fb); return -1; }
     if (ioctl(fd, FBIOGET_VSCREENINFO, &v) || ioctl(fd, FBIOGET_FSCREENINFO, &f)) { perror("framebuffer ioctl"); return -1; }
-    if (v.xres < SW || v.yres < SH || v.bits_per_pixel != 32) {
-        fprintf(stderr, "%s is %ux%u at %u bpp; need at least %dx%d at 32 bpp\n", opt.fb, v.xres, v.yres, v.bits_per_pixel, SW, SH);
-        return -1;
+    turned = fb_rotation() == 180;
+    if (v.xres < SW || v.yres < SH || v.bits_per_pixel != 32 || turned) {
+        if ((v.bits_per_pixel != 32 && v.bits_per_pixel != 16) || v.xres < 160 || v.yres < 90 || v.xres > SW || v.yres > SH) {
+            fprintf(stderr, "%s is %ux%u at %u bpp; need %dx%d or smaller, at 32 or 16 bpp\n", opt.fb, v.xres, v.yres, v.bits_per_pixel, SW, SH);
+            return -1;
+        }
+        scaled = 1; pw = (int)v.xres; ph = (int)v.yres; pbpp = (int)v.bits_per_pixel; pline = (int)f.line_length;
+        logmsg("screen %dx%d at %d bpp%s: the %dx%d picture is fitted to it", pw, ph, pbpp, turned ? ", upside down" : "", SW, SH);
     }
     fb_stride = f.line_length / 4;
-    fb = mmap(0, (size_t)f.line_length * SH, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    fb = mmap(0, (size_t)f.line_length * (scaled ? (size_t)ph : SH), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (fb == MAP_FAILED) { perror("mapping the framebuffer"); return -1; }
     /* keep the text console from drawing over us */
     int tty = open("/dev/tty0", O_RDWR);
@@ -141,6 +183,32 @@ static void fb_flush(const uint32_t *src, int stride, int x, int y, int w, int h
     if (y < 0) { h += y; y = 0; }
     if (x + w > SW) w = SW - x;
     if (y + h > SH) h = SH - y;
+    if (w <= 0 || h <= 0) return;
+    if (scaled) {
+        /* the screen pixels that any of this part of the picture falls on */
+        int dx0 = x * pw / SW, dx1 = ((x + w) * pw + SW - 1) / SW;
+        int dy0 = y * ph / SH, dy1 = ((y + h) * ph + SH - 1) / SH;
+        for (int dy = dy0; dy < dy1; dy++) {
+            int sy0 = dy * SH / ph, sy1 = ((dy + 1) * SH + ph - 1) / ph;
+            int ty = turned ? ph - 1 - dy : dy;
+            unsigned char *row = (unsigned char *)fb + (size_t)ty * pline;
+            for (int dx = dx0; dx < dx1; dx++) {
+                int sx0 = dx * SW / pw, sx1 = ((dx + 1) * SW + pw - 1) / pw;
+                unsigned r = 0, g = 0, b = 0, n = 0;
+                for (int sy = sy0; sy < sy1; sy++) {
+                    const uint32_t *sp = src + sy * stride;
+                    for (int sx = sx0; sx < sx1; sx++, n++) {
+                        r += sp[sx] >> 16 & 255; g += sp[sx] >> 8 & 255; b += sp[sx] & 255;
+                    }
+                }
+                r /= n; g /= n; b /= n;
+                int tx = turned ? pw - 1 - dx : dx;
+                if (pbpp == 16) ((uint16_t *)row)[tx] = (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | b >> 3);
+                else ((uint32_t *)row)[tx] = r << 16 | g << 8 | b;
+            }
+        }
+        return;
+    }
     for (int j = 0; j < h; j++)
         memcpy(fb + (y + j) * fb_stride + x, src + (y + j) * stride + x, (size_t)w * 4);
 }

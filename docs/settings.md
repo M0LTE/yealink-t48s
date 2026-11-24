@@ -110,7 +110,7 @@ The updater runs as a child process and the screen never waits for it: while it 
 
 ## Testing
 
-Brightness is tested in `06-backlight.script`, the Access page in `07-access.script`, themes in `10-themes.script` and the Update page in `11-update.script` (against [`shell/tests/update/update.sh`](../shell/tests/update/update.sh), which plays `t48-update` with files in place of the network and the flash) ([shell.md](shell.md#the-backlight), [access.md](access.md#testing)). `make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, the first account, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
+Brightness is tested in `06-backlight.script`, the Access page in `07-access.script`, themes in `10-themes.script` and the Update page in `12-update.script` (against [`shell/tests/update/update.sh`](../shell/tests/update/update.sh), which plays `t48-update` with files in place of the network and the flash) ([shell.md](shell.md#the-backlight), [access.md](access.md#testing)). `make -C shell check` runs [`shell/tests/04-settings.script`](../shell/tests/04-settings.script) in the simulator: every page, typing by keypad and by touch, the first account, a password (checked to be in the file, mode 600, and absent from the log), a refused address, the time zone reaching `TZ`, volumes, an app's setting reaching the app, and a call taking the screen from the keyboard and giving it back.
 
 ## On the phone (2026-11-23)
 

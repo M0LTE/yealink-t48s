@@ -520,6 +520,12 @@ void shell_key(int code, int down)
         phone_key(code, down);
         return;
     }
+    if (code >= SK_SOFT1 && code <= SK_SOFT4) {
+        /* the bottom row of buttons, where a screen has one */
+        if (down && scr == SCR_HISTORY) phone_history_soft(code - SK_SOFT1);
+        else if (down && scr == SCR_CONTACTS) contacts_soft(code - SK_SOFT1);
+        return;
+    }
     if (scr != SCR_APP && scr != SCR_CALL && watch_key(code, down)) return;   /* X on a browser's pairing code */
     switch (scr) {
     case SCR_APP:

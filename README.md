@@ -1,42 +1,24 @@
 # yealink-t48s
 
-Custom software for a scrap Yealink SIP-T48S desk phone. A toy to use for whatever: SSH into it, show packet-radio status (for example the connections open on GB7RDG), and keep it working as a SIP phone.
+Open firmware for the Yealink SIP-T48S desk phone: a current Linux kernel, a SIP phone with six accounts, contacts and call history, apps, a web setup page, SSH. It replaces Yealink's firmware, and the phone's own screen puts Yealink's back.
 
-Where things stand and what's next: [docs/status.md](docs/status.md).
+![the idle screen](docs/design/switchboard/phone-idle.png)
 
-## Layout
+## Start
 
-- `tools/` - Python helpers run from a Linux box on the same network
-  - `ylweb.py` - client for the new HTTPS web UI (66.84 and later)
-  - `ylweb82.py` - client for the old HTTP web UI (66.82)
-  - `diag82.py` - runs a shell command as root through the 66.82 ping box
-  - `tsh.py` - runs commands over the root telnet shell
-  - `push.py` - copies a file to the phone
-  - `shot.py` - screenshot of the phone (or of Yealink's hidden screen) as PNG
-  - `actionurls.py`, `linekey.py` - read or set Yealink's Action URLs and line keys
-  - `mkfont.py` - generates the fonts for `membanner`
-  - `phonecfg.py` - phone address; reads the web login from `~/.config/yealink-t48s/web-login` (`user:password`) or `T48S_LOGIN`
-- `native/` - programs for the phone, built with clang (`make`)
-- `docs/` - notes
-- `shots/`, `frames/` - screenshots and test frames
+1. A 5 V power supply of 1.5 A or more. Yealink's 0.6 A adapter is too small.
+2. Unpack `t48s-stick.zip` from the [latest release](https://github.com/M0LTE/yealink-t48s/releases/latest) onto a FAT32 USB stick.
+3. Stick in the phone. Hold **Speakerphone** while plugging the power in, then press **2**. The firmware runs from the stick; nothing is written.
+4. To keep it: **Settings, Install**. It backs the phone up to the stick first.
 
-## Logging in
+Every step, the way back and what the screen messages mean: **[docs/guide.md](docs/guide.md)**.
 
-SSH starts at boot: `ssh root@<phone>` (key login; keys in `/data/ssh/authorized_keys`). Copy files with `scp -O`.
+Not yet proven on a phone other than the author's. Where things stand: [docs/status.md](docs/status.md).
 
-If SSH is ever gone (for example after a factory reset), the web trick still gives root:
+## More
 
-```sh
-cd tools
-python3 diag82.py '127.0.0.1 -c 1;/usr/sbin/telnetd -p 2323 -l /bin/sh'
-python3 tsh.py 'id'
-```
-
-Never upgrade the phone's firmware: 66.84 and later close the hole this relies on.
-
-## Apps
-
-The pdn-soundmodem receive waterfall and the GB7RDG links screen that used to live in `native/` are apps now, in [M0LTE/yealink-t48s-apps](https://github.com/M0LTE/yealink-t48s-apps), built against the app SDK ([sdk/README.md](sdk/README.md)) and run by the shell ([docs/shell.md](docs/shell.md)).
+- Apps for the phone: [M0LTE/yealink-t48s-apps](https://github.com/M0LTE/yealink-t48s-apps), written against the app SDK ([sdk/README.md](sdk/README.md)).
+- How it is built and how it works: [docs/developing.md](docs/developing.md).
 
 ![Waterfall of GB7RDG](docs/img/waterfall-gb7rdg.png)
 

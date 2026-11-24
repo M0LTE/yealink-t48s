@@ -1,0 +1,25 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# A stand-in for the phone's t48-install (tests/11-install.script): the same
+# words in and out, a folder for its state, nothing written anywhere else.
+[ "$1" = --machine ] && shift
+D=simdata/fw; mkdir -p $D
+get() { cat $D/$1 2>/dev/null || echo "$2"; }
+case "$1" in
+status)
+    echo "live=yes"
+    if [ "$(get stick yes)" = yes ]; then echo "stick=yes"; echo "free_mb=28412"; echo "backup=$(get backup none)"; echo "backup_date=2026-11-24T16:20:00Z"; echo "files=yes"
+    else echo "stick=no"; fi
+    echo "flash=$(get flash other)" ;;
+backup)
+    echo "step 0 Reading ubl"; sleep 1; echo "step 44 Reading data"; sleep 1; echo "step 92 Checking data"; sleep 1
+    echo checked > $D/backup; echo "done Backup checked" ;;
+install)
+    [ "$(get backup none)" = checked ] || { echo "error No checked backup on the stick"; exit 1; }
+    echo "step 2 Checking the backup"; sleep 1; echo "step 15 Writing the kernel"; sleep 1; echo "step 25 Writing the system"; sleep 1
+    if [ -f $D/fail ]; then echo "error System not written. Install again"; exit 1; fi
+    echo ours > $D/flash; echo "done Installed" ;;
+restore)
+    echo "step 15 Restoring Yealink's system"; sleep 1; echo other > $D/flash; echo "done Restored" ;;
+restart) echo restarted > $D/restart; echo "done Restarting" ;;
+esac

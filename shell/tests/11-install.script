@@ -1,0 +1,90 @@
+# Install (issue 33): on a phone started from a USB stick, Settings has an
+# Install page. A stand-in for t48-install is behind it (tests/install/).
+wait 200
+touch 700 420
+expectstate settings.page root
+# not offered on an installed phone
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row About
+key x
+run sh -c "mkdir -p simdata && : > simdata/live"
+touch 700 420
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Install
+key ok
+expectstate settings.page install
+expectstate settings.rows 7
+# Install is there but cannot be chosen without a checked backup
+expectstate settings.row Back_up
+shot shots/install-before.png
+key down
+expectstate settings.row Install
+key ok
+expectstate overlay none
+key up
+key ok
+expectstate overlay busy
+wait 1500
+shot shots/install-backup.png
+wait 3000
+expectstate overlay message
+expectstate overlay.title Backup_checked
+key ok
+# the backup is done with: Install can be chosen, and asks once
+expectstate settings.rows 6
+expectstate settings.row Install
+shot shots/install-ready.png
+key ok
+expectstate overlay confirm
+expectstate overlay.title Install?
+shot shots/install-confirm.png
+key x
+expectstate overlay none
+# an install that stops says why
+run sh -c ": > simdata/fw/fail"
+key ok
+key right
+key ok
+expectstate overlay busy
+wait 4500
+expectstate overlay message
+expectstate overlay.title Stopped
+shot shots/install-stopped.png
+key ok
+run rm simdata/fw/fail
+key ok
+key right
+key ok
+wait 1500
+shot shots/install-writing.png
+wait 3000
+expectstate overlay.title Installed
+shot shots/install-done.png
+key ok
+# installed: the way back is offered instead
+expectstate settings.row Restore_Yealink_firmware
+key ok
+expectstate overlay.title Restore_Yealink_firmware?
+key right
+key ok
+wait 2500
+expectstate overlay.title Restored
+key ok
+expectstate settings.row Install

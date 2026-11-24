@@ -27,6 +27,12 @@
  * loading this driver changes nothing on the screen: it starts from what the
  * hardware holds.
  *
+ * Other T4xS models have the same PWM and another enable pin and curve. Both
+ * come from the device tree node "yealink,t4xs-backlight":
+ *   yealink,enable-pin    the enable's GPIO number, 0 to 31 (T48S 18, T46S 27)
+ *   yealink,pwm-fields    ten PWM fields, for brightness 1 to 10
+ * Without the node or a property, the T48S values above are used.
+ *
  * GPL v2.
  */
 #include <linux/module.h>
@@ -42,16 +48,16 @@
 #define CHIPC_PHYS	0x80000000
 #define CHIPC_LEDCLOCK	0x04c		/* bit 17: the PWM's clock */
 #define CHIPC_BUSCLOCK	0x05c		/* bit 16: the LED/PWM block's bus clock */
-#define CHIPC_GPIOMUX2	0x120		/* GPIO16-23, 4 bits per pin, 0 = plain GPIO */
+#define CHIPC_GPIOMUX(pin)	(0x118 + 4 * ((pin) / 8))	/* 4 bits per pin, 0 = plain GPIO */
+#define GPIOMUX_MASK(pin)	(0xfu << (((pin) % 8) * 4))
 #define CHIPC_GPIOMUX4	0x128		/* GPIO32-39 */
-#define MUX2_GPIO18	0x00000f00
 #define MUX4_GPIO35	0x0000f000
 #define MUX4_GPIO35_PWM	0x0000d000	/* function 13 */
 
 #define GPIO0_PHYS	0x80004000	/* GPIO0-31, one bit per pin */
 #define GPIO_DATA	0x000
 #define GPIO_DIR	0x400		/* 1 = output */
-#define GPIO18		(1u << 18)	/* low = lamp on */
+#define ENABLE_PIN_T48S	18		/* low = lamp on */
 
 #define PWM_PHYS	0x80002000
 #define PWM_LCD		0x40
@@ -62,6 +68,9 @@
 #define MAX_BRIGHTNESS	10
 
 static void __iomem *gpio0, *pwm;
+static u32 enable_bit = 1u << ENABLE_PIN_T48S;
+/* PWM field for brightness 1 to 10; the T48S's, 30 - 3n */
+static u8 pwm_field[MAX_BRIGHTNESS] = { 27, 24, 21, 18, 15, 12, 9, 6, 3, 0 };
 
 /* none of these registers has a set/clear form: read, change, write, interrupts off */
 static void reg_change(void __iomem *reg, u32 clear, u32 set)
@@ -77,15 +86,19 @@ static void reg_change(void __iomem *reg, u32 clear, u32 set)
 
 static int field_to_brightness(u32 field)
 {
-	int b = (30 - (int)field + 1) / 3;	/* 27 -> 1, 0 -> 10, and the nearest for anything between */
+	int i, best = 0;
 
-	return clamp(b, 1, MAX_BRIGHTNESS);
+	/* the nearest of the ten; of two equally near, the brighter (as 30 - 3n rounded before) */
+	for (i = 1; i < MAX_BRIGHTNESS; i++)
+		if (abs((int)pwm_field[i] - (int)field) <= abs((int)pwm_field[best] - (int)field))
+			best = i;
+	return best + 1;
 }
 
 /* what the hardware is doing now */
 static int t48s_bl_get_brightness(struct backlight_device *bd)
 {
-	if (readl(gpio0 + GPIO_DATA) & GPIO18)
+	if (readl(gpio0 + GPIO_DATA) & enable_bit)
 		return 0;
 	return field_to_brightness((readl(pwm + PWM_LCD) & PWM_LEVEL) >> PWM_SHIFT);
 }
@@ -98,14 +111,14 @@ static int t48s_bl_update_status(struct backlight_device *bd)
 		b = 0;
 	if (b <= 0) {
 		/* off: the enable only, as Yealink does; the level stays for next time */
-		reg_change(gpio0 + GPIO_DATA, 0, GPIO18);
+		reg_change(gpio0 + GPIO_DATA, 0, enable_bit);
 		return 0;
 	}
 	if (b > MAX_BRIGHTNESS)
 		b = MAX_BRIGHTNESS;
 	/* the level first, so the lamp comes on at the right one */
-	reg_change(pwm + PWM_LCD, PWM_LEVEL, (30 - 3 * b) << PWM_SHIFT);
-	reg_change(gpio0 + GPIO_DATA, GPIO18, 0);
+	reg_change(pwm + PWM_LCD, PWM_LEVEL, pwm_field[b - 1] << PWM_SHIFT);
+	reg_change(gpio0 + GPIO_DATA, enable_bit, 0);
 	return 0;
 }
 
@@ -118,11 +131,27 @@ static int __init t48s_backlight_init(void)
 {
 	struct backlight_properties props;
 	struct backlight_device *bd;
+	struct device_node *np;
 	void __iomem *chipc;
+	u32 pin = ENABLE_PIN_T48S;
 	int lit, started;
 
-	if (!of_machine_is_compatible("yealink,sip-t48s"))
+	if (!of_machine_is_compatible("yealink,sip-t4xs"))
 		return -ENODEV;
+	np = of_find_compatible_node(NULL, NULL, "yealink,t4xs-backlight");
+	if (np) {
+		u8 fields[MAX_BRIGHTNESS];
+
+		if (!of_property_read_u32(np, "yealink,enable-pin", &pin) && pin > 31) {
+			pr_err(DRV_NAME ": enable pin %u is not in the first GPIO bank\n", pin);
+			of_node_put(np);
+			return -EINVAL;
+		}
+		if (!of_property_read_u8_array(np, "yealink,pwm-fields", fields, MAX_BRIGHTNESS))
+			memcpy(pwm_field, fields, sizeof(pwm_field));
+		of_node_put(np);
+	}
+	enable_bit = 1u << pin;
 	chipc = ioremap(CHIPC_PHYS, 0x1000);
 	gpio0 = ioremap(GPIO0_PHYS, 0x1000);
 	pwm = ioremap(PWM_PHYS, 0x1000);
@@ -149,13 +178,13 @@ static int __init t48s_backlight_init(void)
 		reg_change(chipc + CHIPC_GPIOMUX4, MUX4_GPIO35, MUX4_GPIO35_PWM);
 	}
 	/* the enable: plain GPIO, an output; its level is left alone */
-	if (readl(chipc + CHIPC_GPIOMUX2) & MUX2_GPIO18)
-		reg_change(chipc + CHIPC_GPIOMUX2, MUX2_GPIO18, 0);
-	if (!(readl(gpio0 + GPIO_DIR) & GPIO18))
-		reg_change(gpio0 + GPIO_DIR, 0, GPIO18);
+	if (readl(chipc + CHIPC_GPIOMUX(pin)) & GPIOMUX_MASK(pin))
+		reg_change(chipc + CHIPC_GPIOMUX(pin), GPIOMUX_MASK(pin), 0);
+	if (!(readl(gpio0 + GPIO_DIR) & enable_bit))
+		reg_change(gpio0 + GPIO_DIR, 0, enable_bit);
 	iounmap(chipc);
 
-	lit = !(readl(gpio0 + GPIO_DATA) & GPIO18);
+	lit = !(readl(gpio0 + GPIO_DATA) & enable_bit);
 
 	memset(&props, 0, sizeof(props));
 	props.type = BACKLIGHT_RAW;

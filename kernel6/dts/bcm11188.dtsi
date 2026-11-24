@@ -166,6 +166,26 @@
 			status = "disabled";
 		};
 
+		/*
+		 * USB controller 1, the phone's socket: a standard EHCI at
+		 * +0x800, interrupt 18 (IRQ_USBH1). The parent is our own small
+		 * driver, which lets the EHCI driver in only when U-Boot has
+		 * switched the block on (drivers/t48s_usb.c).
+		 */
+		usbh: usb@80410000 {
+			compatible = "brcm,bcm11107-usbh";
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges;
+			status = "disabled";
+
+			ehci@80410800 {
+				compatible = "generic-ehci";
+				reg = <0x80410800 0x100>;
+				interrupts = <18>;
+			};
+		};
+
 		/* the UMI block: NAND controller with a hardware BCH engine */
 		nand: nand-controller@80001000 {
 			compatible = "brcm,bcm11107-umi-nand";

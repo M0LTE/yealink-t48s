@@ -41,7 +41,7 @@ static int __init t48s_secure_init(void)
 	void __iomem *base;
 	u32 was;
 
-	if (!of_machine_is_compatible("yealink,sip-t48s"))
+	if (!of_machine_is_compatible("yealink,sip-t4xs"))
 		return 0;
 	base = ioremap(TZPC_BASE, 0x10);
 	if (!base)

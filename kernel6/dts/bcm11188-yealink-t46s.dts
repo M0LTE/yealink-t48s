@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Yealink SIP-T46S desk phone (hardware id 66): the T48S's smaller sibling,
+ * with a 480x272 screen, no touch, ten line keys and four soft keys.
+ *
+ * NOT YET RUN ON A T46S. Everything here was read out of Yealink's and
+ * U-Boot's code for hardware id 66 (docs/models.md says what from where, and
+ * how sure each item is). Until someone has started it, treat it as a guess
+ * that is safe to try: this tree has no flash at all.
+ */
+/dts-v1/;
+
+#include "yealink-t4xs.dtsi"
+
+/ {
+	model = "Yealink SIP-T46S";
+	compatible = "yealink,sip-t46s", "yealink,sip-t4xs", "brcm,bcm11188", "brcm,bcm11107";
+	/* what the Holtek chip must answer; the kernel warns if it does not */
+	yealink,hardware-id = <66>;
+
+	/*
+	 * 64 MB of RAM. The first 4 MB are not ours, as on the T48S, and the
+	 * top megabyte holds the two frame buffers U-Boot uses for this id
+	 * (0x03f00000 to draw in, 0x03f80000 on the screen), so: 59 MB from
+	 * 0x00400000.
+	 */
+	memory@400000 {
+		device_type = "memory";
+		reg = <0x00400000 0x03b00000>;
+	};
+
+	/*
+	 * The screen: U-Boot leaves the SoC's PL111 showing 480x272 in 16 bits
+	 * per pixel from 0x03f80000, which is above the memory declared here.
+	 * The panel is mounted upside down (Yealink's software turns its
+	 * picture by 180 degrees on this model, and so does U-Boot when the
+	 * hardware version says so); "rotation" tells our userspace to do the
+	 * same. The colour order is a guess until someone has seen it.
+	 */
+	framebuffer@3f80000 {
+		compatible = "simple-framebuffer";
+		reg = <0x03f80000 0x0003fc00>;
+		width = <480>;
+		height = <272>;
+		stride = <960>;
+		format = "r5g6b5";
+		rotation = <180>;
+	};
+
+	/*
+	 * The keys, as <Yealink's code for the matrix position (row * 8 +
+	 * column + 1), Linux key code>, from Yealink's T46.qmap. Soft keys are
+	 * numbered left to right and line keys 1 to 5 down the left of the
+	 * screen, 6 to 10 down the right; that order is a guess.
+	 */
+	keypad {
+		compatible = "yealink,t4xs-keypad";
+		yealink,keymap =
+			<57 KEY_1>, <49 KEY_2>, <41 KEY_3>,
+			<58 KEY_4>, <50 KEY_5>, <42 KEY_6>,
+			<59 KEY_7>, <51 KEY_8>, <43 KEY_9>,
+			<60 KEY_KPASTERISK>, <61 KEY_0>, <52 KEY_NUMERIC_POUND>,
+			<33 KEY_UP>, <37 KEY_DOWN>, <34 KEY_LEFT>, <36 KEY_RIGHT>,
+			<35 KEY_ENTER>,		/* OK */
+			<44 KEY_BACKSPACE>,	/* X */
+			<53 KEY_VOLUMEDOWN>, <45 KEY_VOLUMEUP>,
+			<70 KEY_PROG1>,		/* Headset */
+			<69 KEY_MUTE>,
+			<25 KEY_MESSENGER>,	/* Message */
+			<26 KEY_PAUSE>,		/* Hold */
+			<27 KEY_AGAIN>,		/* Redial */
+			<28 KEY_FORWARD>,	/* Transfer */
+			<29 KEY_PROG2>,		/* Speakerphone */
+			/* the four soft keys under the screen */
+			<68 KEY_MACRO1>, <67 KEY_MACRO2>, <66 KEY_MACRO3>, <65 KEY_MACRO4>,
+			/* the ten line keys beside it */
+			<62 KEY_MACRO11>, <54 KEY_MACRO12>, <46 KEY_MACRO13>, <38 KEY_MACRO14>, <30 KEY_MACRO15>,
+			<63 KEY_MACRO16>, <55 KEY_MACRO17>, <47 KEY_MACRO18>, <39 KEY_MACRO19>, <31 KEY_MACRO20>;
+	};
+
+	/*
+	 * The lamp behind the screen: enable on GPIO27; the ten PWM steps are
+	 * the values Yealink's driver writes for its levels 10, 20 ... 99 on
+	 * this id.
+	 */
+	backlight {
+		compatible = "yealink,t4xs-backlight";
+		yealink,enable-pin = <27>;
+		yealink,pwm-fields = /bits/ 8 <25 23 21 19 17 15 13 9 6 3>;
+	};
+};
+
+/*
+ * No &nand here: the flash stays out of reach until the phone's layout has
+ * been read on a real T46S. No touchscreen: the model has none.
+ */

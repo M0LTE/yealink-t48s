@@ -320,3 +320,11 @@ const char *contacts_state(const char *key)
     }
     return NULL;
 }
+
+/* a soft key is a touch on the button above it: Dial, Add, Edit, Delete (or Cancel and the verb, when asking) */
+void contacts_soft(int b)
+{
+    if (mode == M_NAME || mode == M_NUMBER) return;   /* the keyboard has the screen */
+    b &= 3;
+    contacts_touch(T48_TOUCH_DOWN, btn[b].x + btn[b].w / 2, BTN_Y + BTN_H / 2);
+}

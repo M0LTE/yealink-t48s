@@ -32,6 +32,7 @@ static const struct { const char *name; int code; } keys[] = {
     {"voldown", SK_VOLDOWN}, {"volup", SK_VOLUP}, {"headset", SK_HEADSET}, {"mute", SK_MUTE},
     {"message", SK_MESSAGE}, {"hold", SK_HOLD}, {"redial", SK_REDIAL}, {"transfer", SK_TRANSFER},
     {"speaker", SK_SPEAKER},
+    {"soft1", SK_SOFT1}, {"soft2", SK_SOFT2}, {"soft3", SK_SOFT3}, {"soft4", SK_SOFT4},
 };
 
 static int key_named(const char *name)

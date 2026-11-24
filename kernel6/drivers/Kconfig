@@ -43,4 +43,8 @@ config T48S_BOOTMODE
 	bool "T48S: U-Boot's BOOTMODE flag (kernel/drivers/t48s_bootmode.c)"
 	depends on T48S_NAND
 
+config T48S_USB
+	bool "T48S USB host, when U-Boot has started it (a start from a stick)"
+	depends on USB_EHCI_HCD_PLATFORM
+
 endmenu

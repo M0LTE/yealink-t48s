@@ -23,7 +23,7 @@ PATH=$HERE:$PATH
 PROC=${T48_PROC:-/proc}
 LOCK=${T48_LOCK:-/sys/module/t48s_nand/parameters/lock}
 PARAM=${T48_PARAM:-/sys/module/t48s_nand/parameters}
-LOWER=539                # app's blocks below the 60 that have held /data
+LOWER=${T48_LOWER:-539}   # blocks of app to erase: all but the 60 that have held /data (599 on a phone that never had ours)
 SPARE=8                  # blocks left unallocated for UBI to move data into
 . "$HERE/slots.sh"
 say() { echo "install: $*"; }
@@ -93,7 +93,7 @@ app)
     sum=$(sha256sum < "$HERE/system.img" | cut -d' ' -f1)
     if ! app_is_ubi; then
         detach
-        say "app partition: erasing Yealink's $LOWER blocks (the 60 that hold /data are not touched)"
+        say "app partition: erasing $LOWER blocks of Yealink's"
         nandrestore -e $LOWER "/dev/mtd$A" || die "erase failed; run this step again"
     fi
     if attached && [ "$(cat "$(ubi)/mtd_num")" != "$A" ]; then detach; fi
@@ -132,6 +132,8 @@ app)
     avail=$(cat "$(ubi)/avail_eraseblocks")
     if ! slot_vol data >/dev/null; then
         ubimkvol "/dev/ubi$T48_UBI" -N data -s $(( (avail - SPARE) * leb )) >/dev/null || die "no room for data"
+        # an empty volume has no filesystem until it has been mounted for writing once
+        mount -t ubifs "ubi$T48_UBI:data" "$HERE/new" && umount "$HERE/new" || die "the new /data does not mount"
         say "/data: a new, empty volume (there was none)"
     elif [ $((avail - SPARE)) -gt "$(cat "$T48_UBISYS/$(basename "$(slot_vol data)")/reserved_ebs")" ]; then
         # only ever into a larger volume: after the move the room left over is

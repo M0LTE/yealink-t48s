@@ -24,6 +24,11 @@
  * own Qt keymap for this phone (/phone/resource/device-res/keymap/T48.qmap),
  * which agrees with the key table in U-Boot. See docs/keypad-touch-hw.md.
  *
+ * Other T4xS models have the same controller and matrix size with the keys in
+ * other places. Their table comes from the device tree: the node
+ * "yealink,t4xs-keypad" may hold "yealink,keymap", pairs of <Yealink code,
+ * Linux key code>, which then replaces the T48S table below entirely.
+ *
  * To check a key by hand:
  *   echo 1 > /sys/module/t48s_keypad/parameters/debug
  * then every press and release is logged with its row, column and codes.
@@ -304,13 +309,46 @@ static int cold_set(const char *val, const struct kernel_param *kp)
 static const struct kernel_param_ops cold_ops = { .set = cold_set };
 module_param_cb(cold, &cold_ops, NULL, 0200);
 
+/* The key table of another model, from the device tree. Left as it is on any fault. */
+static void __init t48s_keypad_dt_keymap(void)
+{
+	static unsigned short map[NCODES] __initdata;
+	struct device_node *np;
+	int i, n;
+	u32 code, key;
+
+	np = of_find_compatible_node(NULL, NULL, "yealink,t4xs-keypad");
+	if (!np)
+		return;
+	n = of_property_count_u32_elems(np, "yealink,keymap");
+	if (n <= 0 || n % 2) {
+		if (n != -EINVAL)	/* -EINVAL: no such property, the built-in table stands */
+			pr_err(DRV_NAME ": yealink,keymap is not a list of pairs, using the built-in table\n");
+		goto out;
+	}
+	for (i = 0; i < n; i += 2) {
+		if (of_property_read_u32_index(np, "yealink,keymap", i, &code) ||
+		    of_property_read_u32_index(np, "yealink,keymap", i + 1, &key) ||
+		    code == 0 || code >= NCODES || key == KEY_RESERVED || key > KEY_MAX) {
+			pr_err(DRV_NAME ": yealink,keymap entry %d is out of range, using the built-in table\n", i / 2);
+			goto out;
+		}
+		map[code] = key;
+	}
+	memcpy(t48s_keymap, map, sizeof(t48s_keymap));
+	pr_info(DRV_NAME ": %d keys from the device tree\n", n / 2);
+out:
+	of_node_put(np);
+}
+
 static int __init t48s_keypad_init(void)
 {
 	u32 ctrl;
 	int i, rc;
 
-	if (!of_machine_is_compatible("yealink,sip-t48s"))
+	if (!of_machine_is_compatible("yealink,sip-t4xs"))
 		return -ENODEV;
+	t48s_keypad_dt_keymap();
 	keyc = ioremap(KEYC_PHYS, 0x1000);
 	gpio0 = ioremap(GPIO0_PHYS, 0x1000);
 	rc = -ENOMEM;

@@ -15,7 +15,13 @@
 #   OVERLAY          a directory laid over ROOTFS (optional)
 #   DEBUG=0          leave out the early debug output (kernel6/debug.config)
 #   NAND=0           leave out the flash driver, UBI and UBIFS (kernel6/nand.config)
-#   DTS              board device tree (default bcm11188-yealink-t48s)
+#   MODEL            t48s (default) or t46s: which phone. It picks the device tree
+#                    (bcm11188-yealink-MODEL), the name of the live file (T46S.bin)
+#                    and one more config fragment if kernel6/MODEL.config exists.
+#                    MODEL=t46s is a live build only, with no flash driver at all
+#                    (NAND=0): docs/models.md
+#   DTS              board device tree (default bcm11188-yealink-MODEL)
+#   USB=0            leave out USB sticks (kernel6/usb.config)
 #   EXTRA_CONFIG     one more config fragment
 #   OUT              name of the result (default zImage-t48s)
 #   SLOT=1           fail if the result is larger than the 2.5 MB kernel partition
@@ -38,13 +44,25 @@ KVER=6.18.65
 KSHA=c92606f956f09dc50b5a0e2af9e86763fce27ada1647de97f8d1ac8cfc95801d
 HERE=$(cd "$(dirname "$0")" && pwd)
 WORK=$(mkdir -p "${1:-.}" && cd "${1:-.}" && pwd)
+MODEL=${MODEL:-t48s}
+case $MODEL in
+t48s) ;;
+t46s)
+    # not yet run on a T46S: it may be tried from RAM and nothing else, and its
+    # kernel has no way to the flash
+    [ "${FLASH:-0}" != 1 ] && [ "${SLOT:-0}" != 1 ] || { echo "MODEL=t46s: live builds only (LIVE=1)" >&2; exit 2; }
+    [ "${NAND:-0}" = 0 ] || { echo "MODEL=t46s: no flash driver (NAND=0)" >&2; exit 2; }
+    NAND=0 ;;
+*) echo "MODEL must be t48s or t46s" >&2; exit 2 ;;
+esac
+BIN=$(echo "$MODEL" | tr a-z A-Z)
 LIVE=${LIVE:-0}
 if [ "$LIVE" = 1 ]; then
     # the live kernel is the one handed to other people: no system image inside
     # (U-Boot's 4 MB would not hold it) and no keys unless a file is named
     [ -z "$SYSTEM" ] || { echo "LIVE=1: the system image goes in T48S.rfs (tools/mkliveimage.py), not in the kernel" >&2; exit 2; }
-    DTS=${DTS:-bcm11188-yealink-t48s-live}
-    OUT=${OUT:-T48S.bin}
+    DTS=${DTS:-bcm11188-yealink-$MODEL-live}
+    OUT=${OUT:-$BIN.bin}
     KEYS=${AUTHORIZED_KEYS:-}
     LOADADDR=${LOADADDR:-0x00408000}
 fi
@@ -57,8 +75,8 @@ if [ "$FLASH" = 1 ]; then
     KEYS=${AUTHORIZED_KEYS:-}
     LOADADDR=${LOADADDR:-0x00408000}
 fi
-DTS=${DTS:-bcm11188-yealink-t48s}
-OUT=${OUT:-zImage-t48s}
+DTS=${DTS:-bcm11188-yealink-$MODEL}
+OUT=${OUT:-zImage-$MODEL}
 [ "$LIVE" = 1 ] || [ "$FLASH" = 1 ] || KEYS=${AUTHORIZED_KEYS:-$WORK/root.authorized_keys}
 CROSS=${CROSS_COMPILE:-arm-linux-gnueabi-}
 [ -n "$ROOTFS" ] || { echo "set ROOTFS to Buildroot's rootfs.cpio(.gz) or firststage.cpio" >&2; exit 2; }
@@ -105,6 +123,8 @@ mkdir -p "$BUILD"
 cat "$HERE/t48s.config" > "$BUILD/all.config"
 [ "${DEBUG:-1}" = 0 ] || cat "$HERE/debug.config" >> "$BUILD/all.config"
 [ "${NAND:-1}" != 1 ] || cat "$HERE/nand.config" >> "$BUILD/all.config"
+[ ! -f "$HERE/$MODEL.config" ] || cat "$HERE/$MODEL.config" >> "$BUILD/all.config"
+[ "${USB:-1}" != 1 ] || cat "$HERE/usb.config" >> "$BUILD/all.config"
 [ -z "$EXTRA_CONFIG" ] || cat "$EXTRA_CONFIG" >> "$BUILD/all.config"
 cat >> "$BUILD/all.config" <<EOC
 CONFIG_INITRAMFS_SOURCE="$WORK/initramfs-$DTS.cpio"
@@ -160,7 +180,7 @@ if [ "$LIVE" = 1 ]; then
     # nothing would keep its memory from being handed out.
     # tools/mkliveimage.py checkbin proves the addresses from the finished file.
     cat "$BUILD/arch/arm/boot/zImage" "$BUILD/arch/arm/boot/dts/broadcom/$DTS.dtb" > "$WORK/$OUT.zimage"
-    mkimage -A arm -O linux -T kernel -C none -a "$LOADADDR" -e "$LOADADDR" -n "Linux-$KVER-t48s" -d "$WORK/$OUT.zimage" "$WORK/$OUT" >/dev/null
+    mkimage -A arm -O linux -T kernel -C none -a "$LOADADDR" -e "$LOADADDR" -n "Linux-$KVER-$MODEL" -d "$WORK/$OUT.zimage" "$WORK/$OUT" >/dev/null
     rm -f "$WORK/$OUT.zimage"
     ls -l "$BUILD/arch/arm/boot/Image" "$BUILD/arch/arm/boot/zImage" "$WORK/$OUT" | awk '{print $5, $9}'
     python3 "$HERE/../tools/mkliveimage.py" checkbin "$WORK/$OUT" kernel=6.18
@@ -174,7 +194,7 @@ if [ "$FLASH" = 1 ]; then
     # tools/t48flash.py checkkernel proves the header, the addresses and the size
     # from the finished file.
     cat "$BUILD/arch/arm/boot/zImage" "$BUILD/arch/arm/boot/dts/broadcom/$DTS.dtb" > "$WORK/$OUT.zimage"
-    mkimage -A arm -O linux -T kernel -C none -a "$LOADADDR" -e "$LOADADDR" -n "Linux-$KVER-t48s" -d "$WORK/$OUT.zimage" "$WORK/$OUT" >/dev/null
+    mkimage -A arm -O linux -T kernel -C none -a "$LOADADDR" -e "$LOADADDR" -n "Linux-$KVER-$MODEL" -d "$WORK/$OUT.zimage" "$WORK/$OUT" >/dev/null
     rm -f "$WORK/$OUT.zimage"
     ls -l "$BUILD/arch/arm/boot/Image" "$BUILD/arch/arm/boot/zImage" "$WORK/$OUT" | awk '{print $5, $9}'
     python3 "$HERE/../tools/t48flash.py" checkkernel "$WORK/$OUT"

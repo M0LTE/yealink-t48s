@@ -1728,6 +1728,13 @@ void phone_history_touch(int x, int y)
     else if (ui_inside(x, y, 596, HIST_BTN_Y, 188, HIST_BTN_H)) { P.hist_confirm = 1; changed(); }
 }
 
+/* a soft key is a touch on the button above it: Dial, Add contact, Delete, Clear all */
+void phone_history_soft(int b)
+{
+    static const int mid[4] = {16 + 90, 206 + 100, 416 + 85, 596 + 94};
+    phone_history_touch(mid[b & 3], HIST_BTN_Y + HIST_BTN_H / 2);
+}
+
 /* ---------- for the idle screen and the simulator ---------- */
 
 int phone_missed(void) { return P.missed; }

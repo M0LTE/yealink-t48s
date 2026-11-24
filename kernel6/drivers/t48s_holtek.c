@@ -58,6 +58,19 @@ static void __iomem *gpio0;
 static void __iomem *gpio1;
 static DEFINE_MUTEX(holtek_lock);
 static bool holtek_ok;
+
+/*
+ * What the chip said at boot, for userspace and for the record:
+ * /sys/module/t48s_holtek/parameters/hwid is the hardware id (65 T48S, 66
+ * T46S, 67 T42S, 68 T41S; 0 if the chip did not answer), and hwversion the
+ * seven numbers as Yealink prints them. The fourth number's top bit is the one
+ * U-Boot reads as "the screen is mounted upside down".
+ */
+static unsigned int hwid;
+module_param(hwid, uint, 0444);
+MODULE_PARM_DESC(hwid, "hardware id read from the chip (65 T48S, 66 T46S), 0 = no answer");
+static char hwversion[32];
+module_param_string(hwversion, hwversion, sizeof(hwversion), 0444);
 static unsigned int watchdog;	/* last value written, seconds */
 
 /* these GPIO registers have no set/clear form: read, change, write, interrupts off */
@@ -189,9 +202,11 @@ static int __init t48s_holtek_init(void)
 {
 	u64 ver;
 	u8 b[8];
+	u32 want;
 	int i;
 
-	if (!of_machine_is_compatible("yealink,sip-t48s"))
+	/* every T4xS has the chip on the same three pins: U-Boot asks it which phone this is */
+	if (!of_machine_is_compatible("yealink,sip-t4xs"))
 		return -ENODEV;
 	gpio0 = ioremap(GPIO0_PHYS, 0x1000);
 	gpio1 = ioremap(GPIO1_PHYS, 0x1000);
@@ -232,6 +247,19 @@ static int __init t48s_holtek_init(void)
 	pr_info(DRV_NAME ": hardware %u.%u.%u.%u.%u.%u.%u, protocol %u.%u, watchdog turned off\n",
 		b[5], (u8)((b[4] << 4) | (b[4] >> 4)), b[7], b[3], b[2], b[1], b[0],
 		b[6], b[7]);
+	hwid = b[5];
+	snprintf(hwversion, sizeof(hwversion), "%u.%u.%u.%u.%u.%u.%u",
+		 b[5], (u8)((b[4] << 4) | (b[4] >> 4)), b[7], b[3], b[2], b[1], b[0]);
+	/*
+	 * This kernel carries one phone's device tree. Say so loudly if the
+	 * chip names another phone: the screen, keys and lamps are then
+	 * described wrongly. Nothing is switched off for it.
+	 */
+	if (!of_property_read_u32(of_root, "yealink,hardware-id", &want) && want != hwid)
+		pr_warn(DRV_NAME ": this kernel is for hardware id %u, the phone says %u: wrong image for this model\n",
+			want, hwid);
+	if (b[3] & 0x80)
+		pr_info(DRV_NAME ": hardware version says the screen is mounted upside down\n");
 	/* the lamp may have been left on by whatever ran before us */
 	holtek_write(CMD_LED, 0, 32);
 	i = led_classdev_register(NULL, &message_led);

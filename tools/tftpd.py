@@ -5,7 +5,10 @@
 Serves files from DIR (octet mode, RFC 2347/2348/2349 options blksize, tsize,
 timeout). Logs every request, so we can see the exact names U-Boot asks for.
 A request for any *.rom that does not exist is answered with ROM_FALLBACK
-(the recovery mode may name the ROM after an internal board type).
+(the recovery mode may name the ROM after an internal board type). When DIR
+holds exactly one *.rom, *.bin or *.rfs, a request for another name of that
+kind gets that file: a model we have not seen (docs/models.md) may ask for
+names we did not guess, and the log then shows which.
 --rom-once: stop serving *.rom once the *.rfs has been sent. U-Boot needs the
 ROM head before it boots our files, but on the next normal boot Yealink's
 resumemode.sh asks for the same ROM to reflash the phone; refusing it makes
@@ -36,9 +39,15 @@ def serve(client, filename, opts):
         log(f"{client[0]}: refusing {name} (ramdisk already served; --rom-once)")
         s.sendto(struct.pack("!HH", 5, 1) + b"File not found\0", client)
         return
-    if not os.path.isfile(path) and name.lower().endswith(".rom"):
-        log(f"{client[0]}: {name} not found, serving {ROM_FALLBACK}")
-        path = os.path.join(ROOT, ROM_FALLBACK)
+    ext = name.lower()[-4:]
+    if not os.path.isfile(path) and ext in (".rom", ".bin", ".rfs"):
+        same = sorted(f for f in os.listdir(ROOT) if f.lower().endswith(ext))
+        if len(same) == 1:
+            log(f"{client[0]}: {name} not found, serving {same[0]}")
+            path = os.path.join(ROOT, same[0])
+        elif ext == ".rom":
+            log(f"{client[0]}: {name} not found, serving {ROM_FALLBACK}")
+            path = os.path.join(ROOT, ROM_FALLBACK)
     if not os.path.isfile(path):
         log(f"{client[0]}: {name} not found")
         s.sendto(struct.pack("!HH", 5, 1) + b"File not found\0", client)

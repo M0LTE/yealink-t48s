@@ -13,6 +13,10 @@
 
 /* Phone keys, which never go to apps. App keys use the protocol's T48_KEY_*
  * codes; the X key arrives from a backend as T48_KEY_BACK. */
+/* The four soft keys under the screen of a phone that has them (the T46S).
+ * They press the buttons along the bottom of Calls and Contacts, left to
+ * right, and never go to apps. */
+enum { SK_SOFT1 = 0x1f0, SK_SOFT2, SK_SOFT3, SK_SOFT4 };
 enum { SK_VOLDOWN = 0x200, SK_VOLUP, SK_HEADSET, SK_MUTE, SK_MESSAGE, SK_HOLD, SK_REDIAL, SK_TRANSFER, SK_SPEAKER };
 
 /* ---------- the screen and input devices: the phone's, or the simulator's ---------- */
@@ -139,6 +143,7 @@ void phone_draw(void);                       /* the call screen, whichever it is
 void phone_draw_history(void);
 void phone_history_key(int code);
 void phone_history_touch(int x, int y);
+void phone_history_soft(int b);   /* soft key b, 0 to 3 */
 void phone_open_history(void);
 void phone_draw_overlay(void);               /* the volume bar, over any of the shell's screens */
 void phone_account_text(char *out, size_t n, uint32_t *colour);
@@ -175,6 +180,7 @@ void contacts_open(const char *find);        /* show the list */
 void contacts_open_add(const char *number, const char *name);   /* straight to adding this number */
 void contacts_draw(void);
 void contacts_key(int code, int down);
+void contacts_soft(int b);   /* soft key b, 0 to 3 */
 void contacts_touch(int state, int x, int y);
 int contacts_timeout(long long now);
 void contacts_tick(long long now);

@@ -23,3 +23,6 @@ chmod 700 "$TARGET_DIR"/etc/t48-dev
 # build of main); otherwise git says.
 V=${T48_VERSION:-$(git -C "$(dirname "$0")" describe --always --dirty 2>/dev/null)}
 printf '%s\nbuilt=%s\n' "${V:-development build}" "$(date -u +%Y-%m-%d)" > "$TARGET_DIR"/etc/t48-release
+# the on-phone installer (t48-install, docs/installer.md) runs the same script a
+# PC copies over for tools/t48install.sh
+install -D -m 0755 "$(dirname "$0")/../../../tools/phone/t48-flash.sh" "$TARGET_DIR"/usr/lib/t48/t48-flash.sh
