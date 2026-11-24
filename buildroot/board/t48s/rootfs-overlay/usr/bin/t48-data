@@ -6,10 +6,16 @@
 #   t48-data status    what /data is on, and how full
 #   t48-data release   stop using the flash; /data carries on in RAM
 #
-# Our part of the flash is the MTD partition "t48data"; the kernel driver can
-# write nothing else. UBI runs on it, with one volume, "data", holding UBIFS.
-# Nothing here erases: UBI takes over blocks that are already erased, and going
-# back to stock is erasing them again (tools/nandrestore.sh, docs/backup.md).
+# Before the phone is installed, our part of the flash is the MTD partition
+# "t48data", the 60 blocks at the end of Yealink's app partition; the kernel
+# driver lets nothing else be written. UBI runs on it, with one volume, "data",
+# holding UBIFS. Nothing here erases: UBI takes over blocks that are already
+# erased, and going back to stock is erasing them again (tools/nandrestore.sh,
+# docs/backup.md).
+#
+# On an installed phone (docs/install.md) UBI has the whole app partition, the
+# first stage has already attached it to find the system image, and "data" is
+# one volume among the system slots. The same volume: the installer moves it.
 say() { echo "data: $*"; echo "data: $*" > /dev/console 2>/dev/null; }
 mtdnum() { sed -n 's/^mtd\([0-9]*\):.*"t48data"$/\1/p' /proc/mtd; }
 # the first four bytes of a block UBI has taken are "UBI#"
@@ -27,6 +33,12 @@ mount)
     mountpoint -q /data && exit 0
     # a live boot (a USB stick or TFTP, docs/live-image.md) promises to write nothing
     live && { ram "started without installing: nothing is written to the phone"; exit 0; }
+    if [ -e /sys/class/ubi/ubi0 ]; then
+        # installed: the first stage attached the app partition
+        volume && mount -t ubifs ubi0:data /data || { ram "the flash did not mount; see dmesg"; exit 1; }
+        say "in flash"
+        exit 0
+    fi
     M=$(mtdnum)
     [ -n "$M" ] || { ram "this kernel has no flash of ours"; exit 0; }
     has_ubi "$M" || { ram "the flash is not set up: t48-data format"; exit 0; }
@@ -34,6 +46,7 @@ mount)
     say "in flash" ;;
 format)
     live && { echo "started without installing (a USB stick or the network): the flash is left alone" >&2; exit 1; }
+    grep -qw t48boot=flash "${T48_CMDLINE:-/proc/cmdline}" && { echo "installed: /data is already in flash" >&2; exit 1; }
     M=$(mtdnum)
     [ -n "$M" ] || { echo "this kernel has no flash of ours" >&2; exit 1; }
     if ! has_ubi "$M"; then

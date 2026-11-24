@@ -61,13 +61,47 @@ rescue() {
     while :; do setsid sh -c 'exec sh </dev/ttyAMA0 >/dev/ttyAMA0 2>&1'; sleep 1; done
 }
 
+# The installed phone (issues 8 and 29, docs/flash.md): the kernel came from the
+# flash (t48boot=flash) and the system image is in one of two slots in UBI on the
+# app partition. Which one, and the one try a new slot gets: /lib/t48-slots.sh.
+SLOT=
+flash_slot() {
+    APP=$(sed -n 's/^mtd\([0-9]*\):.*"t48app"$/\1/p' /proc/mtd)
+    [ -n "$APP" ] || { WHY="This kernel has no flash."; return 1; }
+    # ours only if UBI is at the start of it; an install cut short leaves Yealink's
+    # data or erased blocks there, and those are for the installer
+    found=
+    for b in 0 1 2 3 4 5 6 7; do
+        [ "$(dd if=/dev/mtd$APP bs=4 skip=$((b * 32768)) count=1 2>/dev/null)" = "UBI#" ] && found=1 && break
+    done
+    [ -n "$found" ] || { WHY="The install is not finished. Run the installer again."; return 1; }
+    ubiattach -m "$APP" -d 0 /dev/ubi_ctrl >/dev/null 2>&1 || { WHY="The flash does not attach."; return 1; }
+    . /lib/t48-slots.sh
+    slot_plan
+    for s in $SLOT_ORDER; do
+        if slot_load "$s" /system.img && mount -t squashfs -o loop,ro /system.img /sysroot 2>/dev/null; then
+            [ -x /sysroot/sbin/init ] && { SLOT=$s; return 0; }
+            umount /sysroot
+        fi
+        rm -f /system.img
+        say "system slot $s does not start"
+    done
+    WHY="Neither system slot starts."
+    return 1
+}
+
 # 1. A system image in RAM beside the kernel: kexec and recovery-mode (live) boots
-# 2. Installed: a system slot in flash (issue #29; not yet)
-IMG=
-[ -f /system.img ] && IMG=/system.img
-[ -n "$IMG" ] || rescue "No system image was found."
-mount -t squashfs -o loop,ro "$IMG" /sysroot 2>/dev/null || rescue "The system image is damaged: it does not mount."
-[ -x /sysroot/sbin/init ] || rescue "The system image has no init."
+# 2. Installed: a system slot in flash
+if [ -f /system.img ]; then
+    IMG=/system.img
+    mount -t squashfs -o loop,ro "$IMG" /sysroot 2>/dev/null || rescue "The system image is damaged: it does not mount."
+    [ -x /sysroot/sbin/init ] || rescue "The system image has no init."
+elif grep -qw t48boot=flash /proc/cmdline; then
+    flash_slot || rescue "$WHY"
+    IMG="slot $SLOT"
+else
+    rescue "No system image was found."
+fi
 
 # what the read-only system needs writable; /data is the system's own business (rcS)
 mount -t tmpfs -o mode=755 tmpfs /sysroot/run
@@ -77,6 +111,12 @@ if [ -s /etc/t48-dev/authorized_keys ]; then
     mount -t tmpfs -o mode=700 tmpfs /sysroot/etc/t48-dev
     cp /etc/t48-dev/authorized_keys /sysroot/etc/t48-dev/
     chmod 600 /sysroot/etc/t48-dev/authorized_keys
+fi
+# how this start came about, for t48-update and the status screen
+if [ -n "$SLOT" ]; then
+    printf 'slot=%s\nnote=%s\n' "$SLOT" "$SLOT_NOTE" > /sysroot/run/t48-slot
+else
+    printf 'slot=ram\nnote=\n' > /sysroot/run/t48-slot
 fi
 say "starting the system image $IMG"
 mount -o move /dev /sysroot/dev

@@ -50,3 +50,6 @@ t48-access boot
 t48-live boot
 # the services runsvdir is about to start (inittab)
 t48-services
+# a system slot on its one try becomes the phone's own once it has run for a
+# minute with the shell up (issue 31, t48-update)
+( sleep 60; t48-update confirm ) >/dev/null 2>&1 &

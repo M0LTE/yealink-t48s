@@ -1,0 +1,100 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# t48-update: the two system slots of an installed phone (issue 31, docs/flash.md).
+#   t48-update status                  which slot is running, which starts next
+#   t48-update install FILE|URL [SHA256]
+#                                      write a system image to the slot that is not
+#                                      in use, read it back, and mark it to be tried
+#                                      once at the next start
+#   t48-update confirm                 run by rcS a minute after start: a slot on
+#                                      trial that got this far becomes the active one
+#                                      (so does a slot that had to stand in because
+#                                      the active one did not start)
+#   t48-update switch                  try the other slot at the next start
+#   t48-update kernel FILE SHA256      write a kernel image to the kernel partition
+#                                      (rare; there is one kernel slot and no way
+#                                      back from a bad one but recovery mode)
+#
+# A slot is tried once. If the phone does not stay up for a minute on it, the
+# next start goes back to the slot that worked. The rules are in
+# /usr/lib/t48/slots.sh, which the first stage uses too.
+. "${T48_SLOTS:-/usr/lib/t48/slots.sh}"
+RUN=${T48_RUN:-/run}
+TMP=${T48_TMP:-/tmp}
+die() { echo "$*" >&2; exit 1; }
+booted() { sed -n 's/^slot=//p' "$RUN/t48-slot" 2>/dev/null; }
+installed() { slot_vol system-a >/dev/null && slot_vol system-b >/dev/null && slot_vol bootstate0 >/dev/null && slot_vol bootstate1 >/dev/null; }
+
+case "$1" in
+status)
+    installed || { echo "Not installed"; exit 0; }
+    state_read
+    echo "Running: $(booted)"
+    echo "Active: $S_ACTIVE"
+    [ "$S_TRIAL" = - ] || echo "On trial: $S_TRIAL, tries left $S_TRIES"
+    note=$(sed -n 's/^note=//p' "$RUN/t48-slot" 2>/dev/null)
+    case "$note" in failed=*) echo "Last update failed: slot ${note#failed=} did not start, went back" ;; esac
+    for s in a b; do echo "Slot $s: $(slot_sum $s || echo unreadable)"; done ;;
+install)
+    [ -n "$2" ] || die "usage: t48-update install FILE|URL [SHA256]"
+    installed || die "Not installed: no system slots"
+    f=$2
+    case "$f" in
+    http://*|https://*)
+        f=$TMP/t48-update.img
+        curl -fsSL --cacert /etc/ssl/certs/ca-certificates.crt -o "$f" "$2" || die "Download failed" ;;
+    esac
+    [ -f "$f" ] || die "No such file: $f"
+    [ "$(head -c 4 "$f")" = hsqs ] || die "Not a system image"
+    sum=$(sha256sum < "$f" | cut -d' ' -f1)
+    [ -z "$3" ] || [ "$sum" = "$3" ] || die "Checksum mismatch"
+    state_read
+    cur=$(booted)
+    case "$cur" in a|b) target=$(slot_other "$cur") ;; *) target=$(slot_other "$S_ACTIVE") ;; esac
+    # never the slot that is running, never the one known to work
+    [ "$target" != "$S_ACTIVE" ] || die "Slot $cur is on trial. Try again in a minute"
+    v=$(slot_vol "system-$target")
+    d=$T48_UBISYS/${v#/dev/}
+    room=$(( $(cat "$d/reserved_ebs") * $(cat "$d/usable_eb_size") ))
+    [ "$(wc -c < "$f")" -le "$room" ] || die "Too large for a slot"
+    # no trial while the slot is being rewritten
+    [ "$S_TRIAL" = - ] || state_write "$S_ACTIVE" - 0 || die "Flash write failed"
+    ubiupdatevol "$v" "$f" || die "Flash write failed"
+    [ "$(slot_sum "$target")" = "$sum" ] || die "Slot $target does not read back"
+    state_write "$S_ACTIVE" "$target" 1 || die "Flash write failed"
+    echo "Slot $target written. Restart to try it" ;;
+confirm)
+    installed || exit 0
+    cur=$(booted)
+    state_read
+    case "$cur" in a|b) ;; *) exit 0 ;; esac
+    # on trial; or running because the active slot did not start, or the note was lost
+    [ "$cur" = "$S_TRIAL" ] || { [ "$S_TRIAL" = - ] && [ "$cur" != "$S_ACTIVE" ]; } || { [ "$S_VALID" = 0 ] && [ "$cur" = "$S_ACTIVE" ]; } || exit 0
+    # well enough: the shell is up
+    [ -n "$T48_NO_SV" ] || sv status /run/service/shell 2>/dev/null | grep -q '^run:' || exit 1
+    state_write "$cur" - 0 || die "Flash write failed"
+    echo "Slot $cur confirmed" ;;
+switch)
+    installed || die "Not installed: no system slots"
+    state_read
+    o=$(slot_other "$S_ACTIVE")
+    [ -n "$(slot_sum "$o")" ] || die "Slot $o is empty or unreadable"
+    state_write "$S_ACTIVE" "$o" 1 || die "Flash write failed"
+    echo "Slot $o will be tried at the next start" ;;
+kernel)
+    [ -f "$2" ] && [ -n "$3" ] || die "usage: t48-update kernel FILE SHA256"
+    grep -qw t48boot=live /proc/cmdline && die "Started without installing: the flash is left alone"
+    M=$(sed -n 's/^mtd\([0-9]*\):.*"t48kernel"$/\1/p' /proc/mtd)
+    [ -n "$M" ] || die "This kernel cannot write the kernel partition"
+    [ "$(sha256sum < "$2" | cut -d' ' -f1)" = "$3" ] || die "Checksum mismatch"
+    [ "$(head -c 4 "$2" | od -An -tx1 | tr -d ' ')" = 27051956 ] || die "Not a kernel image"
+    [ "$(wc -c < "$2")" -le 2621440 ] || die "Too large for the kernel partition"
+    L=/sys/module/t48s_nand/parameters/lock
+    echo open-kernel > $L || die "Lock did not open"
+    nandrestore -b "/dev/mtd$M" < "$2"
+    rc=$?
+    echo close-kernel > $L
+    [ $rc = 0 ] || die "KERNEL WRITE FAILED. Do not restart: write it again, or restore (docs/install.md)"
+    echo "Kernel written. Restart to use it" ;;
+*)  echo "usage: t48-update status | install FILE|URL [SHA256] | confirm | switch | kernel FILE SHA256" >&2; exit 2 ;;
+esac

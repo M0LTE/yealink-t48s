@@ -8,7 +8,8 @@ CONFIG_UBIMKVOL=y
 CONFIG_UBIRMVOL=y
 CONFIG_UBIRSVOL=y
 CONFIG_UBIUPDATEVOL=y
-# CONFIG_UBIRENAME is not set
+# ubirename: the installer swaps the old and the new /data volume in one step
+CONFIG_UBIRENAME=y
 # runit: every long-running program is supervised (issue #17, docs/boot.md)
 CONFIG_RUNSV=y
 CONFIG_RUNSVDIR=y
