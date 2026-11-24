@@ -16,9 +16,19 @@
  * Broadcom's GPL "Island" ethernet driver for the same switch IP.
  *
  * This driver keeps things simple: buffers are DMA-coherent and every frame
- * is copied, one transmit is in flight at a time, and the switch is assumed
- * to be configured already (it is, after a kexec from Yealink's kernel, or
- * after U-Boot; ports, ARL entry for our MAC and IMP speed are left as found).
+ * is copied, and one transmit is in flight at a time.
+ *
+ * The switch is set up here every time the interface comes up, whoever ran
+ * before (esw_bring_up): its clocks and reset in chip control, the two
+ * external ports forwarding, the address table entry that sends our own MAC
+ * address to the CPU port, the CPU port's speed, and the few settings
+ * Yealink's firmware changes from the chip's defaults. After a kexec from
+ * Yealink's kernel, or after U-Boot has fetched us over the network, all of
+ * it is found done already; after a start that never used the network it may
+ * not be. To test that without such a start (interface down first):
+ *   echo 1 > /sys/module/t48s_eth/parameters/cold
+ * removes our address table entry, stops the CPU-side FIFOs, resets the
+ * switch and gates its clocks. The next "up" then has everything to do.
  *
  * GPL v2, like the Broadcom driver it is modelled on.
  */
@@ -34,6 +44,9 @@
 #include <linux/workqueue.h>
 #include <linux/of.h>
 #include <linux/property.h>
+#include <linux/rtnetlink.h>
+#include <linux/delay.h>
+#include <linux/moduleparam.h>
 
 #define DRV_NAME	"t48s_eth"
 
@@ -62,7 +75,45 @@
 #define ESW_IMPENABLE		ESW_PAGE(0x34, 0x06)
 #define ESW_LINK		ESW_PAGE(0x01, 0x00)
 #define ESW_PORT_IMP		8
-#define ESW_PORT_LAN		0
+#define ESW_PORTS		2		/* external ports: 0 and 1 */
+#define ESW_PORTCTRL_STP	0xe0		/* spanning tree state: */
+#define ESW_PORTCTRL_FORWARD	0xa0		/* forwarding */
+#define ESW_SWMODE		ESW_PAGE(0x00, 0x0b)
+#define ESW_SWMODE_MANAGED	0x01
+#define ESW_SWMODE_FORWARD	0x02		/* off after a reset: nothing is switched */
+#define ESW_SPEED		ESW_PAGE(0x01, 0x04)	/* two bits a port: 0 = 10, 1 = 100, 2 = 1000 Mbit/s */
+/* address table (ARL): put a MAC address in the index, read its bucket (two
+ * entries), change one, write the bucket back */
+#define ESW_ARL_CTL		ESW_PAGE(0x05, 0x00)
+#define ESW_ARL_CTL_START	0x80		/* clears itself when done */
+#define ESW_ARL_CTL_READ	0x01
+#define ESW_ARL_MAC		ESW_PAGE(0x05, 0x02)
+#define ESW_ARL_VID		ESW_PAGE(0x05, 0x08)
+#define ESW_ARL_ENTRY(n)	ESW_PAGE(0x05, 0x10 + 0x10 * (n))	/* MAC address */
+#define ESW_ARL_FWD(n)		ESW_PAGE(0x05, 0x18 + 0x10 * (n))
+#define ESW_ARL_FWD_VALID	0x10000
+#define ESW_ARL_FWD_CPU		0x1c008		/* valid, static, highest class, port 8: as
+						 * Yealink's ethHw_arlEntrySet writes it */
+
+/* switch: management block (plain 32-bit registers) */
+#define ESW_STATUS		0xa0000
+#define ESW_STATUS_READY	0x00800000	/* out of reset and usable */
+#define ESW_IMPSPEED		0xa0090		/* low: the speed of the port in use
+						 * (4 = 1000, 1 = 100, 2 = 10 Mbit/s);
+						 * 0x40: the CPU port itself at 1000 */
+#define ESW_IMPSPEED_CPU_1000	0x40
+
+/* chip control: the switch's clock, bus clocks and reset */
+#define CHIPC_PHYS		0x80000000
+#define CHIPC_ESWCLK		0x0c		/* PLL1 channel 3 */
+#define CHIPC_ESWCLK_ON		0x00010014	/* 2 GHz / 20 = 100 MHz, output on: as found
+						 * after U-Boot and after Yealink */
+#define CHIPC_CLK_OUTPUT	0x00010000
+#define CHIPC_BUSCLK		0x5c
+#define CHIPC_BUSCLK_DMAC1	0x00000040
+#define CHIPC_BUSCLK_ESW	0x00000100
+#define CHIPC_SOFTRESET2	0x84
+#define CHIPC_SOFTRESET2_ESW	0x00000060	/* the switch and its clock domain */
 
 /* switch: CPU interface (plain 32-bit registers) */
 #define ESW_PTM_CONFIG		0x80008
@@ -161,6 +212,11 @@ struct t48s_eth {
 
 	struct delayed_work guard;	/* keeps an eye on the IMP port's settings */
 	unsigned int imp_fixes;		/* times the guard had to put them back */
+
+	bool off;			/* the cold test has switched the switch off */
+	unsigned int cold_tests;
+	unsigned int set_last;		/* settings the last bring-up had to change */
+	int arl_bin;			/* where our address sits in its bucket, -1 = not written */
 };
 
 static u8 t48s_mac[ETH_ALEN] = { 0x80, 0x5e, 0xc0, 0x03, 0x1c, 0x05 };
@@ -184,6 +240,22 @@ static void esw_wr(struct t48s_eth *p, u32 off, u32 val)
 {
 	register u32 lo asm("r2") = val;
 	register u32 hi asm("r3") = 0;
+	asm volatile("strd %0, [%2]" : : "r"(lo), "r"(hi), "r"(p->esw + off) : "memory");
+}
+
+/* the few registers that use the high word: MAC addresses */
+static u64 esw_rd64(struct t48s_eth *p, u32 off)
+{
+	register u32 lo asm("r2");
+	register u32 hi asm("r3");
+	asm volatile("ldrd %0, [%2]" : "=&r"(lo), "=&r"(hi) : "r"(p->esw + off) : "memory");
+	return ((u64)hi << 32) | lo;
+}
+
+static void esw_wr64(struct t48s_eth *p, u32 off, u64 val)
+{
+	register u32 lo asm("r2") = (u32)val;
+	register u32 hi asm("r3") = (u32)(val >> 32);
 	asm volatile("strd %0, [%2]" : : "r"(lo), "r"(hi), "r"(p->esw + off) : "memory");
 }
 
@@ -506,7 +578,10 @@ static void esw_imp_enable(struct t48s_eth *p, int on)
 	esw_wr_check(p, ESW_IMPCTRL, v);
 }
 
-/* every two seconds while the interface is up: are broadcasts still coming our way? */
+static u32 esw_impspeed_wanted(struct t48s_eth *p);
+
+/* every two seconds while the interface is up: are broadcasts still coming our
+ * way, and does the CPU port's speed setting still match the link? */
 static void imp_guard(struct work_struct *work)
 {
 	struct t48s_eth *p = container_of(work, struct t48s_eth, guard.work);
@@ -518,15 +593,238 @@ static void imp_guard(struct work_struct *work)
 			    v, p->imp_fixes);
 		esw_wr_check(p, ESW_IMPCTRL, (v & ~ESW_PORTCTRL_DISABLE) | ESW_IMPCTRL_WANTED);
 	}
+	v = esw_impspeed_wanted(p);
+	if (readl(p->esw + ESW_IMPSPEED) != v)
+		writel(v, p->esw + ESW_IMPSPEED);
 	schedule_delayed_work(&p->guard, 2 * HZ);
 }
+
+/* ---- the switch from cold ---- */
+
+/* set a register's bits if they are not as wanted; counts what it changed */
+static void esw_want(struct t48s_eth *p, u32 off, u32 mask, u32 val)
+{
+	u32 v = esw_rd(p, off);
+
+	if ((v & mask) == val)
+		return;
+	esw_wr_check(p, off, (v & ~mask) | val);
+	p->set_last++;
+}
+
+static void esw_want64(struct t48s_eth *p, u32 off, u64 val)
+{
+	if (esw_rd64(p, off) == val)
+		return;
+	esw_wr64(p, off, val);
+	p->set_last++;
+}
+
+static int esw_arl_wait(struct t48s_eth *p)
+{
+	int n = 1000;
+
+	while ((esw_rd(p, ESW_ARL_CTL) & ESW_ARL_CTL_START) && --n)
+		udelay(10);
+	return n ? 0 : -ETIMEDOUT;
+}
+
+/*
+ * The address table entry that sends frames for our MAC address to the CPU
+ * port (on = 1), or its removal (on = 0). Without it the switch treats our
+ * address as unknown and, as the CPU port is set (broadcast and multicast
+ * only), keeps unicast frames from us. Returns the bin used, or an error.
+ */
+static int esw_arl_cpu(struct t48s_eth *p, const u8 *mac, int on)
+{
+	u64 m = 0;
+	int i, bin = -1, rc;
+
+	for (i = 0; i < ETH_ALEN; i++)
+		m = (m << 8) | mac[i];
+	esw_wr64(p, ESW_ARL_MAC, m);
+	esw_wr(p, ESW_ARL_VID, 0);
+	esw_wr(p, ESW_ARL_CTL, ESW_ARL_CTL_START | ESW_ARL_CTL_READ);
+	rc = esw_arl_wait(p);
+	if (rc)
+		return rc;
+	for (i = 1; i >= 0; i--) {
+		u32 fwd = esw_rd(p, ESW_ARL_FWD(i));
+
+		if ((fwd & ESW_ARL_FWD_VALID) && esw_rd64(p, ESW_ARL_ENTRY(i)) == m) {
+			bin = i;	/* ours already */
+			break;
+		}
+		if (!(fwd & ESW_ARL_FWD_VALID))
+			bin = i;	/* free */
+	}
+	if (!on) {
+		if (bin < 0 || esw_rd64(p, ESW_ARL_ENTRY(bin)) != m ||
+		    !(esw_rd(p, ESW_ARL_FWD(bin)) & ESW_ARL_FWD_VALID))
+			return -ENOENT;
+		esw_wr(p, ESW_ARL_FWD(bin), 0);
+	} else {
+		if (bin < 0)
+			bin = 0;	/* both taken by other addresses: ours matters more */
+		if (esw_rd64(p, ESW_ARL_ENTRY(bin)) == m &&
+		    esw_rd(p, ESW_ARL_FWD(bin)) == ESW_ARL_FWD_CPU)
+			return bin;
+		esw_wr64(p, ESW_ARL_ENTRY(bin), m);
+		esw_wr(p, ESW_ARL_FWD(bin), ESW_ARL_FWD_CPU);
+		p->set_last++;
+	}
+	esw_wr(p, ESW_ARL_CTL, ESW_ARL_CTL_START);
+	rc = esw_arl_wait(p);
+	return rc ? rc : bin;
+}
+
+/* the CPU port's speed register follows the external port that has a link, as
+ * Yealink's driver keeps it (ethHw_impSpeedSet) */
+static u32 esw_impspeed_wanted(struct t48s_eth *p)
+{
+	static const u8 code[4] = { 2, 1, 4, 4 };	/* 10, 100, 1000 Mbit/s */
+	u32 link = esw_rd(p, ESW_LINK), speed = esw_rd(p, ESW_SPEED);
+	int port;
+
+	for (port = ESW_PORTS - 1; port >= 0; port--)
+		if (link & (1 << port))
+			return ESW_IMPSPEED_CPU_1000 | code[(speed >> (2 * port)) & 3];
+	return ESW_IMPSPEED_CPU_1000 | 4;
+}
+
+/*
+ * What Yealink's firmware (ethHw_Init and what follows it) changes from the
+ * values a reset leaves, read from the running switch before and after a
+ * reset: the spanning tree, 802.1X and LLDP group addresses go to both ports
+ * and the CPU, and the VLAN settings of the three ports.
+ */
+static const struct { u8 page, off; u64 val; } esw_settings[] = {
+	{ 0x04, 0x20, 0x0180c200000eULL }, { 0x04, 0x28, 0x103 },
+	{ 0x04, 0x30, 0x0180c2000003ULL }, { 0x04, 0x38, 0x103 },
+	{ 0x04, 0x40, 0x0180c2000000ULL }, { 0x04, 0x48, 0x103 },
+	{ 0x04, 0x0e, 0xa8 },
+	{ 0x34, 0x01, 0x0e }, { 0x34, 0x02, 0x70 }, { 0x34, 0x05, 0x40 },
+	{ 0x34, 0x06, 0x1d },
+	{ 0x34, 0x10, 0xfff }, { 0x34, 0x12, 0xfff }, { 0x34, 0x20, 0xfff },
+};
+
+/*
+ * Bring the switch up, from whatever state it is in. Called with the
+ * interface down, before the CPU-side FIFOs and the DMA are started.
+ */
+static int esw_bring_up(struct t48s_eth *p)
+{
+	void __iomem *chipc = ioremap(CHIPC_PHYS, 0x1000);
+	unsigned long flags;
+	u32 busclk, clk, reset;
+	int i, n, rc;
+
+	if (!chipc)
+		return -ENOMEM;
+	local_irq_save(flags);
+	busclk = readl(chipc + CHIPC_BUSCLK);
+	clk = readl(chipc + CHIPC_ESWCLK);
+	reset = readl(chipc + CHIPC_SOFTRESET2);
+	writel(busclk | CHIPC_BUSCLK_ESW | CHIPC_BUSCLK_DMAC1, chipc + CHIPC_BUSCLK);
+	if (!(clk & CHIPC_CLK_OUTPUT))
+		writel(CHIPC_ESWCLK_ON, chipc + CHIPC_ESWCLK);
+	local_irq_restore(flags);
+	if (reset & CHIPC_SOFTRESET2_ESW) {
+		udelay(100);
+		local_irq_save(flags);
+		writel(readl(chipc + CHIPC_SOFTRESET2) & ~CHIPC_SOFTRESET2_ESW,
+		       chipc + CHIPC_SOFTRESET2);
+		local_irq_restore(flags);
+	}
+	iounmap(chipc);
+	if ((busclk & (CHIPC_BUSCLK_ESW | CHIPC_BUSCLK_DMAC1)) != (CHIPC_BUSCLK_ESW | CHIPC_BUSCLK_DMAC1) ||
+	    !(clk & CHIPC_CLK_OUTPUT) || (reset & CHIPC_SOFTRESET2_ESW))
+		netdev_info(p->dev, "switch was off (bus clocks 0x%08x, clock 0x%08x, reset 0x%08x): started\n",
+			    busclk, clk, reset);
+	for (n = 0; n < 200 && !(readl(p->esw + ESW_STATUS) & ESW_STATUS_READY); n++)
+		usleep_range(1000, 2000);
+	p->off = false;
+	if (!(readl(p->esw + ESW_STATUS) & ESW_STATUS_READY)) {
+		netdev_err(p->dev, "switch not ready (status 0x%08x)\n", readl(p->esw + ESW_STATUS));
+		return -EIO;
+	}
+
+	p->set_last = 0;
+	for (i = 0; i < ARRAY_SIZE(esw_settings); i++)
+		esw_want64(p, ESW_PAGE(esw_settings[i].page, esw_settings[i].off), esw_settings[i].val);
+	/* both external ports: MAC on, forwarding. Then let the switch switch. */
+	for (i = 0; i < ESW_PORTS; i++)
+		esw_want(p, ESW_PORTCTRL(i), ESW_PORTCTRL_STP | ESW_PORTCTRL_DISABLE,
+			 ESW_PORTCTRL_FORWARD);
+	esw_want(p, ESW_SWMODE, ESW_SWMODE_MANAGED | ESW_SWMODE_FORWARD,
+		 ESW_SWMODE_MANAGED | ESW_SWMODE_FORWARD);
+	rc = esw_arl_cpu(p, p->dev->dev_addr, 1);
+	p->arl_bin = rc;
+	if (rc < 0)
+		netdev_warn(p->dev, "switch: could not enter our address in the address table (%d)\n", rc);
+	if (readl(p->esw + ESW_IMPSPEED) != esw_impspeed_wanted(p)) {
+		writel(esw_impspeed_wanted(p), p->esw + ESW_IMPSPEED);
+		p->set_last++;
+	}
+	if (p->set_last)
+		netdev_info(p->dev, "switch: %u settings were not as wanted and have been set\n", p->set_last);
+	return 0;
+}
+
+/*
+ * The cold test: with the interface down, take the switch as far down as
+ * this kernel can. Our address leaves the address table (which survives a
+ * reset), the CPU-side FIFOs are stopped, the switch is put in reset and its
+ * clocks are gated. Nothing may read a switch register until the next "up".
+ */
+static struct t48s_eth *the_eth;
+
+static int cold_set(const char *val, const struct kernel_param *kp)
+{
+	struct t48s_eth *p = the_eth;
+	void __iomem *chipc;
+	unsigned long flags;
+	int rc;
+
+	if (!p || val[0] != '1')
+		return -EINVAL;
+	rtnl_lock();
+	if (netif_running(p->dev) || p->off) {
+		rtnl_unlock();
+		return -EBUSY;
+	}
+	chipc = ioremap(CHIPC_PHYS, 0x1000);
+	if (!chipc) {
+		rtnl_unlock();
+		return -ENOMEM;
+	}
+	rc = esw_arl_cpu(p, p->dev->dev_addr, 0);
+	netdev_info(p->dev, "test: our address %s the address table (%d)\n",
+		    rc >= 0 ? "removed from" : "was not in", rc);
+	writel(0, p->esw + ESW_PTM_CONFIG);
+	writel(0, p->esw + ESW_MTP_CONFIG);
+	writel(0, p->esw + ESW_IMPSPEED);
+	p->off = true;
+	local_irq_save(flags);
+	writel(readl(chipc + CHIPC_SOFTRESET2) | CHIPC_SOFTRESET2_ESW, chipc + CHIPC_SOFTRESET2);
+	writel(readl(chipc + CHIPC_ESWCLK) & ~CHIPC_CLK_OUTPUT, chipc + CHIPC_ESWCLK);
+	writel(readl(chipc + CHIPC_BUSCLK) & ~CHIPC_BUSCLK_ESW, chipc + CHIPC_BUSCLK);
+	local_irq_restore(flags);
+	netdev_info(p->dev, "test: switch in reset, clocks gated (reset 0x%08x, clock 0x%08x, bus clocks 0x%08x)\n",
+		    readl(chipc + CHIPC_SOFTRESET2), readl(chipc + CHIPC_ESWCLK), readl(chipc + CHIPC_BUSCLK));
+	iounmap(chipc);
+	p->cold_tests++;
+	rtnl_unlock();
+	return 0;
+}
+
+static const struct kernel_param_ops cold_ops = { .set = cold_set };
+module_param_cb(cold, &cold_ops, NULL, 0200);
 
 /*
  * cat /sys/module/t48s_eth/parameters/diag: the switch's CPU port settings,
  * what it has sent our way, and where the receive ring and the DMA stand.
  */
-static struct t48s_eth *the_eth;
-
 static int diag_get(char *buf, const struct kernel_param *kp)
 {
 	struct t48s_eth *p = the_eth;
@@ -534,11 +832,14 @@ static int diag_get(char *buf, const struct kernel_param *kp)
 
 	if (!p)
 		return sprintf(buf, "no device\n");
+	if (p->off)
+		return sprintf(buf, "switch off (cold test %u)\n", p->cold_tests);
 	llp = dmac_rd(p, DMAC_CH(CH_RX) + DMAC_LLP);
 	return sprintf(buf,
 		"imp ctrl 0x%02x (bcast %s, put back %u times), gblmgmt 0x%02x, imp enable 0x%02x, link 0x%04x\n"
 		"to cpu: bcast %u mcast %u ucast %u dropped %u\n"
-		"rx ring: driver at %d, dma at %d, channels on 0x%x\n",
+		"rx ring: driver at %d, dma at %d, channels on 0x%x\n"
+		"last up: %u settings set; our address in table bin %d; ports 0x%02x 0x%02x, mode 0x%02x, cpu speed 0x%02x; cold tests %u\n",
 		esw_rd(p, ESW_IMPCTRL),
 		(esw_rd(p, ESW_IMPCTRL) & ESW_IMPCTRL_RX_BCAST) ? "on" : "OFF", p->imp_fixes,
 		esw_rd(p, ESW_GBLMGMT), esw_rd(p, ESW_IMPENABLE), esw_rd(p, ESW_LINK),
@@ -548,7 +849,9 @@ static int diag_get(char *buf, const struct kernel_param *kp)
 		esw_rd(p, ESW_MIB(ESW_PORT_IMP, ESW_MIB_TX_DROP)),
 		p->rx_next,
 		llp ? (int)((llp - p->rx_lli_dma) / sizeof(struct lli)) : -1,
-		dmac_rd(p, DMAC_CHEN) & 0xff);
+		dmac_rd(p, DMAC_CHEN) & 0xff,
+		p->set_last, p->arl_bin, esw_rd(p, ESW_PORTCTRL(0)), esw_rd(p, ESW_PORTCTRL(1)),
+		esw_rd(p, ESW_SWMODE), readl(p->esw + ESW_IMPSPEED), p->cold_tests);
 }
 
 static const struct kernel_param_ops diag_ops = { .get = diag_get };
@@ -559,6 +862,9 @@ static int t48s_open(struct net_device *dev)
 	struct t48s_eth *p = netdev_priv(dev);
 	int rc;
 
+	rc = esw_bring_up(p);
+	if (rc)
+		return rc;
 	netdev_info(dev, "switch: link 0x%04x, gblmgmt 0x%02x, imp ctrl 0x%02x, ptm 0x%08x, mtp 0x%08x\n",
 		    esw_rd(p, ESW_LINK), esw_rd(p, ESW_GBLMGMT),
 		    esw_rd(p, ESW_PORTCTRL(ESW_PORT_IMP)),
@@ -608,6 +914,10 @@ static int t48s_stop(struct net_device *dev)
 	dmac_chbit(p, DMAC_MASK_TFR, CH_TX, 0);
 	dmac_stop(p, CH_RX);
 	dmac_stop(p, CH_TX);
+	/* the CPU-side FIFOs off too: a switch reset with them on leaves the
+	 * receive side stuck (seen: nothing reached the CPU afterwards) */
+	writel(0, p->esw + ESW_PTM_CONFIG);
+	writel(0, p->esw + ESW_MTP_CONFIG);
 	napi_disable(&p->napi);
 	free_irq(p->irq_rx, p);
 	free_irq(p->irq_tx, p);
@@ -639,6 +949,7 @@ static int t48s_eth_probe(struct platform_device *pdev)
 	p->dev = dev;
 	spin_lock_init(&p->lock);
 	INIT_DELAYED_WORK(&p->guard, imp_guard);
+	p->arl_bin = -1;
 
 	/*
 	 * Plain ioremap, no claim on the regions: the DMA controller's registers
