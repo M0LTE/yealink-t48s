@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Blind transfer: in a call with 1002, send them to 1003.
 waitstate reg ok 8000
 waitstate audio up 3000

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # /sbin/init of the rescue ramdisk (tools/mkrescue.sh). Booted with Yealink's own
 # kernel through U-Boot's recovery mode, so Yealink's NAND and yaffs2 drivers are
 # available. Puts our boot hook and SSH back on the phone, clears BOOTMODE,

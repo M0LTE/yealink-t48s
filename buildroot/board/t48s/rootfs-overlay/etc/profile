@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 export PS1="t48s# "
 # the time zone chosen in Settings, for programs started from this shell
 TZ=$(t48-config tz 2>/dev/null) && export TZ

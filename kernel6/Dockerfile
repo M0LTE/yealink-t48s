@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # The build container for kernel6/ (a current long-term kernel): Debian 13's own
 # ARM cross compiler (gcc 14), nothing unusual; and QEMU for qemu-test.sh.
 #   docker build -t t48s-kbuild6:trixie kernel6

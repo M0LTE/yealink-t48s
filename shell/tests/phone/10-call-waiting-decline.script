@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Call waiting: a second caller is shown while the first call goes on, with a beep and the lamp; X turns them away.
 waitstate reg ok 8000
 waitstate audio up 3000

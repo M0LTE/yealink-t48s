@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Put the boot hook back once SSH is running. The hook disarms itself at the start of
 # every boot so a broken setup falls back to stock Yealink; SSH being up is the proof
 # that this boot is fine, so re-arm 15 s after it is seen (a long window here once let

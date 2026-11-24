@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Install (issues 33, 61): on a phone started from a USB stick, Settings has an
 # Install page. It offers one step at a time: Back up, then Install, and the
 # phone restarts when the stick is taken out. A stand-in for t48-install is

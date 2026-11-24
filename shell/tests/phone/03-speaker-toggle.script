@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Speakerphone: answer with the Speaker key, move to the handset and back, end with Speaker.
 waitstate reg ok 8000
 waitstate audio up 3000

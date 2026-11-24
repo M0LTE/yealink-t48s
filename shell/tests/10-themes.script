@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Themes: Settings, Screen, Theme picks one of three at once and keeps it; a change
 # from elsewhere (the web setup page, t48-config) is followed within a second; an
 # open app is told, and a frozen one finds out when it comes back.

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Our services, started early in boot by /config/simulator.sh.
 D=/data/ssh
 [ -f $D/dropbear_ed25519_host_key ] || $D/dropbearkey -t ed25519 -f $D/dropbear_ed25519_host_key

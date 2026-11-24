@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
 config BR2_PACKAGE_T48_WEB
 	bool "t48-web"
 	select BR2_PACKAGE_LIBT48

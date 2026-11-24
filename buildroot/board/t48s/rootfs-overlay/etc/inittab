@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 ::sysinit:/etc/init.d/rcS
 ttyAMA0::respawn:-/bin/sh
 # Everything else runs under runit, which starts a service again if it stops:

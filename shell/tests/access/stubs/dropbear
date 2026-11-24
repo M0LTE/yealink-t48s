@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # stand-in for the SSH server: notes how it was started, and leaves a process to be "running"
 echo "$*" >> "$T48_ACCESS_RUN/dropbear.started"
 while [ $# -gt 0 ]; do [ "$1" = -P ] && pidfile=$2; shift; done

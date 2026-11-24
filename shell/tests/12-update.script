@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Settings, Update (issue 31): the screen in front of t48-update. A stand-in
 # plays the updater (tests/update/update.sh), with its scene in simdata/update.
 run mkdir -p simdata/update

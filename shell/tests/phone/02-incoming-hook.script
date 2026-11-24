@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Incoming call, answered by lifting the handset; the far end hangs up.
 waitstate reg ok 8000
 waitstate audio up 3000

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # The backlight (issue 18): dims, goes off, and what brings it back.
 # A folder of files stands in for /sys/class/backlight (T48_BACKLIGHT).
 run mkdir -p simdata/bl/t48s && echo 10 > simdata/bl/t48s/max_brightness && echo 8 > simdata/bl/t48s/brightness && echo 0 > simdata/bl/t48s/bl_power

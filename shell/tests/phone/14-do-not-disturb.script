@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Do not disturb: callers are told the phone is not available, nothing rings, and the call is listed as missed.
 waitstate reg ok 8000
 waitstate audio up 3000

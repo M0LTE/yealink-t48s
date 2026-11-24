@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Programs for the T48S (ARMv6, Linux 2.6.27, EABI soft-float).
 # Freestanding ones use raw syscalls; the rest link musl built by build-dropbear.sh.
 # The Buildroot package (buildroot/package/t48s-tools) sets CROSS_CC.

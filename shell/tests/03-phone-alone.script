@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # The phone screens with no SIP service and no audio service running:
 # everything still answers the keys, and a call fails politely.
 wait 300

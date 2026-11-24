@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # The app manager (issue 22), against two small feeds on disk made by
 # tests/mkfeeds.sh: install, open, settings, update, remove, and the refusals.
 run ./t48-config --config simdata/config set feed url file://$PWD/feeds/1/index.json

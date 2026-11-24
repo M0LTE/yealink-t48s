@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Boot hook for the custom T48S setup, installed as /config/simulator.sh.
 # Yealink's /phone/scripts/phone.sh runs this file instead of its normal startup
 # whenever it exists.

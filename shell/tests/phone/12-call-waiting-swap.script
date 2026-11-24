@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Call waiting, answered: the first call goes on hold, OK swaps between the two, and ending one brings the other back.
 waitstate reg ok 8000
 waitstate audio up 3000

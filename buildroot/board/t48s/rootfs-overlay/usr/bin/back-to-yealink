@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # reset the board through the SoC watchdog (2 seconds); U-Boot then boots Yealink from flash
 echo "resetting to Yealink..."
 # our own feeder would keep the watchdog from firing: stop it first (-v: wait for it)

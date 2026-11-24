@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # A phone with no touchscreen (the T46S, issue 10): its four soft keys press the
 # buttons along the bottom of Contacts and Calls, so nothing there needs a finger.
 wait 300

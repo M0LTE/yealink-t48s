@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Install page: the states with nothing to choose, and a stick that arrives
 # while the page is open (issue 61).
 run sh -c "mkdir -p simdata/fw && : > simdata/live && echo no > simdata/fw/stick"

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Several accounts (issue 36): a second one is entered in Settings, both register, calls go out from the
 # one chosen and say which one was called, the history keeps it, and the account is removed again.
 waitstate reg ok 8000

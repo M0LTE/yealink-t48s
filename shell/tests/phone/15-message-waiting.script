@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Message waiting: the server says two messages wait; the lamp blinks slowly, the idle screen says so, and the Message key calls voicemail.
 waitstate reg ok 8000
 waitstate audio up 3000

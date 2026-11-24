@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # kexec-boot.sh IMAGE [WDT]: boot IMAGE (raw kernel Image) on the phone from Yealink's
 # running kernel via kmod/t48kexec.ko, with no key presses. The watchdog (WDT seconds,
 # default 90) resets the phone back to Yealink if the new kernel does not disarm it.

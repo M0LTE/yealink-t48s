@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Themes in a call. Two-tone's ground is green while a call rings and amber while
 # one is held; the theme carries that, so a change of theme in the middle of a call
 # changes it at once. Then a call over an open app, with the theme changed under both:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # A tour of the shell: idle, launcher, the clock app, Home, the handset.
 wait 300
 expect idle

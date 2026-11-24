@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Prepare linux-2.6.27.47 for building modules that load into Yealink's kernel:
 # vermagic "2.6.27.47 preempt mod_unload ARMv6", no symbol versions.
 set -e

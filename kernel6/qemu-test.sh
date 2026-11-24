@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Smoke test on a PC: build the T48S kernel configuration for QEMU's versatilepb
 # machine (ARM1176, see dts/qemu-versatilepb-test.dts) and boot it to the shell
 # prompt. It proves the configuration, the device-tree-only boot, the interrupt

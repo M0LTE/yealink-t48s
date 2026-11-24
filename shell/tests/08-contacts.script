@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Contacts, do not disturb and the tidier call history (issue 27), with no services behind them.
 wait 300
 expect idle

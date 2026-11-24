@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # mkrfs-bb.sh BUSYBOX OUT.rfs: ext2 ramdisk for our own kernel: static busybox as
 # init, a shell on the serial console, and a banner on the screen (native/membanner).
 # Needs sudo (mke2fs -d ownership, debugfs).

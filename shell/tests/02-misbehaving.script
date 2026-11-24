@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Apps that die or hang must not take the shell with them.
 key ok
 key right

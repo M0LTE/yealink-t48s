@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Linux 3.6.11: the FALLBACK kernel since issue 55 (the phone's kernel is kernel6/).
 # Build the T48S kernel inside the t48s-kbuild:trusty container (gcc 4.7).
 # Run from the directory holding linux-3.6.11/ and this kernel/ directory.

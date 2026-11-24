@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # The idle screen's standing notice (issue 7): what t48-live shows when the phone was
 # started from a USB stick. It is there while its file exists and no longer. Its first
 # line leads the one row of notices; its second takes the bottom line.

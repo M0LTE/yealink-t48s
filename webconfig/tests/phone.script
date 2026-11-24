@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # The web setup page and the phone's own screens (issue 37): the page is off
 # until it is turned on here, a browser pairs with a code this screen shows,
 # and what one side changes the other shows. Run by with-phone.sh: $B is the

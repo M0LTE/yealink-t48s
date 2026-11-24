@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Attended transfer: ask 1003 first with 1002 on hold; give up once and go back; then put them through.
 waitstate reg ok 8000
 waitstate audio up 3000

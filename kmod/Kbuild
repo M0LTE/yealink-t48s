@@ -1,2 +1,3 @@
+# SPDX-License-Identifier: GPL-2.0
 obj-m += hello.o t48kexec.o regprobe.o pgdprobe.o
 t48kexec-objs := t48kexec_main.o t48kexec_stub.o

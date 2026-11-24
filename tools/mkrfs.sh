@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # mkrfs.sh INIT OUT.rfs: build the ext2 ramdisk for U-Boot's USB/TFTP recovery boot.
 # INIT becomes /sbin/init. Also includes the phone's userenv tool with its C library
 # (copied from the phone over SSH) and the device nodes the test init needs.

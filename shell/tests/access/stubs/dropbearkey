@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # stand-in: "makes" a host key, and prints a fingerprint for it
 case "$1" in
 -t) echo "host key $(date +%s)" > "$4" ;;

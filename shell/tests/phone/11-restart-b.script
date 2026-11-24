@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # keep-state
 # A new shell finds the call from part a still up, on the speaker and muted, and can end it.
 run $FAR $BOB waitcall established 3

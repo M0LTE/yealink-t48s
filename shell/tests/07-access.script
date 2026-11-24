@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Access (issue 28): SSH is off until the owner turns it on, and a first key
 # gets onto the phone through a short-lived password. The phone's real
 # t48-access script runs behind this, with stand-ins for dropbear

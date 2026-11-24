@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # The live start (LIVE=1, docs/live-image.md) on a PC, as far as a PC can go:
 # build T48S.bin for QEMU's versatilepb machine (dts/qemu-versatilepb-test-live.dts:
 # the test machine with the live start's ramdisk and command line), then hand it

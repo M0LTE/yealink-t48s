@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # A call arrives while an app is open: the app is paused and the call screen
 # takes over; when the call is over the app comes back.
 waitstate reg ok 8000

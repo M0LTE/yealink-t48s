@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Install page on an installed phone started from the stick (issue 61): Restore
 # is the one thing to choose, and the phone restarts when the stick is taken out.
 run sh -c "mkdir -p simdata/fw && : > simdata/live && : > simdata/fw/in && echo ours > simdata/fw/flash && echo checked > simdata/fw/backup"

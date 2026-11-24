@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # ourkernel.sh boot [IMAGE]   : start our kernel from Yealink and wait for its shell prompt.
 #                              IMAGE defaults to dumps/Image-kexec: Linux 6.18 (kernel6/) since issue 55.
 #                              The 3.6 fallback, Image-kexec-linux3.6, starts the same way.

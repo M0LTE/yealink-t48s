@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Build the modern kernel for the T48S (issue 38). Run inside the t48s-kbuild6
 # container (kernel6/Dockerfile), or on any machine with an arm-linux-gnueabi gcc:
 #

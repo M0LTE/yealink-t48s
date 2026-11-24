@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # A call that is not answered is a missed call: counted on the idle screen, listed in the history.
 waitstate reg ok 8000
 waitstate audio up 3000

@@ -1,2 +1,3 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 exec "$SIM_BIN/t48-config" --config "$SIM_BIN/simdata/config" "$@"

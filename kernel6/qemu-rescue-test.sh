@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # The first stage's way out when nothing starts (issue 32, docs/install.md), on
 # a PC: build the kernel for QEMU's versatilepb machine with the command line of
 # an installed phone (dts/qemu-versatilepb-test-flash.dts) and the first stage

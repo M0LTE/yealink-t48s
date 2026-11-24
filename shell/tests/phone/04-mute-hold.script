@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Mute, then hold and resume, in a call on the headset.
 waitstate reg ok 8000
 waitstate audio up 3000

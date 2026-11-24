@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Added to Buildroot's default busybox config: clock from NTP (servers from DHCP)
 CONFIG_NTPD=y
 # UBI: attach our part of the flash and make the data volume (issue #29, docs/flash.md).

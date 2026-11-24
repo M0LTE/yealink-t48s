@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # mkrescue.sh OUTDIR: build the rescue set (T48S.bin, T48S.rfs, T48S.rom) for U-Boot's
 # recovery mode, option 1 (serve with tools/tftpd.py OUTDIR 69 --rom-once).
 # T48S.bin is Yealink's own kernel (NAND drivers built in); T48S.rfs runs

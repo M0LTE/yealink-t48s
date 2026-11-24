@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Laid over t48s_defconfig for the modern kernel (kernel6/, issue 38): the same
 # root filesystem built against Linux 6.18 headers instead of 3.6.
 #   T48S_BR_FRAGMENT=buildroot/configs/kernel6.fragment buildroot/build.sh WORKDIR

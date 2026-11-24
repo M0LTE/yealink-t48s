@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Contacts: a number in the list shows its name for calls in and out, and in the history.
 waitstate reg ok 8000
 waitstate audio up 3000

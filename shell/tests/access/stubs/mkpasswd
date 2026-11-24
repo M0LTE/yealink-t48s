@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # stand-in: "hashes" the password on standard input, and keeps it so a test can
 # check it was given and that it is nowhere in the log
 pw=$(cat)

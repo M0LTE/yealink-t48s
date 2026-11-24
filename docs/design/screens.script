@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # The seven screens every theme is shown with (docs/design/README.md). Run by render.sh
 # against fakesip.py, so the account is registered and the call is answered.
 wait 2500
