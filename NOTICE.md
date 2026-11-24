@@ -24,7 +24,6 @@ Each file says which in its `SPDX-License-Identifier` line. A patch carries the 
 | DejaVu Sans and DejaVu Sans Mono, as glyph tables for the boot banner | `native/gen/fonts.h` | Bitstream Vera licence, DejaVu's changes public domain: `native/gen/LICENSE-DejaVu.txt` |
 | A patch to re for Linux 3.6 headers | `sip/patches/` | BSD-3-Clause, as re |
 | Patches to Linux 6.18 | `kernel6/patches/` | GPL-2.0, as Linux |
-| dropbear 2025.88 built against musl, a leftover test binary that no release contains | `kernel/kexec-rootfs/usr/bin/dropbearmulti` | MIT (dropbear), MIT (musl) |
 
 ## Third-party programs in what a release ships
 
