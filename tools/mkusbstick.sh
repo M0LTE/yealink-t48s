@@ -59,6 +59,9 @@ mkfs.vfat -F $FAT -n "$MODEL" "$PART" >/dev/null
 M=$(mktemp -d)
 mount -t vfat "$PART" "$M"
 for f in $MODEL.rom $MODEL.bin $MODEL.rfs README.txt; do cp "$DIR/$f" "$M/$f"; done
+# after the files U-Boot reads, so that those stay at the start of the stick: what
+# the on-phone installer wants (docs/installer.md)
+[ ! -d "$DIR/install" ] || cp -r "$DIR/install" "$M/install"
 sync; umount "$M"; rmdir "$M"; sync
 python3 "$HERE/mkliveimage.py" checkstick "$DEV" "$DIR" model="$MODEL"
 echo "The stick is ready. It is safe to pull out."
