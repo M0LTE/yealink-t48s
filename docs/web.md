@@ -42,6 +42,7 @@ Open that address in a browser. A browser the phone has not seen gets one page o
 | Apps | what is installed and what the feed offers: install, update, remove; each app's own settings; the feed address |
 | Access | SSH on and off, the host key's fingerprint, the keys that can log in: **paste a public key** to add one, remove one, forget all. The browsers paired with the page; turn the page off |
 | Backup | download the settings as one text file; put a saved file back |
+| Update | the version and slot that are running, the channel, the newest release on it; check, install, restart, and the kernel when the channel's differs |
 
 **Passwords go one way only.** A password box is always empty and says only "Set" or "Not set"; leaving it empty keeps the one that is set. That goes for SIP passwords and for any app setting its manifest calls a password.
 
@@ -79,6 +80,18 @@ Alice Example|1002
 - A restore replaces each part that is in the file and leaves the rest alone. The whole file is read and checked first; a file that is cut short, or has anything in it that is not a setting, changes nothing.
 - The settings of an app that is no longer installed are only in a backup with passwords: without the app's manifest there is no telling which of them are passwords.
 
+## Update
+
+A front end for `t48-update` ([install.md](install.md)), which does all of the work: the page runs `t48-update info` to draw itself and the other commands for its buttons.
+
+- **Nothing is automatic.** Opening the page asks the network nothing. Check now does.
+- Install is offered once a check has found an update. It writes the slot that is not in use; Restart, offered when it is done, tries it.
+- Install kernel is offered only when the channel's kernel differs from the one in flash, with a Confirm box: there is one kernel slot.
+- Check, install and kernel are started and left to run; the page answers at once and asks for itself again every three seconds while one is going (a `Refresh` header, so no script is needed). One at a time.
+- A failure is shown in the updater's own words, and so is the last result, with its time.
+- The channel is Stable, Testing or a URL. The updater decides what is a URL.
+- On a phone started without installing: the version and "Not installed".
+
 ## How it is kept safe
 
 Sized for a hobby phone on a home network: not careless, not a bank.
@@ -98,7 +111,7 @@ Sized for a hobby phone on a home network: not careless, not a bank.
 - Shell scripts that take form fields and write settings are where quoting mistakes become root. Here every value is a C string that goes to the settings store, which already refuses anything that is not one line of text.
 - It is one static program of about 200 KB with the style sheet and script inside it, and it shares the store and the manifest reader with the shell as source, so there is one implementation of each.
 
-It handles one request at a time, each with a 20 second limit: there is one owner. An app install holds the page until it is done.
+It handles one request at a time, each with a 20 second limit: there is one owner. An app install holds the page until it is done; an update does not.
 
 ## Running it
 
@@ -134,9 +147,9 @@ make -C webconfig check
 
 CI runs this and `make -C shell check` on every push to main, as the quick job `check` beside the image build ([build.yml](../.github/workflows/build.yml)).
 
-1. **The handlers** ([`tests/test_web.py`](../webconfig/tests/test_web.py)): the real program over HTTP against a temporary settings tree, 23 tests. It does not start with the setting off, and leaves when it is turned off. Without pairing: only the welcome page, every other page sends the browser back to it, every form is refused. Pairing: the code, a wrong code, another browser trying the right code, five tries, asking again too soon, refused at the phone, fifteen wrong tries closing it, another site's form. Paired: forms without the token, with a wrong one, and from another site are refused and change nothing; then every form, good and bad values; contacts in and out as CSV and vCard; apps installed from the test feed, updated, their settings, removed; SSH and keys (a private key, a line with options and junk are refused); and the backup both ways, with and without passwords, with seven kinds of damaged file. Passwords, the code and the cookie are checked to be in no page and no log.
+1. **The handlers** ([`tests/test_web.py`](../webconfig/tests/test_web.py)): the real program over HTTP against a temporary settings tree, 32 tests. It does not start with the setting off, and leaves when it is turned off. Without pairing: only the welcome page, every other page sends the browser back to it, every form is refused. Pairing: the code, a wrong code, another browser trying the right code, five tries, asking again too soon, refused at the phone, fifteen wrong tries closing it, another site's form. Paired: forms without the token, with a wrong one, and from another site are refused and change nothing; then every form, good and bad values; contacts in and out as CSV and vCard; apps installed from the test feed, updated, their settings, removed; SSH and keys (a private key, a line with options and junk are refused); and the backup both ways, with and without passwords, with seven kinds of damaged file. The Update page against a stand-in for `t48-update` ([`tests/update.sh`](../webconfig/tests/update.sh)): before a check, a check that finds an update, an install watched through downloading and writing to the restart, a failed check, the channels and a refused URL, the kernel and its Confirm box, a phone that is not installed. Passwords, the code and the cookie are checked to be in no page and no log.
 2. **With the phone's shell** ([`tests/phone.script`](../webconfig/tests/phone.script), run by `with-phone.sh`): the shell as its PC simulator, the real `t48-web`, and a scripted browser. The page is not there until it is turned on at the Access screen; the code appears on the screen; X refuses it; the next one pairs. Then changes made on the web are watched arriving on the phone (time zone, an account, the ringer level while the Sound page is showing, brightness, a contact, the history cleared, an app installed), and changes made on the phone are read back from the web (the volume key, the time zone, SSH). Off at the screen: the page is gone and the browser is a stranger when it comes back.
-3. The same 23 handler tests pass against the phone's own ARM build under qemu: `make -C webconfig CC=.../armcc O=build-arm`, then `RUNNER=qemu-arm SHELL_BUILD=$PWD/shell/build python3 webconfig/tests/test_web.py webconfig/build-arm`.
+3. The same 32 handler tests pass against the phone's own ARM build under qemu: `make -C webconfig CC=.../armcc O=build-arm`, then `RUNNER=qemu-arm SHELL_BUILD=$PWD/shell/build python3 webconfig/tests/test_web.py webconfig/build-arm`.
 4. `make -C webconfig shots` takes the pictures on this page with Playwright. Taking them found a fault the scripted tests could not: with `Referrer-Policy: no-referrer` a real browser sends `Origin: null` with its own forms, and every form was refused. It is `same-origin` now.
 
 | | |

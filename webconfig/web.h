@@ -13,6 +13,8 @@ struct web_options {
     int port;
     const char *appcmd;   /* t48-app */
     const char *keep;     /* t48-access's folder of things that are kept: ssh/authorized_keys */
+    const char *update;   /* t48-update */
+    const char *restart;  /* what restarts the phone */
 };
 extern struct web_options wopt;
 
@@ -53,6 +55,7 @@ void flash(struct req *r, int bad, const char *fmt, ...) __attribute__((format(p
 void send_page(struct req *r, int status);                 /* what H() has made, as HTML */
 void send_file(struct req *r, const char *type, const char *filename);   /* the same, as a download */
 void redirect(struct req *r, const char *where);
+void page_refresh(int seconds);                            /* this page asks for itself again, for one that shows progress */
 void page_begin(struct req *r, const char *title, const char *nav);
 void page_end(struct req *r);
 void form_begin(struct req *r, const char *action, const char *more);   /* with the CSRF field in it */

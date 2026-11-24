@@ -51,6 +51,17 @@ class Phone:
         with open(self.apply, "w") as f:
             f.write('#!/bin/sh\necho "$1" >> "%s"\n' % self.applied)
         os.chmod(self.apply, 0o755)
+        # the stand-in for t48-update (update.sh) keeps what it knows in a folder; "restart" only says it was asked
+        self.fake = os.path.join(self.dir, "update")
+        os.makedirs(self.fake)
+        self.update = os.path.join(self.dir, "update.sh")
+        with open(self.update, "w") as f:
+            f.write('#!/bin/sh\nFAKE="%s" exec sh "%s" "$@"\n' % (self.fake, os.path.join(HERE, "update.sh")))
+        os.chmod(self.update, 0o755)
+        self.restart = os.path.join(self.dir, "restart.sh")
+        with open(self.restart, "w") as f:
+            f.write('#!/bin/sh\necho restart >> "%s"\n' % os.path.join(self.fake, "restarted"))
+        os.chmod(self.restart, 0o755)
         if enabled:
             self.set("access", "web", "on")
         self.port = free_port()
@@ -63,7 +74,7 @@ class Phone:
             RUNNER + [WEB, "--listen", "127.0.0.1:%d" % self.port, "--config", self.config, "--state", self.state,
              "--apps", self.installed + ":" + os.path.join(SHELL_BUILD, "apps"), "--data", os.path.join(self.dir, "appdata"),
              "--apply", self.apply, "--app", os.path.join(SHELL_BUILD, "t48-app"), "--access", self.access,
-             "--keys", self.keep, "--run", self.run],
+             "--keys", self.keep, "--run", self.run, "--update", self.update, "--restart", self.restart],
             stderr=self.logfile)
         for _ in range(100):
             if self.proc.poll() is not None or (os.path.exists(self.log) and "listening" in read(self.log)):
@@ -212,7 +223,7 @@ class Pairing(unittest.TestCase):
         self.assertIn("Plain HTTP", r.body)
         self.assertEqual(r.getheader("X-Frame-Options"), "DENY")
         self.assertIn("default-src 'none'", r.getheader("Content-Security-Policy"))
-        for path in ("/accounts", "/backup", "/contacts/export.csv", "/access"):
+        for path in ("/accounts", "/backup", "/contacts/export.csv", "/access", "/update"):
             r = b.get(path)
             self.assertEqual((r.status, r.getheader("Location")), (303, "/"), path)
         self.p.set("sip", "user", "1001")
@@ -221,6 +232,10 @@ class Pairing(unittest.TestCase):
             self.assertEqual(r.status, 403, path)
         self.assertEqual(self.p.get("sip", "user"), "1001")
         self.assertIsNone(self.p.get("access", "ssh"))
+        for path in ("/update/check", "/update/install", "/update/kernel", "/update/restart", "/update/channel"):
+            r = b.post(path, {"sure": "yes", "channel": "testing"}, csrf=False)
+            self.assertEqual(r.status, 403, path)
+        self.assertFalse(os.path.exists(os.path.join(self.p.fake, "calls")))
         self.assertEqual(b.get("/style.css").status, 200)
         self.assertEqual(b.get("/nothing").status, 303)
 
@@ -787,7 +802,7 @@ class Paired(unittest.TestCase):
 
     def test_95_pages_and_log(self):
         b, p = self.b, self.p
-        for path in ("/", "/accounts", "/network", "/time", "/sound", "/contacts", "/history", "/apps", "/access", "/backup"):
+        for path in ("/", "/accounts", "/network", "/time", "/sound", "/contacts", "/history", "/apps", "/access", "/backup", "/update"):
             r = b.get(path)
             self.assertEqual(r.status, 200, path)
             self.assertIn("Plain HTTP", r.body, path)
@@ -809,6 +824,234 @@ class Paired(unittest.TestCase):
         self.assertEqual(p.proc.wait(5), 0)
         time.sleep(1.3)
         self.assertIn("access", p.applied_list()[-1:])
+
+
+class Update(unittest.TestCase):
+    """The Update page, with a stand-in for t48-update (tests/update.sh)."""
+
+    def setUp(self):
+        self.p = Phone().start()
+        self.b = Browser(self.p).pair()
+
+    def tearDown(self):
+        self.p.stop()
+
+    def fake(self, name, text=None):
+        path = os.path.join(self.p.fake, name)
+        if text is None:
+            if os.path.exists(path):
+                os.remove(path)
+        else:
+            with open(path + ".new", "w") as f:
+                f.write(text)
+            os.rename(path + ".new", path)
+
+    def calls(self, without_info=True):
+        path = os.path.join(self.p.fake, "calls")
+        c = read(path).splitlines() if os.path.exists(path) else []
+        return [x for x in c if x != "info"] if without_info else c
+
+    def fact(self, body, name):
+        m = re.search(r"<dt>%s</dt><dd>(.*?)</dd>" % name, body)
+        return re.sub(r"<[^>]+>", "", m.group(1)) if m else None
+
+    def page(self, until=None, tries=80):
+        """the page; with until, asked for again as a browser would until it says so"""
+        for _ in range(tries):
+            r = self.b.get("/update")
+            self.assertEqual(r.status, 200)
+            if until is None or until(r):
+                return r
+            time.sleep(0.1)
+        self.fail("the page never got there: " + r.body)
+
+    def post(self, path, fields=None):
+        r = self.b.post(path, fields)
+        self.assertEqual((r.status, r.getheader("Location")), (303, "/update"), r.body)
+
+    def flash(self, r):
+        m = re.search(r"<p class='flash( bad)?' role='status'>(.*?)</p>", r.body)
+        return (bool(m.group(1)), m.group(2)) if m else (None, "")
+
+    def test_before_a_check(self):
+        r = self.page()
+        self.assertEqual(self.fact(r.body, "Version"), "v0.2.0, slot A")
+        self.assertEqual(self.fact(r.body, "Latest"), "Not checked")
+        self.assertIsNone(self.fact(r.body, "Status"))
+        self.assertEqual(self.fact(r.body, "Last result"), "None")
+        self.assertIn("<option value='stable' selected>Stable</option>", r.body)
+        self.assertIn("Check now", r.body)
+        for absent in ("/update/install", "/update/restart", "/update/kernel"):
+            self.assertNotIn(absent, r.body)
+        self.assertIsNone(r.getheader("Refresh"))
+        self.assertIn("href='/update' class='here'>Update</a>", r.body)
+        self.assertIn("href='/update'", self.b.get("/").body)
+        # looking never checks
+        self.assertEqual(self.calls(), [])
+        self.assertIn("info", self.calls(False))
+        # and a GET starts nothing
+        self.assertEqual(self.b.get("/update/check").status, 404)
+        self.assertEqual(self.calls(), [])
+
+    def test_check_then_update_available(self):
+        self.fake("offer", "latest=v0.3.0\nupdate=yes\nkernel=same\n")
+        self.fake("hold-checking", "")
+        self.post("/update/check")
+        r = self.page(lambda r: self.fact(r.body, "Status") == "Checking")
+        # it asks for itself again, and offers nothing meanwhile
+        self.assertIsNotNone(r.getheader("Refresh"))
+        self.assertNotIn("<form method='post' action='/update/", r.body)
+        self.assertEqual(self.fact(r.body, "Channel"), "Stable")
+        # a second run is refused while one is going
+        self.post("/update/check")
+        self.assertEqual(self.flash(self.page()), (True, "Update already running."))
+        self.fake("hold-checking")
+        r = self.page(lambda r: self.fact(r.body, "Status") == "Update available")
+        self.assertRegex(self.fact(r.body, "Latest"), r"^v0\.3\.0, checked \d{1,2} [A-Z][a-z]{2} \d\d:\d\d$")
+        self.assertIn("action='/update/install'", r.body)
+        self.assertNotIn("/update/kernel", r.body)
+        self.assertNotIn("/update/restart", r.body)
+        self.assertEqual(self.calls(), ["check"])
+        self.assertIsNone(self.page().getheader("Refresh"))
+        # up to date: nothing to install
+        self.fake("offer", "latest=v0.2.0\nupdate=no\nkernel=same\n")
+        self.post("/update/check")
+        r = self.page(lambda r: self.fact(r.body, "Status") == "Up to date")
+        self.assertNotIn("/update/install", r.body)
+        self.post("/update/install")
+        self.assertEqual(self.flash(self.page()), (True, "No update to install."))
+        self.assertEqual(self.calls(), ["check", "check"])
+
+    def test_install_then_restart(self):
+        self.fake("offer", "latest=v0.3.0\nupdate=yes\nkernel=same\n")
+        # not before a check has found one
+        self.post("/update/install")
+        self.assertEqual(self.flash(self.page()), (True, "No update to install."))
+        self.post("/update/check")
+        self.page(lambda r: self.fact(r.body, "Status") == "Update available")
+        self.fake("hold-downloading", "")
+        self.fake("hold-writing", "")
+        t = time.time()
+        self.post("/update/install")
+        self.assertLess(time.time() - t, 2)   # started, not waited for
+        r = self.page(lambda r: self.fact(r.body, "Status") == "Downloading")
+        self.assertEqual(r.getheader("Refresh"), "3")
+        self.fake("hold-downloading")
+        r = self.page(lambda r: self.fact(r.body, "Status") == "Writing")
+        self.assertIsNotNone(r.getheader("Refresh"))
+        self.assertNotIn("<form method='post' action='/update/", r.body)
+        self.fake("hold-writing")
+        r = self.page(lambda r: self.fact(r.body, "Status") == "Restart to finish")
+        self.assertIn("action='/update/restart'", r.body)
+        self.assertNotIn("/update/install", r.body)
+        self.assertIsNone(self.page().getheader("Refresh"))
+        # the restart wants its tick
+        self.post("/update/restart")
+        self.assertEqual(self.flash(self.page()), (True, "Tick Confirm first."))
+        self.assertFalse(os.path.exists(os.path.join(self.p.fake, "restarted")))
+        self.post("/update/restart", {"sure": "yes"})
+        self.assertEqual(self.flash(self.page()), (False, "Restarting."))
+        for _ in range(40):
+            if os.path.exists(os.path.join(self.p.fake, "restarted")):
+                break
+            time.sleep(0.1)
+        self.assertEqual(read(os.path.join(self.p.fake, "restarted")), "restart\n")
+        self.assertEqual(self.calls(), ["check", "install"])
+        # what the updater wrote down after the restart
+        self.fake("state", "state=idle\nmessage=\n")
+        self.fake("result", "result=v0.3.0 installed\nresult_time=1795000000\n")
+        r = self.page()
+        self.assertRegex(self.fact(r.body, "Last result"), r"^v0\.3\.0 installed, \d{1,2} [A-Z][a-z]{2} \d\d:\d\d$")
+        # and no restart without an update waiting
+        self.post("/update/restart", {"sure": "yes"})
+        self.assertEqual(self.flash(self.page()), (True, "No update to restart for."))
+        self.assertEqual(read(os.path.join(self.p.fake, "restarted")), "restart\n")
+
+    def test_a_failed_check(self):
+        self.fake("fail", "No release found <b>")
+        self.post("/update/check")
+        r = self.page(lambda r: self.fact(r.body, "Status") not in (None, "Checking"))
+        # the cause as the updater worded it, and nothing of it taken as HTML
+        self.assertEqual(self.fact(r.body, "Status"), "No release found &lt;b&gt;")
+        self.assertIn("<span class='pill bad'>No release found &lt;b&gt;</span>", r.body)
+        self.assertEqual(self.fact(r.body, "Latest"), "Not checked")
+        self.assertRegex(self.fact(r.body, "Last result"), r"^No release found &lt;b&gt;, ")
+        self.assertIn("Check now", r.body)
+        self.assertNotIn("/update/install", r.body)
+
+    def test_channel(self):
+        self.fake("offer", "latest=v0.3.0\nupdate=yes\nkernel=same\n")
+        self.post("/update/check")
+        self.page(lambda r: self.fact(r.body, "Status") == "Update available")
+        self.post("/update/channel", {"channel": "testing", "url": ""})
+        r = self.page()
+        self.assertEqual(self.flash(r), (False, "Channel saved."))
+        self.assertIn("<option value='testing' selected>Testing</option>", r.body)
+        # what the other channel offered is no longer said
+        self.assertEqual(self.fact(r.body, "Latest"), "Not checked")
+        self.post("/update/channel", {"channel": "custom", "url": " https://builds.example.org/t48s/ "})
+        r = self.page()
+        self.assertEqual(self.flash(r), (False, "Channel saved."))
+        self.assertIn("<option value='custom' selected>Custom</option>", r.body)
+        self.assertIn("value='https://builds.example.org/t48s/'", r.body)
+        self.assertEqual(read(os.path.join(self.p.fake, "channel")), "https://builds.example.org/t48s/\n")
+        # refused here: not a URL at all, nothing, an option for the updater
+        for url in ("builds.example.org", "", "--help", "ftp://builds.example.org/", "https://a b"):
+            self.post("/update/channel", {"channel": "custom", "url": url})
+            self.assertEqual(self.flash(self.page()), (True, "Not saved: a custom channel is an https:// or http:// URL."), url)
+        self.post("/update/channel", {"channel": "nightly"})
+        self.assertIs(self.flash(self.page())[0], True)
+        # refused by the updater, with its reason
+        self.post("/update/channel", {"channel": "custom", "url": "https://builds.example.org/?a=$(reboot)"})
+        self.assertEqual(self.flash(self.page()), (True, "Not saved: Not a URL."))
+        self.assertEqual(read(os.path.join(self.p.fake, "channel")), "https://builds.example.org/t48s/\n")
+        self.post("/update/channel", {"channel": "stable", "url": "https://builds.example.org/t48s/"})
+        self.assertIn("<option value='stable' selected>Stable</option>", self.page().body)
+        self.assertEqual(self.calls(), ["check", "channel testing", "channel https://builds.example.org/t48s/",
+                                        "channel https://builds.example.org/?a=$(reboot)", "channel stable"])
+        self.assertNotIn("builds.example.org", self.p.logtext())
+
+    def test_kernel_differs(self):
+        self.fake("offer", "latest=v0.3.0\nupdate=no\nkernel=differs\n")
+        # not offered, and not started, before a check says so
+        self.assertNotIn("/update/kernel", self.page().body)
+        self.post("/update/kernel", {"sure": "yes"})
+        self.assertEqual(self.flash(self.page()), (True, "No kernel to install."))
+        self.post("/update/check")
+        r = self.page(lambda r: self.fact(r.body, "Status") == "Up to date")
+        m = re.search(r"<form method='post' action='/update/kernel'.*?</form>", r.body)
+        self.assertIn("name='sure' value='yes' required> Confirm", m.group(0))
+        self.assertIn(">Install kernel</button>", m.group(0))
+        self.assertIn("A failed kernel needs recovery mode.", m.group(0))
+        self.post("/update/kernel")
+        self.assertEqual(self.flash(self.page()), (True, "Tick Confirm first."))
+        self.assertEqual(self.calls(), ["check"])
+        self.post("/update/kernel", {"sure": "yes"})
+        r = self.page(lambda r: self.fact(r.body, "Status") == "Restart to finish")
+        self.assertEqual(self.calls(), ["check", "kernel"])
+        self.assertRegex(self.fact(r.body, "Last result"), r"^Kernel written, ")
+        self.assertIn("action='/update/restart'", r.body)
+        self.assertNotIn("/update/kernel", r.body)
+
+    def test_not_installed(self):
+        self.fake("installed", "no")
+        r = self.page()
+        self.assertEqual(self.fact(r.body, "Version"), "v0.2.0")
+        self.assertIn("Not installed", r.body)
+        self.assertNotIn("action='/update/", r.body)
+        self.assertIsNone(self.fact(r.body, "Latest"))
+        for path in ("/update/check", "/update/install", "/update/kernel"):
+            self.post(path, {"sure": "yes"})
+            self.assertEqual(self.flash(self.page()), (True, "Not installed."), path)
+        self.assertEqual(self.calls(), [])
+
+    def test_forms_need_the_token(self):
+        self.fake("offer", "latest=v0.3.0\nupdate=yes\nkernel=differs\n")
+        for path in ("/update/check", "/update/install", "/update/kernel", "/update/restart", "/update/channel"):
+            fields = {"sure": "yes", "channel": "testing"}
+            self.assertEqual(self.b.post(path, fields, csrf=False).status, 403, path)
+            self.assertEqual(self.b.post(path, fields, headers={"Origin": "http://evil.example"}).status, 403, path)
+        self.assertEqual(self.calls(), [])
 
 
 if __name__ == "__main__":

@@ -272,6 +272,7 @@ void page_overview(struct req *r)
       ssh ? "good" : "", ssh ? "on" : "off", keys_count(), keys_count() == 1 ? "" : "s", sessions_count(), sessions_count() == 1 ? "" : "s");
 
     H("<a class='card tile' href='/backup'><h2>Backup</h2><p>Download or restore</p></a>");
+    H("<a class='card tile' href='/update'><h2>Update</h2><p>Check or install</p></a>");
     H("</div>");
     page_end(r);
 }
@@ -1429,6 +1430,210 @@ out:
     redirect(r, "/backup");
 }
 
+/* ---------- update: t48-update does the work (docs/install.md) ---------- */
+
+struct update_info {
+    char installed[8], slot[8], version[64], channel[204], latest[64], update[12], kernel[12], checked[24];
+    char state[16], message[160], result[160], result_time[24];
+};
+
+static int update_command(const char *verb, const char *arg, char *out, size_t n, int wait_ms)
+{
+    char *argv[] = {(char *)wopt.update, (char *)verb, (char *)arg, NULL};
+    return run_program(argv, wait_ms, out, n, 0);
+}
+
+/* what "t48-update info" says, NAME=VALUE a line. Asking never goes to the network. */
+static void update_read(struct update_info *u)
+{
+    const struct { const char *name; char *to; size_t n; } f[] = {
+        {"installed", u->installed, sizeof u->installed}, {"slot", u->slot, sizeof u->slot}, {"version", u->version, sizeof u->version},
+        {"channel", u->channel, sizeof u->channel}, {"latest", u->latest, sizeof u->latest}, {"update", u->update, sizeof u->update},
+        {"kernel", u->kernel, sizeof u->kernel}, {"checked", u->checked, sizeof u->checked}, {"state", u->state, sizeof u->state},
+        {"message", u->message, sizeof u->message}, {"result", u->result, sizeof u->result}, {"result_time", u->result_time, sizeof u->result_time},
+    };
+    char out[2048];
+    memset(u, 0, sizeof *u);
+    update_command("info", NULL, out, sizeof out, 10000);
+    for (char *p = out; p && *p;) {
+        char *nl = strchr(p, '\n'), *eq;
+        if (nl) *nl = 0;
+        p[strcspn(p, "\r")] = 0;
+        if ((eq = strchr(p, '='))) {
+            *eq = 0;
+            for (unsigned i = 0; i < sizeof f / sizeof f[0]; i++)
+                if (!strcmp(p, f[i].name)) snprintf(f[i].to, f[i].n, "%s", eq + 1);
+        }
+        p = nl ? nl + 1 : NULL;
+    }
+    if (!u->version[0]) snprintf(u->version, sizeof u->version, "%s", T48_VERSION);
+}
+
+static int update_busy(const struct update_info *u)
+{
+    return !strcmp(u->state, "checking") || !strcmp(u->state, "downloading") || !strcmp(u->state, "writing");
+}
+
+/* A run is started and left to itself, and takes a moment to say that it is
+ * running: until what it says has changed, for three seconds at most, the
+ * page takes it to be on its first step, which is the check. */
+static time_t update_started;
+static char update_before[360];
+
+static void update_mark(const struct update_info *u, char *out, size_t n)
+{
+    snprintf(out, n, "%s|%s|%s", u->state, u->message, u->checked);
+}
+
+static int update_pending(const struct update_info *u)
+{
+    char now[360];
+    update_mark(u, now, sizeof now);
+    if (strcmp(now, update_before) || time(NULL) - update_started >= 3) update_started = 0;
+    return update_started != 0;
+}
+
+/* 23 Nov 16:25, from seconds as text; "" if it is not a time */
+static const char *update_when(const char *epoch)
+{
+    static char b[2][32];
+    static int at;
+    char *o = b[at = !at];
+    time_t t = (time_t)atoll(epoch);
+    struct tm tm;
+    o[0] = 0;
+    if (t <= 0) return o;
+    localtime_r(&t, &tm);
+    strftime(o, sizeof b[0], "%e %b %H:%M", &tm);
+    return o + (o[0] == ' ');
+}
+
+static void page_update(struct req *r)
+{
+    struct update_info u;
+    update_read(&u);
+    int inst = !strcmp(u.installed, "yes"), pending = inst && update_pending(&u), busy = inst && (pending || update_busy(&u));
+    int restart = !strcmp(u.state, "restart"), offer = !strcmp(u.update, "yes");
+    int named = !strcmp(u.channel, "stable") || !strcmp(u.channel, "testing");
+    const char *slot = !strcmp(u.slot, "a") ? ", slot A" : !strcmp(u.slot, "b") ? ", slot B" : "";
+
+    use_phone_time();
+    page_begin(r, "Update", "/update");
+    if (!inst) {
+        H("<div class='card'><dl class='facts'><dt>Version</dt><dd>%s</dd></dl><p class='dim'>Not installed</p></div>", u.version);
+        page_end(r);
+        return;
+    }
+    /* while something runs the page asks for itself again */
+    if (busy) page_refresh(pending ? 1 : 3);
+
+    H("<div class='card'><dl class='facts'><dt>Version</dt><dd>%s%r</dd>", u.version, slot);
+    if (busy) H("<dt>Channel</dt><dd>%s</dd>", !strcmp(u.channel, "stable") ? "Stable" : !strcmp(u.channel, "testing") ? "Testing" : u.channel);
+    H("<dt>Latest</dt><dd>");
+    if (!u.latest[0]) H("Not checked");
+    else H("%s%r%s", u.latest, update_when(u.checked)[0] ? ", checked " : "", update_when(u.checked));
+    H("</dd>");
+    const char *st = pending || !strcmp(u.state, "checking") ? "Checking" : !strcmp(u.state, "downloading") ? "Downloading" :
+                     !strcmp(u.state, "writing") ? "Writing" : restart ? "Restart to finish" :
+                     !strcmp(u.state, "failed") ? (u.message[0] ? u.message : "Failed") :
+                     offer ? "Update available" : !strcmp(u.update, "no") ? "Up to date" : NULL;
+    if (st)
+        H("<dt>Status</dt><dd><span class='pill %r'>%s</span></dd>",
+          busy ? "" : !strcmp(u.state, "failed") ? "bad" : restart || offer ? "warn" : "good", st);
+    H("<dt>Last result</dt><dd>%s%r%s</dd></dl>", u.result[0] ? u.result : "None",
+      u.result[0] && update_when(u.result_time)[0] ? ", " : "", u.result[0] ? update_when(u.result_time) : "");
+    if (!busy) {
+        H("<div class='actions'>");
+        form_begin(r, "/update/check", "class='inline'");
+        H("<button type='submit'%r>Check now</button></form>", offer && !restart ? "" : " class='primary'");
+        if (offer && !restart) {
+            form_begin(r, "/update/install", "class='inline'");
+            H("<button class='primary' type='submit'>Install</button></form>");
+        }
+        H("</div>");
+        if (restart) {
+            form_begin(r, "/update/restart", "class='danger'");
+            sure_box();
+            H("<button type='submit' class='bad'>Restart</button></form>");
+        }
+        if (!strcmp(u.kernel, "differs")) {
+            form_begin(r, "/update/kernel", "class='danger'");
+            sure_box();
+            H("<button type='submit' class='bad'>Install kernel</button><small class='dim'> A failed kernel needs recovery mode.</small></form>");
+        }
+    }
+    H("</div>");
+
+    if (!busy) {
+        H("<div class='card'>");
+        form_begin(r, "/update/channel", NULL);
+        H("<div class='fields'><label class='field'><span>Channel</span><select name='channel'><option value='stable'%r>Stable</option>"
+          "<option value='testing'%r>Testing</option><option value='custom'%r>Custom</option></select></label>",
+          !strcmp(u.channel, "stable") ? " selected" : "", !strcmp(u.channel, "testing") ? " selected" : "", named ? "" : " selected");
+        field("Custom URL", "url", named ? "" : u.channel, "type='url' autocapitalize='none' spellcheck='false' placeholder='https://'", NULL);
+        H("</div><div class='actions'><button type='submit'>Save</button></div></form></div>");
+    }
+    page_end(r);
+}
+
+/* check, install and kernel take from seconds to minutes: started, left to
+ * themselves, and watched by the page through "info" */
+static void post_update_start(struct req *r)
+{
+    const char *verb = strrchr(r->path, '/') + 1;
+    struct update_info u;
+    update_read(&u);
+    if (strcmp(u.installed, "yes")) flash(r, 1, "Not installed.");
+    else if (update_busy(&u) || update_pending(&u)) flash(r, 1, "Update already running.");
+    else if (!strcmp(verb, "kernel") && !sure(r)) flash(r, 1, UNSURE);
+    else if (!strcmp(verb, "kernel") && strcmp(u.kernel, "differs")) flash(r, 1, "No kernel to install.");
+    else if (!strcmp(verb, "install") && strcmp(u.update, "yes")) flash(r, 1, "No update to install.");
+    else {
+        char *argv[] = {(char *)wopt.update, (char *)verb, NULL};
+        update_mark(&u, update_before, sizeof update_before);
+        if (run_program(argv, 0, NULL, 0, 0) < 0) flash(r, 1, "Not started: %s.", strerror(errno));
+        else { update_started = time(NULL); logmsg("update %s started", verb); }
+    }
+    redirect(r, "/update");
+}
+
+static void post_update_channel(struct req *r)
+{
+    char to[201], out[400];
+    struct update_info u;
+    int custom = !strcmp(form(r, "channel"), "custom");
+    if (!line(r, custom ? "url" : "channel", to, sizeof to) ||
+        (custom ? (strncmp(to, "https://", 8) && strncmp(to, "http://", 7)) || strchr(to, ' ') : strcmp(to, "stable") && strcmp(to, "testing"))) {
+        flash(r, 1, "Not saved: a custom channel is an https:// or http:// URL.");
+        redirect(r, "/update");
+        return;
+    }
+    update_read(&u);
+    if (update_busy(&u) || update_pending(&u)) { flash(r, 1, "Update already running."); redirect(r, "/update"); return; }
+    /* the updater has the last word on what a channel may be, and says why not */
+    if (update_command("channel", to, out, sizeof out, 10000) != 0) {
+        out[strcspn(out, "\r\n")] = 0;
+        flash(r, 1, "Not saved: %s.", out[0] ? out : "updater did not finish");
+    } else flash(r, 0, "Channel saved.");
+    redirect(r, "/update");
+}
+
+static void post_update_restart(struct req *r)
+{
+    struct update_info u;
+    update_read(&u);
+    if (!sure(r)) flash(r, 1, UNSURE);
+    else if (strcmp(u.state, "restart")) flash(r, 1, "No update to restart for.");
+    else {
+        char *argv[] = {(char *)wopt.restart, NULL};
+        logmsg("restart for the update");
+        /* in a second, so that this answer gets back to the browser first */
+        run_program(argv, 0, NULL, 0, 1);
+        flash(r, 0, "Restarting.");
+    }
+    redirect(r, "/update");
+}
+
 /* ---------- which address is which page ---------- */
 
 const struct route routes[] = {
@@ -1469,5 +1674,11 @@ const struct route routes[] = {
     {"GET", "/backup", page_backup},
     {"POST", "/backup/download", post_backup_download},
     {"POST", "/backup/restore", post_backup_restore},
+    {"GET", "/update", page_update},
+    {"POST", "/update/check", post_update_start},
+    {"POST", "/update/install", post_update_start},
+    {"POST", "/update/kernel", post_update_start},
+    {"POST", "/update/channel", post_update_channel},
+    {"POST", "/update/restart", post_update_restart},
     {NULL, NULL, NULL},
 };

@@ -68,7 +68,8 @@ struct options opt = {
     .access = "/run/t48-access",
     .web = "/run/t48-web",
 };
-struct web_options wopt = {.iface = "eth0", .port = 80, .appcmd = "/usr/bin/t48-app", .keep = "/data/access"};
+struct web_options wopt = {.iface = "eth0", .port = 80, .appcmd = "/usr/bin/t48-app", .keep = "/data/access",
+                           .update = "/usr/bin/t48-update", .restart = "/sbin/reboot"};
 
 static volatile sig_atomic_t stopping;
 static int stop_soon;
@@ -350,6 +351,12 @@ void send_file(struct req *r, const char *type, const char *filename)
 {
     add_header("Content-Disposition: attachment; filename=\"%s\"\r\n", filename);
     respond(r, 200, type, page.p ? page.p : "", page.n);
+}
+
+/* the browser asks for this page again by itself in so many seconds, script or no script */
+void page_refresh(int seconds)
+{
+    add_header("Refresh: %d\r\n", seconds);
 }
 
 void redirect(struct req *r, const char *where)
@@ -722,7 +729,7 @@ void page_begin(struct req *r, const char *title, const char *nav)
     static const struct { const char *path, *label; } items[] = {
         {"/", "Overview"}, {"/accounts", "Accounts"}, {"/network", "Network"}, {"/time", "Date and time"},
         {"/sound", "Sound and screen"}, {"/contacts", "Contacts"}, {"/history", "Calls"}, {"/apps", "Apps"},
-        {"/access", "Access"}, {"/backup", "Backup"},
+        {"/access", "Access"}, {"/backup", "Backup"}, {"/update", "Update"},
     };
     page.n = 0;
     H("<!doctype html><html lang='en' data-theme='%s'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
@@ -963,12 +970,15 @@ static int usage(void)
         "  --data DIR         apps' own folders (%s)\n"
         "  --apply PROGRAM    run with a settings file's name when it has changed (%s)\n"
         "  --app PROGRAM      the app manager's command (%s)\n"
+        "  --update PROGRAM   the updater's command (%s)\n"
+        "  --restart PROGRAM  run to restart the phone (%s)\n"
         "  --access DIR       where t48-access leaves its status file (%s)\n"
         "  --keys DIR         where t48-access keeps the keys that can log in (%s)\n"
         "  --run DIR          where this leaves its status file for the shell (%s)\n"
         "It runs only while \"web=on\" is in the settings file \"access\": the owner turns\n"
         "it on at the phone's screen (Settings, Access).\n",
-        wopt.iface, wopt.port, opt.config, opt.state, opt.apps, opt.data, opt.apply, wopt.appcmd, opt.access, wopt.keep, opt.web);
+        wopt.iface, wopt.port, opt.config, opt.state, opt.apps, opt.data, opt.apply, wopt.appcmd, wopt.update, wopt.restart,
+        opt.access, wopt.keep, opt.web);
     return 2;
 }
 
@@ -980,7 +990,8 @@ int main(int argc, char **argv)
                            !strcmp(argv[i], "--apps") ? &opt.apps : !strcmp(argv[i], "--data") ? &opt.data :
                            !strcmp(argv[i], "--apply") ? &opt.apply : !strcmp(argv[i], "--app") ? &wopt.appcmd :
                            !strcmp(argv[i], "--access") ? &opt.access : !strcmp(argv[i], "--keys") ? &wopt.keep :
-                           !strcmp(argv[i], "--run") ? &opt.web : NULL;
+                           !strcmp(argv[i], "--run") ? &opt.web : !strcmp(argv[i], "--update") ? &wopt.update :
+                           !strcmp(argv[i], "--restart") ? &wopt.restart : NULL;
         if (!strcmp(argv[i], "--port") && i + 1 < argc) { wopt.port = atoi(argv[++i]); continue; }
         if (!dst || i + 1 >= argc) return usage();
         *dst = argv[++i];
