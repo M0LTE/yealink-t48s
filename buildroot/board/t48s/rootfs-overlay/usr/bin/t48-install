@@ -9,7 +9,9 @@
 #   t48-install install    write the kernel and app partitions. Only with a
 #                          checked backup of this phone on the stick
 #   t48-install restore    put the backup's kernel and app partitions back
-#   t48-install restart    restart the phone
+#   t48-install eject      let go of the stick, wait until it is taken out,
+#                          then restart the phone
+#   t48-install restart    restart the phone now
 #
 # Only on a phone started through recovery mode (t48boot=live): nothing of the
 # flash is in use then. What is written: the kernel partition and the app
@@ -21,6 +23,9 @@
 #
 # With --machine as the first word, progress goes out as lines for the shell:
 #   step PERCENT text      done text      error text
+# The long reads go through t48-meter, which counts the bytes: that is where
+# "Copying, 52 of 138 MB" comes from. Without it the work is the same and the
+# progress moves once per partition.
 # T48_* variables are for the rehearsal on a PC (tools/test-owner.sh).
 set -u
 MACHINE=0; [ "${1:-}" = --machine ] && { MACHINE=1; shift; }
@@ -31,6 +36,7 @@ LIB=${T48_LIB:-/usr/lib/t48}
 WORK=${T48_WORK:-/tmp/t48install}
 MNT=${T48_MNT:-/run/t48-stick}
 DEV=${T48_DEV:-/dev}
+SYSBLOCK=${T48_SYSBLOCK:-/sys/block}
 NEED_KB=160000           # room a backup needs on the stick
 # number:name:bytes of data, as the kernel lists them; together the whole chip
 PARTS="0:ubl:131072 1:uboot:1048576 2:env:1048576 3:userenv:1048576 4:logo:1048576
@@ -46,6 +52,19 @@ PCT=0
 sum() { sha256sum | cut -d' ' -f1; }
 mtd() { sed -n "s/^mtd\([0-9]*\):.*\"$1\"\$/\1/p" "$PROC/mtd"; }
 live() { tr ' ' '\n' < "$PROC/cmdline" | grep -qx t48boot=live; }
+
+# ---- progress by bytes ----
+# All in units of 1000 bytes. A stretch of work SPAN long moves the bar from LO
+# to HI; what is shown is (work done - SUB) / DIV of TOTAL, in MB.
+LO=0; HI=100; SPAN=1; SUB=0; DIV=1; TOTAL=0; DOING=
+progress() {
+    PCT=$((LO + $1 * (HI - LO) / SPAN)); [ $PCT -lt $HI ] || PCT=$HI
+    [ $MACHINE = 1 ] && echo "step $PCT $DOING, $((($1 - SUB) / DIV / 1000)) of $((TOTAL / 1000)) MB"
+    return 0
+}
+# the meter's byte counts, one a line, on top of the work done before ($1)
+track() { while read -r n; do progress $(($1 + n / 1000)); done; }
+meter() { if command -v t48-meter >/dev/null 2>&1; then t48-meter; else cat; fi; }
 
 # ---- the stick ----
 stick() {
@@ -87,6 +106,19 @@ dump() {
     if [ -n "$2" ]; then nandread -o "$DEV/mtd$1" 2> "$WORK/log" | tee "$2" | sum
     else nandread -o "$DEV/mtd$1" 2> "$WORK/log" | sum; fi
 }
+# the same with progress ($3: work done before); the checksum is left in $WORK/s
+mdump() {
+    rm -f "$WORK/s"
+    { nandread -o "$DEV/mtd$1" 2> "$WORK/log" | meter 3>&5 | if [ -n "$2" ]; then tee "$2"; else cat; fi | sum > "$WORK/s"; } 5>&1 | track "$3"
+}
+# a file through a command with progress ($1 work done before, $2 the file, then
+# the command, which reads it on standard input); the command's status in $WORK/rc
+mfile() {
+    mw=$1; mf=$2; shift 2
+    echo 1 > "$WORK/rc"
+    { meter < "$mf" 3>&5 | { "$@"; echo $? > "$WORK/rc"; }; } 5>&1 | track "$mw"
+    [ "$(cat "$WORK/rc")" = 0 ]
+}
 dump_clean() {
     grep -q " 0 bad blocks, 0 read errors" "$WORK/log" || return 1
     if grep -q "kernel ECC" "$WORK/log"; then grep -q "0 bit errors corrected, 0 failed" "$WORK/log" || return 1; fi
@@ -106,17 +138,24 @@ do_backup() {
     fi
     [ "$(free_kb)" -ge $NEED_KB ] || die "Stick needs 160 MB free"
     mkdir -p "$(B)" || die "Stick is read-only"
-    : > "$WORK/sums"; i=0
+    # one pass to copy, three to check: the bar is a quarter of the way after the copy
+    TOTAL=0
+    for p in $PARTS; do TOTAL=$((TOTAL + ${p##*:} / 2048 * 2112 / 1000)); done
+    SPAN=$((TOTAL * 4)); LO=0; HI=99
+    : > "$WORK/sums"; at=0
+    DOING=Copying; SUB=0; DIV=1
     for p in $PARTS; do
         n=${p%%:*}; r=${p#*:}; name=${r%%:*}; size=${r#*:}
         f="$(B)/mtd$n-$name.dataoob"
-        PCT=$((i * 4)); say "Reading $name"
-        s=$(dump "$n" "$f") || die "Reading $name failed"
+        [ $MACHINE = 1 ] || echo "Copying $name"
+        progress $at
+        mdump "$n" "$f" "$at"
+        s=$(cat "$WORK/s" 2>/dev/null); [ -n "$s" ] || die "Reading $name failed"
         dump_clean || die "Flash has a bad block or read error in $name"
         [ "$(wc -c < "$f")" = $((size / 2048 * 2112)) ] || die "Stick write failed ($name)"
         cp "$WORK/log" "$(B)/mtd$n-$name.log"
         echo "$s  mtd$n-$name.dataoob" >> "$WORK/sums"
-        i=$((i + 1))
+        at=$((at + size / 2048 * 2112 / 1000))
     done
     {
         echo "T48S flash backup, taken on the phone $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -131,18 +170,21 @@ do_backup() {
     # the three checks. 1: the stick gives back what was written to it (the page
     # cache is dropped first, so this is the stick and not our memory of it)
     echo 3 > "${T48_DROP_CACHES:-/proc/sys/vm/drop_caches}" 2>/dev/null
-    i=0
+    DOING=Checking; SUB=$TOTAL; DIV=3
     for p in $PARTS; do
-        n=${p%%:*}; r=${p#*:}; name=${r%%:*}
-        f="$(B)/mtd$n-$name.dataoob"
+        n=${p%%:*}; r=${p#*:}; name=${r%%:*}; size=${r#*:}
+        f="$(B)/mtd$n-$name.dataoob"; kb=$((size / 2048 * 2112 / 1000))
         want=$(sed -n "s/  mtd$n-$name.dataoob\$//p" "$WORK/sums")
-        PCT=$((48 + i * 4)); say "Checking $name"
-        [ "$(sum < "$f")" = "$want" ] || die "Stick does not read back ($name). Try another stick"
+        [ $MACHINE = 1 ] || echo "Checking $name"
+        progress $at
+        mfile "$at" "$f" sh -c 'sha256sum | cut -d" " -f1 > "$0"' "$WORK/s"
+        [ "$(cat "$WORK/s")" = "$want" ] || die "Stick does not read back ($name). Try another stick"
         # 2: a second read of the flash is the same bytes
-        [ "$(dump "$n" "")" = "$want" ] && dump_clean || die "Two reads of $name differ"
+        mdump "$n" "" $((at + kb))
+        [ "$(cat "$WORK/s" 2>/dev/null)" = "$want" ] && dump_clean || die "Two reads of $name differ"
         # 3: the error-correction bytes are right, so a restore writes exactly this
-        nandrestore -n < "$f" > "$WORK/n" 2>&1 && grep -q ": identical" "$WORK/n" || die "Backup of $name fails its check"
-        i=$((i + 1))
+        mfile $((at + 2 * kb)) "$f" sh -c 'nandrestore -n > "$0" 2>&1' "$WORK/n" && grep -q ": identical" "$WORK/n" || die "Backup of $name fails its check"
+        at=$((at + 3 * kb))
     done
     { sum < "$(B)/SHA256SUMS"; date -u +%Y-%m-%dT%H:%M:%SZ; } > "$(B)/VERIFIED"
     sync
@@ -158,6 +200,7 @@ need_backup() {
     backup_files_ok || die "Backup on the stick is damaged"
     for p in $NEVER; do
         n=${p%%:*}; name=${p#*:}
+        PCT=$((PCT + 1)); say "Checking the backup"
         same "$n" "$(B)/mtd$n-$name.dataoob" && continue
         case $name in cfg|data) ;; *) die "Backup is not this phone's ($name differs)" ;; esac
     done
@@ -166,6 +209,7 @@ need_backup() {
 untouched() {
     for p in $NEVER; do
         n=${p%%:*}; name=${p#*:}
+        PCT=$((PCT + 1)); say "Checking"
         if [ -f "$WORK/before-$name" ]; then
             [ "$(dump "$n" "")" = "$(cat "$WORK/before-$name")" ] || die "$name changed. Stop and ask"
         else
@@ -195,6 +239,15 @@ bootmode() {
     m=$(cat "$BM/mode" 2>/dev/null) || m=unreadable
     case "$m" in none|unreadable|"") ;; *) echo BOOTMODE > "$BM/clear" 2>/dev/null; m=$(cat "$BM/mode" 2>/dev/null) ;; esac
     echo "${m:-unreadable}"
+}
+
+# the end of an install or a restore. The stick comes out before the restart
+# either way: U-Boot's flag may not have cleared, and Yealink's firmware
+# reflashes itself from a stick it finds
+leave() {
+    bootmode > /dev/null
+    [ $MACHINE = 1 ] || echo "Next: t48-install eject"
+    finish "$1"
 }
 
 do_install() {
@@ -227,10 +280,7 @@ do_install() {
     untouched
     [ "$(cat "$PARAM/write_errors")" = 0 ] || die "Flash write errors. Install again"
     PCT=100
-    case "$(bootmode)" in
-    none) finish "Installed" ;;
-    *) finish "Installed. Take the stick out before restarting" ;;
-    esac
+    leave Installed
 }
 
 do_restore() {
@@ -238,12 +288,13 @@ do_restore() {
     need_backup
     preflight
     note_moving
-    PCT=15; say "Restoring Yealink's system"
+    PCT=15; say "System"
     [ -f "$LIB/t48-flash.sh" ] && sh "$LIB/t48-flash.sh" quiet >/dev/null 2>&1
     # app first: cut short, the phone still starts our kernel, which shows rescue. Kernel last
     lock open-app
-    nandrestore "$DEV/mtd$A" < "$(B)/mtd10-app.dataoob" > "$WORK/a" 2>&1 || die "System not restored. Restore again"
-    PCT=75; say "Restoring Yealink's kernel"
+    TOTAL=$(($(wc -c < "$(B)/mtd10-app.dataoob") / 1000)); SPAN=$TOTAL; LO=15; HI=75; SUB=0; DIV=1; DOING=System
+    mfile 0 "$(B)/mtd10-app.dataoob" sh -c 'nandrestore "$1" > "$0" 2>&1' "$WORK/a" "$DEV/mtd$A" || die "System not restored. Restore again"
+    PCT=75; say "Kernel"
     lock open-kernel
     nandrestore "$DEV/mtd$K" < "$(B)/mtd7-kernel.dataoob" > "$WORK/k" 2>&1; rc=$?
     lock close-kernel
@@ -253,10 +304,7 @@ do_restore() {
     same 10 "$(B)/mtd10-app.dataoob" || die "System differs from the backup. Restore again"
     untouched
     PCT=100
-    case "$(bootmode)" in
-    none) finish "Restored" ;;
-    *) finish "Restored. Take the stick out before restarting" ;;
-    esac
+    leave Restored
 }
 
 do_status() {
@@ -276,15 +324,29 @@ do_status() {
     echo "bootmode=$(cat "$BM/mode" 2>/dev/null || echo unreadable)"
 }
 
+# any USB disk still in the socket (the phone has no other disk)
+usb_in() { for d in "$SYSBLOCK"/sd*; do [ -e "$d" ] && return 0; done; return 1; }
+restart_now() {
+    sync; umount "$MNT" 2>/dev/null
+    # -v: without it sv does not wait, and the feeder still holds the watchdog
+    # when the reset asks for it (issue 61)
+    [ -d /run/service/watchdog ] && sv -v -w 5 down /run/service/watchdog >/dev/null 2>&1
+    t48-watchdog reset
+    die "Not restarted. Unplug the power"
+}
+
 mkdir -p "$WORK"
 case "${1:-}" in
 status) do_status ;;
 backup) do_backup ;;
 install) do_install ;;
 restore) do_restore ;;
-restart)
+eject)
     sync; umount "$MNT" 2>/dev/null
-    [ -d /run/service/watchdog ] && sv -w 5 down /run/service/watchdog >/dev/null 2>&1
-    exec t48-watchdog reset ;;
-*)  sed -n '5,12p' "$0" | sed 's/^# //' >&2; exit 2 ;;
+    [ $MACHINE = 1 ] || echo "Take the stick out"
+    while usb_in; do sleep 1; done
+    PCT=100; say "Restarting"
+    restart_now ;;
+restart) restart_now ;;
+*)  sed -n '5,14p' "$0" | sed 's/^# //' >&2; exit 2 ;;
 esac

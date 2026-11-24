@@ -10,7 +10,7 @@ FREE = clang --target=armv6-linux-gnueabi -march=armv6 -mfloat-abi=soft -marm -O
        -ffreestanding -fno-builtin -nostdlib -fuse-ld=lld
 MUSLCC = $(CROSS_CC) -Os -Wall
 
-all: fbtest fbswap.so envexec fbinfo tap sertest usbinit membanner cpubench keytest touchtest apmcap t48rec t48play t48mix nandread nandrestore t48-watchdog t48-keys
+all: fbtest fbswap.so envexec fbinfo tap sertest usbinit membanner cpubench keytest touchtest apmcap t48rec t48play t48mix nandread nandrestore t48-watchdog t48-keys t48-meter
 
 fbtest: fbtest.c
 	$(FREE) -static -Wl,-e,_start -o $@ $<
@@ -32,6 +32,10 @@ nandrestore: nandrestore.c
 
 # Feeds the hardware watchdog (issue #17)
 t48-watchdog: t48-watchdog.c
+	$(MUSLCC) -static -o $@ $<
+
+# Progress for t48-install: a pipe that counts (docs/installer.md)
+t48-meter: t48-meter.c
 	$(MUSLCC) -static -o $@ $<
 
 # The keypad for the first stage's rescue menu (issue #32)

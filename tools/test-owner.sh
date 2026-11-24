@@ -35,6 +35,7 @@ bytes)
     T=$(mktemp -d); trap 'chmod -R u+w "$T"; rm -rf "$T"' EXIT
     mkdir -p "$T/bin" "$T/proc" "$T/param" "$T/bm" "$T/dev" "$T/lib" "$T/work" "$T/stick/install"
     cc -O2 -Wall -o "$T/bin/nr" "$HERE/native/nandrestore.c"
+    cc -O2 -Wall -o "$T/bin/t48-meter" "$HERE/native/t48-meter.c"
     order="mtd0-ubl mtd1-uboot mtd2-env mtd3-userenv mtd4-logo mtd5-smkern mtd6-smrfs mtd7-kernel mtd8-rfs mtd10-app mtd11-cfg mtd12-data"
     for p in $order; do cat "$BACKUP/$p.dataoob"; done > "$T/chip"
     S0=$(sum "$T/chip")
@@ -96,6 +97,11 @@ EOS
     last | grep -qx "done Backup checked" || fail "backup did not finish"
     for p in $order; do cmp -s "$T/stick/t48s-backup/$p.dataoob" "$BACKUP/$p.dataoob" || fail "backup of $p differs"; done
     pass "backup: twelve partitions on the stick, each byte for byte the flash, spare bytes included"
+    # progress by bytes: it starts at nothing, never goes back, and both halves reach the end
+    grep -qx "step 0 Copying, 0 of 138 MB" "$T/out" && grep -q "^step [0-9]* Copying, 138 of 138 MB$" "$T/out" &&
+        grep -q "^step [0-9]* Checking, 0 of 138 MB$" "$T/out" && grep -q "^step 99 Checking, 138 of 138 MB$" "$T/out" &&
+        sed -n 's/^step \([0-9]*\) .*/\1/p' "$T/out" | sort -n -c &&
+        pass "backup: progress in MB copied and checked, $(grep -c '^step' "$T/out") steps, never backwards" || { grep '^step' "$T/out" | tail -n 5; fail "backup progress"; }
     ( cd "$T/stick/t48s-backup" && sha256sum -c --quiet SHA256SUMS ) && [ "$(sum "$T/chip")" = "$S0" ] && pass "backup: checksums right, flash untouched" || fail "backup checksums"
     run backup && last | grep -qx "done Backup already on the stick" && pass "a second backup keeps the first" || fail "second backup"
     # a backup that has rotted on the stick
@@ -125,7 +131,7 @@ EOS
 
     # the install
     run install || { cat "$T/out"; fail "install"; }
-    last | grep -qx "done Installed. Take the stick out before restarting" && pass "install: finished; says so when BOOTMODE could not be cleared" || { cat "$T/out"; fail "install end"; }
+    last | grep -qx "done Installed" && pass "install: finished" || { cat "$T/out"; fail "install end"; }
     [ "$(cat "$T/lower")" = 599 ] && pass "install: a phone that never had our /data has all 599 blocks of app erased" || fail "erase count"
     part() { dd if="$T/chip" bs=2112 skip=$(($1 / 2048)) count=$(($2 / 2048)) 2>/dev/null; }
     python3 "$HERE/tools/t48flash.py" kernelimage "$SET/T48S-kernel.uimg" "$T/k.want" >/dev/null
@@ -142,6 +148,24 @@ EOS
     run restore || { cat "$T/out"; fail "restore"; }
     last | grep -qx "done Restored" || fail "restore end"
     [ "$(sum "$T/chip")" = "$S0" ] && pass "restore: the whole flash is the backup again, byte for byte: $S0" || fail "restore bytes"
+    grep -q "^step 7[0-5] System, 80 of 80 MB$" "$T/out" && pass "restore: progress in MB written" || { grep '^step' "$T/out" | tail -n 5; fail "restore progress"; }
+    # without the meter the work is the same
+    mv "$T/bin/t48-meter" "$T/t48-meter"; mv "$T/stick/t48s-backup" "$T/first-backup"
+    run backup || { cat "$T/out"; fail "backup without the meter"; }
+    for p in $order; do cmp -s "$T/stick/t48s-backup/$p.dataoob" "$BACKUP/$p.dataoob" || fail "backup of $p differs (no meter)"; done
+    pass "backup without t48-meter: the same twelve files"
+    mv "$T/t48-meter" "$T/bin/t48-meter"
+    # the end: the stick is let go, the restart waits until it is out, and the
+    # watchdog's feeder is stopped before the reset asks for the watchdog
+    mkdir -p "$T/sys/sda"
+    printf '#!/bin/sh\necho "sv $*" >> "%s/ends"\n' "$T" > "$T/bin/sv"
+    printf '#!/bin/sh\necho "watchdog $* stick=$([ -e "%s/sys/sda" ] && echo in || echo out)" >> "%s/ends"\n' "$T" "$T" > "$T/bin/t48-watchdog"
+    chmod +x "$T/bin/sv" "$T/bin/t48-watchdog"
+    ( sleep 3; rmdir "$T/sys/sda" ) &
+    T48_SYSBLOCK=$T/sys run eject || true
+    wait
+    grep -qx "step 100 Restarting" "$T/out" && grep -qx "watchdog reset stick=out" "$T/ends" && pass "eject: the restart waits for the stick to come out" || { cat "$T/out" "$T/ends"; fail "eject"; }
+    last | grep -qx "error Not restarted. Unplug the power" && pass "a restart that does not happen says so" || fail "restart failure"
     echo "ALL PASSED (bytes)" ;;
 
 ubi)

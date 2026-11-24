@@ -49,10 +49,8 @@ static int wd_open(void)
     dev = open("/dev/watchdog", O_WRONLY | O_CLOEXEC);  /* opening it arms it */
     if (dev >= 0)
         return 0;
-    if (errno == EBUSY) {           /* the driver is there and someone else holds it */
-        perror("/dev/watchdog");
-        return -1;
-    }
+    if (errno == EBUSY)             /* the driver is there and someone else holds it */
+        return -2;
     int fd = open("/dev/mem", O_RDWR | O_SYNC | O_CLOEXEC);
     if (fd < 0) { perror("/dev/mem"); return -1; }
     reg = mmap(NULL, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, fd, WDT_PAGE);
@@ -100,8 +98,17 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: t48-watchdog [off | reset]\n");
         return 2;
     }
-    if (wd_open() < 0)
+    /* a feeder that has just been told to stop ("sv down watchdog" does not wait
+     * for it) may still hold /dev/watchdog: give it five seconds to let go */
+    for (int tries = 0, r; (r = wd_open()) < 0; tries++) {
+        if (r == -2 && !strcmp(cmd, "reset") && tries < 50) {
+            usleep(100000);
+            continue;
+        }
+        if (r == -2)
+            fprintf(stderr, "/dev/watchdog: in use\n");
         return 1;
+    }
     if (!strcmp(cmd, "off")) {
         wd_off();
         return 0;
