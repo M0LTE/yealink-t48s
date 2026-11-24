@@ -14,8 +14,8 @@
 
 	/*
 	 * 124 MB from 0x00400000 (the first 4 MB are not ours). The top 6 MB
-	 * hold the frame buffers the boot loader set up; the LCD controller is
-	 * scanning out of them when the kernel starts.
+	 * hold the four frame buffers the boot loader set up; the LCD
+	 * controller is scanning out of the first when the kernel starts.
 	 */
 	memory@400000 {
 		device_type = "memory";
@@ -34,6 +34,18 @@
 		height = <480>;
 		stride = <3200>;
 		format = "x8r8g8b8";
+	};
+
+	/*
+	 * The other three frames, shown whole at a frame boundary by pointing
+	 * the PL111 at one of them (drivers/t48s_flip.c, /dev/t48flip). It
+	 * interrupts on line 30 when it has taken a new address.
+	 */
+	flip@30500000 {
+		compatible = "yealink,t48s-flip";
+		reg = <0x30500000 0x1000>;
+		interrupts = <30>;
+		memory-region = <&flip_mem>;
 	};
 
 	/* the lamps inside three keys; the message lamp is on the Holtek chip */
@@ -97,8 +109,14 @@
 		#size-cells = <1>;
 		ranges;
 
+		/* one frame is 800 x 480 x 4 = 0x177000 bytes */
 		fb_mem: framebuffer@7a24000 {
-			reg = <0x07a24000 0x005dc000>;
+			reg = <0x07a24000 0x00177000>;
+			no-map;
+		};
+
+		flip_mem: flip@7b9b000 {
+			reg = <0x07b9b000 0x00465000>;
 			no-map;
 		};
 	};

@@ -10,3 +10,4 @@ obj-$(CONFIG_T48S_AUDIO)	+= t48s_audio.o
 obj-$(CONFIG_T48S_NAND)		+= t48s_nand.o
 obj-$(CONFIG_T48S_BOOTMODE)	+= t48s_bootmode.o
 obj-$(CONFIG_T48S_USB)		+= t48s_usb.o
+obj-$(CONFIG_T48S_FLIP)		+= t48s_flip.o
