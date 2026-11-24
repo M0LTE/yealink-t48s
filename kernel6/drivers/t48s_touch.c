@@ -10,8 +10,14 @@
  * the pen-down pin, and only while that is low does it clock the chip. This
  * kernel has no GPIO interrupts and no SPI core built in, and one transfer of
  * about 50 bytes at 2 MHz takes a quarter of a millisecond, so there is
- * nothing to gain from more machinery. U-Boot and Yealink's kernel leave the
- * SPI host set up (8 bits, mode 0, 2 MHz); it is set up again here anyway.
+ * nothing to gain from more machinery. Yealink's kernel leaves the SPI host
+ * set up (8 bits, mode 0, 2 MHz). U-Boot does not use it and leaves it cold:
+ * its clock gated and the PL022 unprogrammed (seen on a start through
+ * recovery mode, where every transfer timed out). So everything is set up
+ * here: pins, bus clock, the SPI clock itself, the PL022.
+ *   echo 1 > /sys/module/t48s_touch/parameters/cold
+ * tests that: it puts all of it back as U-Boot leaves it (and resets the
+ * PL022), then sets it up again and reads the chip.
  *
  * Reported as "T48S touchscreen": BTN_TOUCH, ABS_X, ABS_Y and ABS_PRESSURE,
  * all raw 12-bit values (0-4095), the same as Yealink's "YL tsc" device, so
@@ -51,7 +57,13 @@
 #define DRV_NAME	"t48s_touch"
 
 #define CHIPC_PHYS	0x80000000
-#define CHIPC_SPICLK	0x24		/* SPI clock divider, left as found */
+#define CHIPC_SPICLK	0x24		/* SPI master clock, PLL1 channel 9 */
+#define CHIPC_SPICLK_ON	0x00010014	/* 2 GHz / 20 = 100 MHz, output on: as Yealink runs it */
+#define CHIPC_SPICLK_OFF 0x00020014	/* as U-Boot leaves it: bypass selected, output off */
+#define CHIPC_CLK_OUTPUT	0x00010000
+#define CHIPC_CLK_BYPASS	0x00020000
+#define CHIPC_SOFTRESET1	0x80
+#define CHIPC_SOFTRESET1_SPIH	0x00001000
 #define CHIPC_BUSCLK	0x5c		/* bus clock gates */
 #define CHIPC_BUSCLK_SPIH	0x00400000
 #define CHIPC_GPIOMUX(pin)	(0x118 + 4 * ((pin) / 8))	/* 4 bits per pin */
@@ -388,7 +400,8 @@ static const struct kernel_param_ops diag_ops = { .get = diag_get };
 module_param_cb(diag, &diag_ops, NULL, 0444);
 MODULE_PARM_DESC(diag, "read the chip's temperature, battery and aux inputs, the pen pin and the counters");
 
-/* pins, clock gate and chip select; all of this is normally found done already */
+/* pins, clocks and chip select; after a kexec from Yealink all of this is found
+ * done already, after U-Boot none of the clocks */
 static int t48s_touch_pins(void)
 {
 	void __iomem *chipc;
@@ -413,14 +426,74 @@ static int t48s_touch_pins(void)
 		writel(v, chipc + CHIPC_GPIOMUX(pin));
 	}
 	writel(readl(chipc + CHIPC_BUSCLK) | CHIPC_BUSCLK_SPIH, chipc + CHIPC_BUSCLK);
+	v = readl(chipc + CHIPC_SPICLK);
+	if ((v & (CHIPC_CLK_OUTPUT | CHIPC_CLK_BYPASS)) != CHIPC_CLK_OUTPUT) {
+		writel(CHIPC_SPICLK_ON, chipc + CHIPC_SPICLK);
+		pr_info(DRV_NAME ": SPI clock was off, switched on\n");
+	}
 	local_irq_restore(flags);
 	iounmap(chipc);
+	udelay(100);
 
 	gpio_change(GPIO_DATA, CS_BIT, 1);
 	gpio_change(GPIO_DIR, CS_BIT, 1);
 	gpio_change(GPIO_DIR, PEN_BIT, 0);
 	return 0;
 }
+
+/*
+ * Test of the cold start with no cold boot: put the SPI host back as U-Boot
+ * leaves it (PL022 reset, SPI clock gated, bus clock off, pins plain GPIO,
+ * chip select an input), then set everything up again and wake the chip.
+ * cat .../diag afterwards shows whether the chip answers.
+ */
+static int cold_set(const char *val, const struct kernel_param *kp)
+{
+	static const u8 pwrdown[3] = { TSC_PWRDOWN, 0, 0 };
+	void __iomem *chipc;
+	unsigned long flags;
+	u8 rx[3];
+	u32 v;
+	int pin, rc;
+
+	if (!touch_dev || val[0] != '1')
+		return -EINVAL;
+	chipc = ioremap(CHIPC_PHYS, 0x1000);
+	if (!chipc)
+		return -ENOMEM;
+	mutex_lock(&spi_lock);
+	local_irq_save(flags);
+	v = readl(chipc + CHIPC_SOFTRESET1);
+	writel(v | CHIPC_SOFTRESET1_SPIH, chipc + CHIPC_SOFTRESET1);
+	udelay(100);
+	writel(v & ~CHIPC_SOFTRESET1_SPIH, chipc + CHIPC_SOFTRESET1);
+	writel(CHIPC_SPICLK_OFF, chipc + CHIPC_SPICLK);
+	writel(readl(chipc + CHIPC_BUSCLK) & ~CHIPC_BUSCLK_SPIH, chipc + CHIPC_BUSCLK);
+	for (pin = SPI_FIRST_PIN; pin <= SPI_LAST_PIN; pin++) {
+		v = readl(chipc + CHIPC_GPIOMUX(pin));
+		v &= ~(0xfu << ((pin % 8) * 4));
+		writel(v, chipc + CHIPC_GPIOMUX(pin));
+	}
+	local_irq_restore(flags);
+	iounmap(chipc);
+	gpio_change(GPIO_DIR, CS_BIT, 0);
+	msleep(20);
+
+	rc = t48s_touch_pins();
+	if (!rc) {
+		pr_info(DRV_NAME ": test: after the reset PL022 CR0 0x%04x CR1 0x%04x CPSR %u\n",
+			ssp_read(SSP_CR0), ssp_read(SSP_CR1), ssp_read(SSP_CPSR));
+		ssp_setup();
+		rc = spi_xfer(pwrdown, rx, sizeof(pwrdown));
+	}
+	mutex_unlock(&spi_lock);
+	pr_info(DRV_NAME ": test: cold start %s\n", rc ? "failed" : "done");
+	return rc;
+}
+
+static const struct kernel_param_ops cold_ops = { .set = cold_set };
+module_param_cb(cold, &cold_ops, NULL, 0200);
+MODULE_PARM_DESC(cold, "1: put the SPI host back as U-Boot leaves it and set it up again. For tests");
 
 static int __init t48s_touch_init(void)
 {
