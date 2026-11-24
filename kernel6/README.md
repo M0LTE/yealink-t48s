@@ -70,6 +70,7 @@ The loader copies the file to 0x00408000 and jumps to it. This file is a self-ex
 | RAM | 118 MB of the 124 MB; the top 6 MB are the frame buffers | yes (115.6 MB free to use; the 144 KB just under the frame buffers are left out, as on 3.6) |
 | GPIO | `drivers/gpio-bcmring.c`, with interrupts | yes: lamps through it, pen-down interrupt delivered |
 | Screen | the kernel's simple framebuffer on U-Boot's picture; console and `/dev/fb0` | yes: the shell draws on it |
+| Serial port after a start from U-Boot | `drivers/t48s_secure.c`: U-Boot leaves UART A a secure device, whose interrupt never reaches Linux; one bit in the TrustZone block register makes it an ordinary one (issue 59) | the same write from user space brought a dead serial shell back on the installed phone, 2026-11-24 |
 | Watchdog, reset | the kernel's SP805 driver with `patches/0002`; `t48-watchdog` uses `/dev/watchdog` | yes: fed by `t48-watchdog`; off for 50 s without a reset; a frozen feeder resets the phone within the 30 s; `back-to-yealink` and `reboot` reset |
 | Key lamps | the kernel's `gpio-leds`, same names | by reading the pins back, not by eye |
 | Holtek chip, message lamp | `drivers/t48s_holtek.c` | the chip answers and its watchdog is turned off; the lamp not by eye |

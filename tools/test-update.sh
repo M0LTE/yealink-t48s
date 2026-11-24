@@ -114,6 +114,18 @@ rm -rf "$T/run/t48-update"; state_read; state_write b - 0; printf 'slot=b\nnote=
 $UPD boot
 [ "$(info result)" = "v3 did not start, went back" ] && pass "an update that did not start: v3 did not start, went back" || fail "failed note: $(info result)"
 printf 'slot=b\nnote=\n' > "$T/run/t48-slot"
+# or does not even mount: the first stage starts the active slot in the same start
+$UPD install >/dev/null
+rm -rf "$T/run/t48-update"; state_read; state_write b a 0; printf 'slot=b\nnote=trial\n' > "$T/run/t48-slot"
+$UPD boot
+state_read
+[ "$S_ACTIVE $S_TRIAL" = "b -" ] && [ "$(info result)" = "v3 did not start, went back" ] && grep -q "note=failed=a" "$T/run/t48-slot" && pass "an update that does not mount: the trial is dropped and noted in the same start" || fail "same-start fallback"
+$UPD confirm >/dev/null; state_read; [ "$S_ACTIVE $S_TRIAL" = "b -" ] && pass "and the slot that stood in stays the active one" || fail "confirm after same-start fallback"
+printf 'slot=b\nnote=\n' > "$T/run/t48-slot"
+$UPD channel http://127.0.0.1:1/none >/dev/null
+if $UPD check 2>/dev/null; then fail "check against nothing passed"; fi
+[ "$(info result)" = "v3 did not start, went back" ] && pass "a check that fails does not replace the last result" || fail "check result"
+$UPD channel "$URL" >/dev/null
 
 # the kernel
 if $UPD kernel "$T/k2.uimg" 0000 2>/dev/null; then fail "a kernel with the wrong checksum was written"; fi

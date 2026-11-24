@@ -82,7 +82,7 @@ base() {
     *) channel | sed 's|/*$||' ;;
     esac
 }
-fetch() { curl -fsSL --connect-timeout 20 --max-time 900 --cacert "$CA" -o "$2" "$1"; }
+fetch() { curl -fsL --connect-timeout 20 --max-time 900 --cacert "$CA" -o "$2" "$1"; }
 # sum_of FILE: its line in the channel's SHA256SUMS
 sum_of() { sed -n "s/^\([0-9a-f]\{64\}\)  *\*\{0,1\}$1\$/\1/p" "$W/SHA256SUMS" | head -n 1; }
 
@@ -219,7 +219,8 @@ channel)
     echo "Channel: $2" ;;
 check)
     lock
-    do_check || stop "No release found"
+    # a check that fails is not a result: the last install's stays
+    do_check || { state failed "No release found"; unlock; die "No release found"; }
     state idle ""
     unlock
     echo "Latest: $(get "$W/latest" latest)"
@@ -274,6 +275,15 @@ kernel)
 boot)
     installed || exit 0
     note=$(sed -n 's/^note=//p' "$RUN/t48-slot" 2>/dev/null)
+    cur=$(booted)
+    state_read
+    # the slot on trial did not mount and the first stage went on to this one in
+    # the same start: that was its try
+    if [ "$note" = trial ] && [ "$S_TRIAL" != - ] && [ "$cur" != "$S_TRIAL" ]; then
+        note="failed=$S_TRIAL"
+        state_write "$S_ACTIVE" - 0
+        printf 'slot=%s\nnote=%s\n' "$cur" "$note" > "$RUN/t48-slot"
+    fi
     case "$note" in
     failed=*)
         v=$(get "$KEEP/update-pending" version)
