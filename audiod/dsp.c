@@ -12,6 +12,36 @@ int dsp_vol_q15(int level)
 	return tab[level < 0 ? 0 : level > 15 ? 15 : level];
 }
 
+int dsp_alert_q15(int level)
+{
+	/* 32768 * SPK_LIMIT / 16000 * 10^(-2 * (15 - level) / 20) */
+	static const int16_t tab[16] = {
+		0, 147, 185, 233, 293, 369, 464, 584,
+		736, 926, 1166, 1468, 1848, 2326, 2928, 3686
+	};
+	return tab[level < 0 ? 0 : level > 15 ? 15 : level];
+}
+
+void dsp_limit(struct limiter *st, int16_t *x, int n, int ceiling)
+{
+	int32_t env = st->env;
+	int i;
+
+	for (i = 0; i < n; i++) {
+		int32_t a = x[i] < 0 ? -x[i] : x[i];
+
+		/* the highest peak lately: up at once, down slowly */
+		env -= (env >> 10) + 1;
+		if (env < a)
+			env = a;
+		/* env is never below this sample, so the result is never
+		 * above the ceiling */
+		if (env > ceiling)
+			x[i] = (int16_t)((int32_t)x[i] * ceiling / env);
+	}
+	st->env = env;
+}
+
 void dsp_gain(int16_t *x, int n, int g)
 {
 	int i;

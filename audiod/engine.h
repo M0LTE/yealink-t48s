@@ -24,6 +24,7 @@ struct engine {
 	struct tone_gen key;	/* key click or DTMF feedback, mixed on top */
 	struct echo echo;
 	struct dcblock dc;
+	struct limiter lim;	/* on whatever goes to the loudspeaker's amplifier */
 	int settle;		/* frames of microphone still to hold back after a route change */
 };
 

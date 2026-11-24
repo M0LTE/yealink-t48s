@@ -30,6 +30,7 @@ struct route {
 	enum echo_mode echo;
 	int coupling_q8;	/* see echo.h */
 	int confirmed;		/* 0 until someone has checked it on a phone */
+	int amp;		/* it switches the loudspeaker's amplifier on: set by routes_fix */
 	int nctl;
 	struct route_ctl ctl[ROUTE_MAX_CTL];
 };
@@ -39,5 +40,9 @@ extern struct route routes[ROUTE_ROWS];
 /* Read a routes file over the table. Returns 0, or -1 after printing why. */
 int routes_load(const char *path);
 void routes_print(void);
+/* Work out which routes use the amplifier and hold their loudspeaker gains
+ * to SPK_MAX_DAC and SPK_MAX_OUT (dsp.h), whatever a routes file asked for.
+ * Returns how many values it lowered. Run after routes_load. */
+int routes_fix(void);
 
 #endif

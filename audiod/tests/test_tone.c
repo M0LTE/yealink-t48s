@@ -90,17 +90,52 @@ int main(void)
 	CHECK(sounding(buf, 50 * 16) && !sounding(buf, 110 * 16) && !sounding(buf, 3000 * 16));
 	CHECK(sounding(buf, 3150 * 16));
 
-	/* ringer: two notes taking turns 20 times a second, ring rhythm */
+	/* ringer: two sine notes taking turns 20 times a second, ring rhythm.
+	 * Each note holds for 19 ms and fades into the next over 6 ms. */
 	tone_start(&g, &tone_ring);
 	render(&g, buf, 7 * SEC);
-	CHECK(tone_amp(buf + 32, 320, 1000) > 14000);
-	CHECK(tone_amp(buf + 432, 320, 1250) > 14000);
-	CHECK(max_step(buf, 7 * SEC) < 8000);	/* the notes join without a jump */
-	CHECK(tone_amp(buf + 32, 320, 1000) > 4 * tone_amp(buf + 32, 320, 1250));	/* first note */
-	CHECK(tone_amp(buf + 432, 320, 1250) > 4 * tone_amp(buf + 432, 320, 1000));	/* second */
+	CHECK(tone_amp(buf + 416, 256, 1250) > 14000);	/* second note, held */
+	CHECK(tone_amp(buf + 816, 256, 1000) > 14000);	/* first note again */
+	CHECK(tone_amp(buf + 416, 256, 1250) > 4 * tone_amp(buf + 416, 256, 1000));
+	CHECK(tone_amp(buf + 816, 256, 1000) > 4 * tone_amp(buf + 816, 256, 1250));
 	CHECK(sounding(buf, 200 * 16) && !sounding(buf, 500 * 16) && sounding(buf, 800 * 16));
 	CHECK(!sounding(buf, 1500 * 16) && sounding(buf, 3200 * 16));
 	CHECK(tone_active(&g));
+	/* gentle on the amplifier (issue #57). Never above one note's level,
+	 * also while two notes overlap: */
+	for (i = 0, k = 0; i < 7 * SEC; i++)
+		if (abs(buf[i]) > k)
+			k = abs(buf[i]);
+	CHECK(k <= 16000 && k > 15500);
+	/* each burst fades in over 20 ms and out again: quarter by quarter
+	 * the level rises, and the first and last 2.5 ms are almost nothing */
+	for (k = 0; k < 2; k++) {
+		const int16_t *r = buf + k * 600 * 16;	/* the two bursts of a ring */
+		CHECK(rms(r, 40) < 300 && rms(r + 6400 - 40, 40) < 300);
+		CHECK(rms(r, 80) < rms(r + 80, 80) && rms(r + 80, 80) < rms(r + 160, 80));
+		CHECK(rms(r + 160, 80) < rms(r + 240, 80) && rms(r + 240, 80) < 16000 * 0.71);
+		CHECK(rms(r + 6320, 80) < rms(r + 6240, 80) && rms(r + 6240, 80) < rms(r + 6160, 80));
+		CHECK_RANGE(rms(r + 320, 5760), 16000 * 0.66, 16000 * 0.71);	/* as loud as a sine all through */
+	}
+	/* half way through a change of note both notes are there, equally */
+	CHECK_RANGE(tone_amp(buf + 752 - 16, 32, 1000) + tone_amp(buf + 752 - 16, 32, 1250), 12000, 20000);
+	CHECK_RANGE(rms(buf + 704, 96), 16000 * 0.5, 16000 * 0.71);
+	/* only sine waves: nothing to speak of away from the two notes, and
+	 * the wave never turns a corner (a 1250 Hz sine at this level bends
+	 * by 3780 a sample at most) */
+	for (i = 1750; i <= 7750; i += 250)
+		CHECK(tone_amp(buf, 6400, i) < 40);
+	for (i = 2, k = 0; i < 7 * SEC; i++)
+		if (abs(buf[i] - 2 * buf[i - 1] + buf[i - 2]) > k)
+			k = abs(buf[i] - 2 * buf[i - 1] + buf[i - 2]);
+	CHECK(k < 3900);
+	/* stopped in mid ring: a 20 ms fade, not a cut */
+	tone_start(&g, &tone_ring);
+	render(&g, buf, 3200);
+	tone_stop(&g);
+	render(&g, buf, 640);
+	CHECK(rms(buf, 80) > 8000 && rms(buf + 240, 80) < rms(buf, 80) && rms(buf + 320, 320) == 0);
+	CHECK(!tone_active(&g));
 
 	/* keys: the DTMF pair for 80 ms, then silence, without being stopped */
 	for (k = 0; k < 12; k++) {

@@ -16,6 +16,15 @@ static void run(struct engine *e, int with_call)
 		engine_tick(e, mic + i, with_call ? spk + i : 0, mic_out + i, spk_out + i);
 }
 
+static int peak(const int16_t *x, int n)
+{
+	int i, m = 0;
+	for (i = 0; i < n; i++)
+		if (abs(x[i]) > m)
+			m = abs(x[i]);
+	return m;
+}
+
 int main(void)
 {
 	struct engine e;
@@ -118,15 +127,17 @@ int main(void)
 	engine_set_ring(&e, 1);
 	run(&e, 1);
 	CHECK(engine_hw_row(&e) == ROUTE_ALERT && engine_sounding(&e));
-	CHECK(tone_amp(spk_out + 32, 320, 1000) > 14000);
+	/* at 15 it sits on the loudspeaker's limit, and is not turned down by the limiter */
+	CHECK_RANGE(tone_amp(spk_out + 816, 256, 1000), SPK_LIMIT * 0.97, SPK_LIMIT);
+	CHECK(peak(spk_out, N) <= SPK_LIMIT && peak(spk_out, N) > SPK_LIMIT - 10);
 	CHECK(rms(mic_out, N) == 0);
 	CHECK(tone_amp(spk_out, N, 700) < 30);	/* call audio is not played on hook */
-	engine_set_volume(&e, T48AC_VOL_RINGER, 9);	/* 18 dB down */
+	engine_set_volume(&e, T48AC_VOL_RINGER, 9);	/* 12 dB down: the ringer's steps are 2 dB */
 	engine_set_ring(&e, 0);
 	run(&e, 1);
 	engine_set_ring(&e, 1);
 	run(&e, 1);
-	CHECK_RANGE(tone_amp(spk_out + 32, 320, 1000), 16000 * 0.11, 16000 * 0.135);
+	CHECK_RANGE(tone_amp(spk_out + 816, 256, 1000), SPK_LIMIT * 0.24, SPK_LIMIT * 0.26);
 	engine_set_volume(&e, T48AC_VOL_RINGER, 15);
 
 	/* lifting the handset while it rings: the melody stops at once and
@@ -148,16 +159,98 @@ int main(void)
 	/* hanging up with it still ringing: back to the melody on the loudspeaker */
 	engine_set_route(&e, T48AC_ROUTE_NONE);
 	run(&e, 1);
-	CHECK(tone_amp(spk_out + 32, 320, 1000) > 14000);
+	CHECK(tone_amp(spk_out + 816, 256, 1000) > SPK_LIMIT * 0.97);
 	engine_set_ring(&e, 0);
 
-	/* on-hook dialling: key sounds and tones play at the ringer volume */
+	/* on-hook dialling: key sounds and tones play at the ringer volume
+	 * (8000 at 4 dB under the ringer's top, which is SPK_LIMIT for 16000) */
 	run(&e, 1);
 	engine_set_volume(&e, T48AC_VOL_RINGER, 13);
 	engine_set_tone(&e, T48AC_TONE_ERROR);
 	run(&e, 1);
-	CHECK_RANGE(tone_amp(spk_out, N, 400), 3900, 4050);
+	CHECK_RANGE(tone_amp(spk_out, N, 400), 560, 575);
 	engine_set_tone(&e, T48AC_TONE_OFF);
+	run(&e, 1);
+
+	/* the loudspeaker's limit (issue #57): whatever is asked of the two
+	 * routes that use the amplifier, no sample leaves above SPK_LIMIT.
+	 * The loudest call there can be, a tone and a key on top, volume 15: */
+	CHECK(routes[ROUTE_ALERT].amp && routes[T48AC_ROUTE_SPEAKER].amp);
+	CHECK(!routes[T48AC_ROUTE_HANDSET].amp && !routes[T48AC_ROUTE_HEADSET].amp);
+	sine_fill(spk, N, 700, 32767, 0);
+	routes[T48AC_ROUTE_SPEAKER].echo = ECHO_NONE;	/* voice switching would turn it down too */
+	engine_set_route(&e, T48AC_ROUTE_SPEAKER);
+	routes[T48AC_ROUTE_SPEAKER].echo = ECHO_SWITCH;
+	engine_set_volume(&e, T48AC_VOL_SPEAKER, 15);
+	run(&e, 1);
+	CHECK(peak(spk_out, N) <= SPK_LIMIT && peak(spk_out, N) > SPK_LIMIT - 50);
+	/* turned down, not clipped: still the call's tone and nothing else */
+	CHECK_RANGE(tone_amp(spk_out + N / 2, N / 2, 700), SPK_LIMIT * 0.97, SPK_LIMIT * 1.02);
+	CHECK(tone_amp(spk_out + N / 2, N / 2, 2100) < SPK_LIMIT / 100);
+	engine_set_tone(&e, T48AC_TONE_ERROR);
+	engine_key(&e, '5');
+	run(&e, 1);
+	CHECK(peak(spk_out, N) <= SPK_LIMIT);
+	engine_set_tone(&e, T48AC_TONE_OFF);
+	/* a quiet call is left alone */
+	sine_fill(spk, N, 700, 1500, 0);
+	run(&e, 1);
+	run(&e, 1);
+	CHECK_RANGE(tone_amp(spk_out, N, 700), 1490, 1501);
+	/* on hook, every ringer volume, ringing with a key pressed */
+	engine_set_route(&e, T48AC_ROUTE_NONE);
+	for (k = 0; k <= 15; k++) {
+		engine_set_volume(&e, T48AC_VOL_RINGER, k);
+		engine_set_ring(&e, 1);
+		engine_key(&e, '#');
+		run(&e, 1);
+		CHECK(peak(spk_out, N) <= SPK_LIMIT);
+		engine_set_ring(&e, 0);
+		run(&e, 1);
+	}
+	/* the earpiece and the headset are not held back */
+	sine_fill(spk, N, 700, 8000, 0);
+	engine_set_route(&e, T48AC_ROUTE_HANDSET);
+	engine_set_volume(&e, T48AC_VOL_HANDSET, 15);
+	run(&e, 1);
+	CHECK_RANGE(tone_amp(spk_out, N, 700), 7950, 8050);
+	engine_set_route(&e, T48AC_ROUTE_NONE);
+
+	/* a routes file cannot turn the loudspeaker up past the gains the
+	 * limit was measured with, and a route that switches the amplifier
+	 * on is limited whatever it is called */
+	{
+		struct route saved_spk = routes[T48AC_ROUTE_SPEAKER], saved_hs = routes[T48AC_ROUTE_HANDSET];
+		struct route *r = &routes[T48AC_ROUTE_SPEAKER];
+
+		for (i = 0; i < r->nctl; i++) {
+			if (!strcmp(r->ctl[i].name, "Codec A Playback Volume"))
+				r->ctl[i].value = 42;
+			if (!strcmp(r->ctl[i].name, "Codec A Output A Playback Volume"))
+				r->ctl[i].value = 7;
+		}
+		r = &routes[T48AC_ROUTE_HANDSET];
+		strcpy(r->ctl[r->nctl].name, "Speaker Amp Switch");
+		r->ctl[r->nctl++].value = 1;
+		CHECK(routes_fix() == 2);
+		r = &routes[T48AC_ROUTE_SPEAKER];
+		for (i = 0; i < r->nctl; i++) {
+			if (!strcmp(r->ctl[i].name, "Codec A Playback Volume"))
+				CHECK(r->ctl[i].value == SPK_MAX_DAC);
+			if (!strcmp(r->ctl[i].name, "Codec A Output A Playback Volume"))
+				CHECK(r->ctl[i].value == SPK_MAX_OUT);
+		}
+		CHECK(routes[T48AC_ROUTE_HANDSET].amp);
+		sine_fill(spk, N, 700, 32767, 0);
+		engine_set_route(&e, T48AC_ROUTE_HANDSET);
+		run(&e, 1);
+		CHECK(peak(spk_out, N) <= SPK_LIMIT);
+		engine_set_route(&e, T48AC_ROUTE_NONE);
+		routes[T48AC_ROUTE_SPEAKER] = saved_spk;
+		routes[T48AC_ROUTE_HANDSET] = saved_hs;
+		CHECK(routes_fix() == 0 && !routes[T48AC_ROUTE_HANDSET].amp);
+		sine_fill(spk, N, 700, 8000, 0);
+	}
 
 	/* the speakerphone route turns the echo control on, the others off */
 	engine_set_route(&e, T48AC_ROUTE_SPEAKER);

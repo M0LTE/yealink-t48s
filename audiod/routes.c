@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "dsp.h"
 #include "routes.h"
 
 /*
@@ -38,12 +39,12 @@
 	{ "Codec B Sidetone Switch", 0 }
 #define SPEAKER_OUT \
 	{ "Codec A Output B Playback Switch", 0 }, { "Codec A Sidetone Switch", 0 }, \
-	{ "Codec A Playback Volume", 30 }, { "Codec A Output A Playback Volume", 6 }, \
+	{ "Codec A Playback Volume", SPK_MAX_DAC }, { "Codec A Output A Playback Volume", SPK_MAX_OUT }, \
 	{ "Codec A Output A Playback Switch", 1 }, { "Speaker Amp Switch", 1 }
 
 struct route routes[ROUTE_ROWS] = {
 	[ROUTE_ALERT] = {
-		.name = "alert", .cap_dev = 0, .play_dev = 0, .echo = ECHO_NONE, .confirmed = 1,
+		.name = "alert", .cap_dev = 0, .play_dev = 0, .echo = ECHO_NONE, .confirmed = 1, .amp = 1,
 		.nctl = 17, .ctl = { QUIET_B, MIC_B(0, 1, 5), MIC_A(0, 48), SPEAKER_OUT },
 	},
 	[T48AC_ROUTE_HANDSET] = {
@@ -55,7 +56,7 @@ struct route routes[ROUTE_ROWS] = {
 			{ "Codec B Output B Playback Switch", 1 } },
 	},
 	[T48AC_ROUTE_SPEAKER] = {
-		.name = "speaker", .cap_dev = 0, .play_dev = 0, .echo = ECHO_SWITCH, .confirmed = 1,
+		.name = "speaker", .cap_dev = 0, .play_dev = 0, .echo = ECHO_SWITCH, .confirmed = 1, .amp = 1,
 		.coupling_q8 = 512,	/* measured: the base microphone hears a tone up to 7 dB above its level in the frame played (1.4 kHz) */
 		.nctl = 17, .ctl = { QUIET_B, MIC_B(0, 1, 5), MIC_A(1, 48), SPEAKER_OUT },
 	},
@@ -168,6 +169,36 @@ bad:
 	fprintf(stderr, "t48-audiod: %s line %d: not understood\n", path, ln);
 	fclose(f);
 	return -1;
+}
+
+/* The limiter's ceiling (SPK_LIMIT) was measured with these gains. A routes
+ * file may lower them, never raise them: more gain after the limiter would
+ * undo it (issue #57). */
+int routes_fix(void)
+{
+	static const struct { const char *name; int max; } cap[] = {
+		{ "Codec A Playback Volume", SPK_MAX_DAC },
+		{ "Codec A Output A Playback Volume", SPK_MAX_OUT },
+	};
+	int i, j, k, lowered = 0;
+
+	for (i = 0; i < ROUTE_ROWS; i++) {
+		struct route *r = &routes[i];
+
+		r->amp = 0;
+		for (j = 0; j < r->nctl; j++)
+			if (!strcmp(r->ctl[j].name, "Speaker Amp Switch") && r->ctl[j].value)
+				r->amp = 1;
+		for (j = 0; r->amp && j < r->nctl; j++)
+			for (k = 0; k < 2; k++)
+				if (!strcmp(r->ctl[j].name, cap[k].name) && r->ctl[j].value > cap[k].max) {
+					fprintf(stderr, "t48-audiod: route %s: %s %d lowered to %d, the most the loudspeaker is allowed\n",
+						r->name, cap[k].name, r->ctl[j].value, cap[k].max);
+					r->ctl[j].value = cap[k].max;
+					lowered++;
+				}
+	}
+	return lowered;
 }
 
 void routes_print(void)

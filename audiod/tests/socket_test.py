@@ -248,13 +248,14 @@ def main():
     n = len(played) / 16000
     check(3.4 < n < 4.6, "the loudspeaker file holds only the time the hardware ran (%.2f s of about 4.9 s)" % n)
     dial = played[1600:14400]
-    check(4800 < amp(dial, 350) < 5100 and 4800 < amp(dial, 440) < 5100, "dial tone on hook: 350 + 440 Hz at the ringer volume")
-    # find the ring: 1000 Hz at full level in some 20 ms block
-    ring_at = next((i for i in range(0, len(played) - FRAME, FRAME) if amp(played[i:i + FRAME], 1000) > 12000), None)
+    check(540 < amp(dial, 350) < 575 and 540 < amp(dial, 440) < 575, "dial tone on hook: 350 + 440 Hz at the ringer volume")
+    # find the ring: 1000 Hz at the loudspeaker's limit (1800) in some 16 ms block
+    ring_at = next((i for i in range(0, len(played) - 256, 16) if amp(played[i:i + 256], 1000) > 1700), None)
     check(ring_at is not None, "ringer: its first note (1000 Hz) is there")
     key_at = next((i for i in range(0, len(played) - 960, 160)
-                   if amp(played[i:i + 960], 770) > 4000 and amp(played[i:i + 960], 1336) > 4000), None)
+                   if amp(played[i:i + 960], 770) > 450 and amp(played[i:i + 960], 1336) > 450), None)
     check(key_at is not None and (ring_at is None or key_at > ring_at), "key 5: 770 + 1336 Hz after the ring")
+    check(max(abs(x) for x in played[:-int(1.0 * 16000)]) <= 1800, "nothing on the loudspeaker above its limit (1800)")
     tail = played[-int(0.8 * 16000):]
     hs = max(amp(tail[i:i + 3200], 350) for i in range(0, len(tail) - 3200, 1600))
     check(2300 < hs < 2600, "dial tone off hook: at the handset volume (350 Hz at %.0f, want 2500)" % hs)

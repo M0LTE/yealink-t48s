@@ -14,6 +14,7 @@ void engine_init(struct engine *e)
 	memset(e, 0, sizeof(*e));
 	for (i = 0; i < T48AC_VOL_COUNT; i++)
 		e->vol[i] = 8;
+	e->vol[T48AC_VOL_RINGER] = 13;	/* 4 dB under the loudspeaker's limit */
 	echo_init(&e->echo, ECHO_NONE, 0);
 }
 
@@ -50,6 +51,7 @@ void engine_set_route(struct engine *e, int route)
 	echo_init(&e->echo, route ? routes[route].echo : ECHO_NONE,
 		  route ? routes[route].coupling_q8 : 0);
 	memset(&e->dc, 0, sizeof(e->dc));
+	memset(&e->lim, 0, sizeof(e->lim));
 	e->settle = route ? SETTLE_FRAMES : 0;
 	/* a ringer that was sounding must not carry on into the new route */
 	if (e->alert_def == &tone_ring || e->alert_def == &tone_waiting) {
@@ -94,7 +96,7 @@ void engine_tick(struct engine *e, const int16_t *mic_in, const int16_t *spk_in,
 		 int16_t *mic_out, int16_t *spk_out)
 {
 	int16_t tbuf[FRAME];
-	int vol = dsp_vol_q15(e->vol[e->route ? e->route : T48AC_VOL_RINGER]);
+	int vol = e->route ? dsp_vol_q15(e->vol[e->route]) : dsp_alert_q15(e->vol[T48AC_VOL_RINGER]);
 
 	/* What the loudspeaker gets: the call, then the tones on top */
 	if (e->route && spk_in) {
@@ -108,6 +110,10 @@ void engine_tick(struct engine *e, const int16_t *mic_in, const int16_t *spk_in,
 		dsp_mix(spk_out, spk_out, tbuf, vol, FRAME);
 	if (tone_render(&e->key, tbuf, FRAME))
 		dsp_mix(spk_out, spk_out, tbuf, vol, FRAME);
+	/* The amplifier can reset the phone (issue #57): call, tones and
+	 * ringer all go through the limiter on their way to it */
+	if (routes[engine_hw_row(e)].amp)
+		dsp_limit(&e->lim, spk_out, FRAME, SPK_LIMIT);
 
 	/* What the call gets: nothing on hook, else the microphone with the
 	 * DC taken off and, on the speakerphone, the echo control applied

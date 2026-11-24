@@ -4,6 +4,10 @@
  * ringback, busy, error, call waiting), the ringer, key clicks and the DTMF
  * feedback sounds. A tone is a list of segments; the generator is a phase
  * accumulator reading a 256-step sine table, integer only.
+ *
+ * Nothing here is anything but sine waves, and every start, stop and change
+ * of note is a smooth fade: the loudspeaker's amplifier can pull the phone's
+ * supply down (issue #57), and edges are what it finds hardest.
  */
 #ifndef AUDIOD_TONE_H
 #define AUDIOD_TONE_H
@@ -14,7 +18,9 @@ struct tone_seg {
 	uint16_t ms;		/* how long; 0 = until stopped */
 	int16_t amp;		/* peak of each tone, full scale 32767 */
 	uint8_t warble_ms;	/* 0: f1 and f2 sound together. Otherwise they
-				 * alternate this often (the ringer) */
+				 * take turns this often, one fading into the
+				 * other (the ringer) */
+	uint8_t fade_ms;	/* fade in and out; 0 means 2 ms */
 };
 
 struct tone_def {
@@ -32,7 +38,9 @@ struct tone_gen {
 	uint32_t ph1, ph2, inc1, inc2;
 	uint32_t warble_left, warble_len;
 	uint8_t warble_second;
-	int32_t env;		/* 0..32767, slewed over 2 ms so nothing clicks */
+	int32_t env;		/* 0..32767, slewed over the fade time and then
+				 * shaped into half a cosine, so nothing clicks */
+	int32_t env_step;
 };
 
 /* The UK tone plan (the phone's first home). Another country is another
@@ -44,7 +52,7 @@ extern const struct tone_def tone_dial, tone_ringback, tone_busy, tone_error,
 const struct tone_def *tone_for_key(int key);
 
 void tone_start(struct tone_gen *g, const struct tone_def *def);
-void tone_stop(struct tone_gen *g);		/* fades out over 2 ms */
+void tone_stop(struct tone_gen *g);		/* fades out over the segment's fade time */
 static inline int tone_active(const struct tone_gen *g) { return g->def != 0; }
 
 /* Write n samples. Returns 0 if the generator was and stays silent (out is

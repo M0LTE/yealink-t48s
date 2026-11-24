@@ -21,6 +21,32 @@ static inline int16_t sat16(int32_t v)
 /* Volume level 0..15 as a Q15 gain: 0 is silent, 15 is full, 3 dB a step */
 int dsp_vol_q15(int level);
 
+/*
+ * The loudspeaker's limit (issue #57). The amplifier runs from the phone's
+ * 5 V supply, and a loud steady tone pulls it down until the processor
+ * resets. Measured on the phone on 2026-11-24, with the gains in SPK_MAX_DAC
+ * and SPK_MAX_OUT, the screen at full brightness and every lamp lit: the old
+ * ringer survived a peak of 4020 (-18.2 dBFS) and reset the phone at 4510
+ * (-17.2 dBFS), the same under Linux 3.6 and 6.18. It has also been reported
+ * to reset at 2850 (-21.2 dBFS, ringer volume 10 as it was then). The limit
+ * is 4 dB under the lowest of those and 7.5 dB under the measured one.
+ * Nothing sent to the amplifier peaks above it, whatever the volume.
+ */
+#define SPK_LIMIT    1800	/* peak, in samples: -25.2 dBFS */
+#define SPK_MAX_DAC  30		/* "Codec A Playback Volume": -6 dB */
+#define SPK_MAX_OUT  6		/* "Codec A Output A Playback Volume": -3 dB */
+
+/* The ringer volume 0..15 as a Q15 gain for the on-hook loudspeaker: 0 is
+ * silent, 15 puts the ringer (peak 16000 in tone.c) exactly on SPK_LIMIT,
+ * 2 dB a step. Tones and key sounds on hook use it too. */
+int dsp_alert_q15(int level);
+
+/* Peak limiter: no sample leaves above ceiling. A peak above it turns the
+ * gain down at once, and the gain comes back over about 60 ms, so a steady
+ * tone is turned down, not clipped. */
+struct limiter { int32_t env; };
+void dsp_limit(struct limiter *st, int16_t *x, int n, int ceiling);
+
 /* x *= gain (Q15) */
 void dsp_gain(int16_t *x, int n, int gain_q15);
 

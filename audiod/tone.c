@@ -30,23 +30,26 @@ static const int16_t sine[257] = {
 	-3212, -2410, -1608, -804, 0,
 };
 
-#define RAMP      32			/* samples: 2 ms fade in and out */
-#define ENV_STEP  (32768 / RAMP)
+#define FADE_MS   2			/* fade in and out, unless the segment says */
+#define XFADE     96			/* samples: 6 ms from one ringer note to the other */
 
 /* Levels: a single tone at 8000 is -12 dBFS, two at 5000 each peak at -10 */
 #define A2 5000
 #define A1 8000
 
-static const struct tone_seg seg_dial[]     = { { 350, 440, 0, A2, 0 } };
-static const struct tone_seg seg_ringback[] = { { 400, 450, 400, A2, 0 }, { 0, 0, 200, 0, 0 },
-						{ 400, 450, 400, A2, 0 }, { 0, 0, 2000, 0, 0 } };
-static const struct tone_seg seg_busy[]     = { { 400, 0, 375, A1, 0 }, { 0, 0, 375, 0, 0 } };
-static const struct tone_seg seg_error[]    = { { 400, 0, 0, A1, 0 } };
-static const struct tone_seg seg_waiting[]  = { { 400, 0, 100, A1, 0 }, { 0, 0, 3000, 0, 0 } };
-/* The ringer: two notes swapped 20 times a second, in the UK ring rhythm */
-static const struct tone_seg seg_ring[]     = { { 1000, 1250, 400, 16000, 25 }, { 0, 0, 200, 0, 0 },
-						{ 1000, 1250, 400, 16000, 25 }, { 0, 0, 2000, 0, 0 } };
-static const struct tone_seg seg_click[]    = { { 2000, 0, 8, 4000, 0 } };
+static const struct tone_seg seg_dial[]     = { { 350, 440, 0, A2, 0, 0 } };
+static const struct tone_seg seg_ringback[] = { { 400, 450, 400, A2, 0, 0 }, { 0, 0, 200, 0, 0, 0 },
+						{ 400, 450, 400, A2, 0, 0 }, { 0, 0, 2000, 0, 0, 0 } };
+static const struct tone_seg seg_busy[]     = { { 400, 0, 375, A1, 0, 0 }, { 0, 0, 375, 0, 0, 0 } };
+static const struct tone_seg seg_error[]    = { { 400, 0, 0, A1, 0, 0 } };
+static const struct tone_seg seg_waiting[]  = { { 400, 0, 100, A1, 0, 0 }, { 0, 0, 3000, 0, 0, 0 } };
+/* The ringer: two notes taking turns 20 times a second, in the UK ring
+ * rhythm. Each note is a sine that fades into the other over 6 ms, and each
+ * burst fades in and out over 20 ms (issue #57). 16000 is the level the
+ * ringer volume is worked out from (dsp_alert_q15). */
+static const struct tone_seg seg_ring[]     = { { 1000, 1250, 400, 16000, 25, 20 }, { 0, 0, 200, 0, 0, 0 },
+						{ 1000, 1250, 400, 16000, 25, 20 }, { 0, 0, 2000, 0, 0, 0 } };
+static const struct tone_seg seg_click[]    = { { 2000, 0, 8, 4000, 0, 0 } };
 
 const struct tone_def tone_dial     = { "dial", seg_dial, 1, 1 };
 const struct tone_def tone_ringback = { "ringback", seg_ringback, 4, 1 };
@@ -56,7 +59,7 @@ const struct tone_def tone_waiting  = { "waiting", seg_waiting, 2, 1 };
 const struct tone_def tone_ring     = { "ring", seg_ring, 4, 1 };
 const struct tone_def tone_click    = { "click", seg_click, 1, 0 };
 
-#define DTMF(lo, hi) { { lo, hi, 80, A2, 0 } }
+#define DTMF(lo, hi) { { lo, hi, 80, A2, 0, 0 } }
 static const struct tone_seg seg_dtmf[12][1] = {
 	DTMF(941, 1336),						/* 0 */
 	DTMF(697, 1209), DTMF(697, 1336), DTMF(697, 1477),	/* 1 2 3 */
@@ -93,6 +96,18 @@ static inline int32_t sine_at(uint32_t ph)
 	return sine[i] + (((sine[i + 1] - sine[i]) * (int32_t)frac) >> 8);
 }
 
+/* Half a cosine from 0 to 32767 as x goes from 0 to 32767: a fade with no
+ * corner at either end */
+static inline int32_t smooth(int32_t x)
+{
+	return (Q15_ONE - sine_at(((uint32_t)x << 16) + 0x40000000u)) >> 1;
+}
+
+static uint32_t fade_len(const struct tone_seg *s)
+{
+	return (uint32_t)(s->fade_ms ? s->fade_ms : FADE_MS) * (SRATE / 1000);
+}
+
 static void enter_seg(struct tone_gen *g, unsigned idx)
 {
 	const struct tone_seg *s = &g->def->seg[idx];
@@ -104,6 +119,7 @@ static void enter_seg(struct tone_gen *g, unsigned idx)
 	g->warble_len = (uint32_t)s->warble_ms * (SRATE / 1000);
 	g->warble_left = g->warble_len;
 	g->warble_second = 0;
+	g->env_step = (int32_t)(32768 / fade_len(s));
 }
 
 void tone_start(struct tone_gen *g, const struct tone_def *def)
@@ -139,17 +155,28 @@ int tone_render(struct tone_gen *g, int16_t *out, int n)
 		}
 		s = &g->def->seg[g->seg];
 		/* fade out before the end of a timed segment, and when stopped */
-		target = (s->f1 && !g->stopping && (!s->ms || g->left > RAMP)) ? Q15_ONE : 0;
+		target = (s->f1 && !g->stopping && (!s->ms || g->left > fade_len(s))) ? Q15_ONE : 0;
 		if (g->env < target)
-			g->env = g->env + ENV_STEP > target ? target : g->env + ENV_STEP;
+			g->env = g->env + g->env_step > target ? target : g->env + g->env_step;
 		else if (g->env > target)
-			g->env = g->env - ENV_STEP < target ? target : g->env - ENV_STEP;
+			g->env = g->env - g->env_step < target ? target : g->env - g->env_step;
 
 		if (!g->env) {
 			v = 0;
 		} else if (g->warble_len) {
-			v = sine_at(g->ph1);
-			g->ph1 += g->warble_second ? g->inc2 : g->inc1;
+			/* Both notes run all the time; only their shares
+			 * change. The shares add up to one, so the sum never
+			 * peaks above one note alone. */
+			int32_t now = sine_at(g->warble_second ? g->ph2 : g->ph1);
+			int32_t next = sine_at(g->warble_second ? g->ph1 : g->ph2);
+
+			v = now;
+			if (g->warble_left <= XFADE && g->warble_len > XFADE) {
+				int32_t w = smooth((int32_t)((XFADE - g->warble_left) * Q15_ONE / XFADE));
+				v = (now * (Q15_ONE - w) + next * w) >> 15;
+			}
+			g->ph1 += g->inc1;
+			g->ph2 += g->inc2;
 			if (!--g->warble_left) {
 				g->warble_left = g->warble_len;
 				g->warble_second ^= 1;
@@ -163,7 +190,7 @@ int tone_render(struct tone_gen *g, int16_t *out, int n)
 			}
 		}
 		v = (v * s->amp) >> 15;
-		out[i] = sat16((v * g->env) >> 15);
+		out[i] = sat16((v * smooth(g->env)) >> 15);
 
 		if (g->stopping) {
 			if (!g->env)

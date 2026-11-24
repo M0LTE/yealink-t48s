@@ -441,6 +441,7 @@ int main(int argc, char **argv)
 	}
 	if (routes_file && routes_load(routes_file) < 0)
 		return 1;
+	routes_fix();
 	if (print_routes) {
 		routes_print();
 		return 0;
