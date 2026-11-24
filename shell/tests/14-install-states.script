@@ -1,0 +1,46 @@
+# Install page: the states with nothing to choose, and a stick that arrives
+# while the page is open (issue 61).
+run sh -c "mkdir -p simdata/fw && : > simdata/live && echo no > simdata/fw/stick"
+wait 200
+touch 700 420
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Install
+key ok
+# no stick the phone can read
+expectstate settings.rows 2
+expectstate settings.row Stick
+expectstate settings.value Not_found
+shot shots/install-no-stick.png
+# it is put in: the page follows within a few seconds
+run sh -c "echo yes > simdata/fw/stick"
+waitstate settings.rows 5 5000
+expectstate settings.row Back_up
+run ./t48-config --config simdata/config set screen theme directory
+wait 1200
+shot shots/install-before-directory.png
+run ./t48-config --config simdata/config set screen theme twotone
+wait 1200
+shot shots/install-before-twotone.png
+run ./t48-config --config simdata/config set screen theme switchboard
+wait 1200
+# an installed phone, and a stick without its backup: nothing to restore from
+run sh -c "echo ours > simdata/fw/flash"
+waitstate settings.rows 4 5000
+shot shots/install-no-backup.png
+# a backup on a stick whose install files are missing
+run sh -c "echo other > simdata/fw/flash; echo checked > simdata/fw/backup; echo no > simdata/fw/files"
+waitstate settings.rows 5 5000
+expectstate settings.row Install
+expectstate settings.value No_install_files
+key ok
+expectstate overlay none
+shot shots/install-no-files.png

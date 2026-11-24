@@ -456,16 +456,21 @@ are kept in memory only, so they are gone when you unplug it.
 
 To install it for good
 ----------------------
-On the phone: Settings, Install. Back up first (it copies the phone's
-whole flash onto this stick and checks the copy; about 10 minutes, and
-the stick needs 160 MB free), then Install. Keep the t48s-backup
-folder: it is the way back to Yealink's firmware, from the same page.
+On the phone: Settings, Install. The page offers one step at a time.
+1. Back up. The phone's whole flash is copied onto this stick and the
+   copy checked. About 3 minutes; the stick needs 160 MB free.
+2. Install. About 3 minutes. Do not unplug.
+3. When the screen says Installed, take this stick out. The phone
+   restarts by itself.
+Keep the t48s-backup folder: it is the way back to Yealink's firmware.
+To go back, start from this stick again: the same page then offers
+Restore, and ends the same way.
 
 Power: use a 5 V supply of 1.5 A or more. Yealink's 0.6 A adapter is
 too small to run the phone and a stick: the phone freezes.
 
-To go back to Yealink
----------------------
+To stop trying it (nothing installed)
+-------------------------------------
 1. Unplug the power.
 2. TAKE THIS STICK OUT. This matters: if the stick is still in the
    phone at the next power-up, Yealink's firmware tries to update itself

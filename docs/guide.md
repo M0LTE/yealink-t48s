@@ -2,7 +2,7 @@
 
 Open firmware for the Yealink SIP-T48S. Try it from a USB stick, install it from the phone's own screen, go back to Yealink's firmware from the same screen.
 
-**Status, 2026-11-24.** The stick start works. The Install page, its backup and the kernel's USB stick support are written and rehearsed off the phone; they have not yet run on one ([what is left](installer.md#test-plan-for-a-real-phone)). Until they have, install only a phone you can afford to recover over a serial lead.
+**Status, 2026-11-24.** The stick start, the backup, Install and Restore have each run on one phone. The page's present order of steps and the restart when the stick comes out are rehearsed off the phone and not yet run on one ([what is left](installer.md#test-plan-for-a-real-phone)). Until more phones have been through it, install only a phone you can afford to recover over a serial lead.
 
 ![the idle screen](design/switchboard/phone-idle.png)
 
@@ -36,18 +36,18 @@ To go back: unplug the power, **take the stick out**, plug the power in. With th
 
 ## Install it
 
-Yealink's firmware is replaced. The backup is the way back, so it comes first and Install is greyed until it is done.
+Yealink's firmware is replaced. The backup is the way back, so it comes first: the page offers one step at a time.
 
 | | |
 |---|---|
-| ![before](img/install-before.png) | ![backing up](img/install-backup.png) |
-| ![ready](img/install-ready.png) | ![the question](img/install-confirm.png) |
+| ![step 1](img/install-before.png) | ![backing up](img/install-backup.png) |
+| ![step 2](img/install-ready.png) | ![installed](img/install-done.png) |
 
 1. Start from the stick, as above.
 2. **Settings** (Down on the idle screen), **Install**.
-3. **Back up.** The phone's whole flash is copied to the stick, 138 MB in the folder `t48s-backup`, and checked three ways. About 10 minutes.
-4. **Install**, and answer the question. About 10 minutes. Do not unplug.
-5. `Installed`. **Restart**. The phone starts the open firmware by itself from now on. The stick can come out.
+3. **Back up.** The phone's whole flash is copied to the stick, 138 MB in the folder `t48s-backup`, and checked three ways. About 3 minutes.
+4. **Install**, and answer the question. About 3 minutes. Do not unplug.
+5. `Installed`. **Take the stick out.** The phone restarts by itself, into the open firmware from now on.
 
 Copy `t48s-backup` from the stick to a computer and keep it. It is the only copy of this phone's Yealink firmware, and it holds Yealink's settings, passwords included.
 
@@ -80,8 +80,8 @@ If the power fails during Install: start from the stick again and choose Install
 ## Go back to Yealink
 
 1. Start from the stick that holds `t48s-backup` (Speakerphone, 2).
-2. **Settings, Install, Restore Yealink firmware**, and answer the question. About 10 minutes.
-3. `Restored`. Unplug the power, **take the stick out**, plug the power in.
+2. **Settings, Install, Restore Yealink firmware**, and answer the question. About 3 minutes.
+3. `Restored`. **Take the stick out.** The phone restarts by itself, into Yealink's firmware.
 
 The phone's flash is then byte for byte what the backup holds. The open firmware's settings are gone.
 
@@ -95,6 +95,9 @@ The phone's flash is then byte for byte what the backup holds. The open firmware
 | "Update failed" | The files on the stick are damaged. Copy them again |
 | `RESCUE` on the screen | The kernel started and found no system. From a stick: `T48S.rfs` is damaged, copy it again. On an installed phone: start from the stick and Install again |
 | Install page: Stick `Not found` | The phone was not started from this stick, or the supply is too small for it |
+| Install page: `Restore needs the stick that holds this phone's backup` | The phone has the open firmware and this stick has no `t48s-backup`. Copy the folder back onto it |
+| Install: `No install files` | The `install` folder is missing from the stick. Unpack the zip again |
+| `Installed` or `Restored`, the stick is out, no restart | Unplug the power and plug it in. Nothing is lost |
 | `Stick needs 160 MB free` | Make room, or use another stick |
 | `The stick holds another phone's backup` | Move that `t48s-backup` folder off the stick first |
 | `Backup on the stick is damaged` | The stick has lost data. If the phone is still on Yealink's firmware, rename the folder and Back up again |

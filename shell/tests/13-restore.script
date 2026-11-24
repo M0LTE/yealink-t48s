@@ -1,0 +1,45 @@
+# Install page on an installed phone started from the stick (issue 61): Restore
+# is the one thing to choose, and the phone restarts when the stick is taken out.
+run sh -c "mkdir -p simdata/fw && : > simdata/live && : > simdata/fw/in && echo ours > simdata/fw/flash && echo checked > simdata/fw/backup"
+wait 200
+touch 700 420
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Install
+key ok
+expectstate settings.rows 5
+expectstate settings.row Restore_Yealink_firmware
+shot shots/restore-before.png
+key ok
+expectstate overlay.title Restore_Yealink_firmware?
+shot shots/restore-confirm.png
+# a restore that stops is offered again, whatever the flash now looks like
+run sh -c ": > simdata/fw/fail; echo other > simdata/fw/flash"
+key right
+key ok
+expectstate overlay busy
+waitstate overlay message 5000
+expectstate overlay.title Stopped
+key ok
+expectstate settings.row Restore_Yealink_firmware
+run rm simdata/fw/fail
+key ok
+key right
+key ok
+wait 1300
+expectstate overlay.text System,_43_of_80_MB
+shot shots/restore-writing.png
+waitstate overlay.title Restored 5000
+expectstate overlay.text Take_the_stick_out_to_restart
+shot shots/restore-done.png
+run rm simdata/fw/in
+waitstate overlay.text Restarting 3000
+run test -e simdata/fw/restart

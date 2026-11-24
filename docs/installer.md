@@ -2,16 +2,33 @@
 
 Issue [#33](https://github.com/M0LTE/yealink-t48s/issues/33). The owner's side is [guide.md](guide.md). The install it performs is the one in [install.md](install.md); this page is what is new around it.
 
-**Status, 2026-11-24: written, built and rehearsed off the phone. None of it has run on a phone.** What must be run on one is [at the end](#test-plan-for-a-real-phone).
+**Status, 2026-11-24: restore, then backup and install, ran end to end on Tom's phone.** The page was then reworked (issue [#61](https://github.com/M0LTE/yealink-t48s/issues/61)): one step at a time, progress in MB, and a restart when the stick comes out. That rework is rehearsed off the phone and has not run on one. What must be run on one is [at the end](#test-plan-for-a-real-phone).
 
 A phone on Yealink's firmware is started from a USB stick ([live-image.md](live-image.md)). Settings then has an Install page. It backs the whole flash up to the stick, installs only when that backup has been checked, and puts the backup back on request. No computer, no network, no keys.
+
+## The page
+
+`t48-install status` is read when the page opens, when a job ends and every 3 seconds while the page waits. One action is offered:
+
+| Phone | Stick | Offered |
+|---|---|---|
+| Yealink firmware | no checked backup | `Back up`, `Step 1 of 2` |
+| Yealink firmware | checked backup | `Install`, `Step 2 of 2` (greyed, `No install files`, without `install/`) |
+| Open firmware | checked backup | `Restore Yealink firmware` |
+| Open firmware | no checked backup | nothing: `Restore needs the stick that holds this phone's backup` |
+| either | not found | nothing |
+
+An install or restore that stops part way is offered again, whatever the flash then looks like.
+
+When Install or Restore ends, the page runs `t48-install eject`: the stick is unmounted, the screen says `Installed` (or `Restored`) and `Take the stick out to restart`, and the phone restarts when no USB disk is left in `/sys/block`. There is nothing to press. That way the stick is never in the socket at the next start, where Yealink's firmware would try to reflash itself from it.
 
 ## The parts
 
 | Part | Where | What |
 |---|---|---|
 | USB sticks in the kernel | [`kernel6/drivers/t48s_usb.c`](../kernel6/drivers/t48s_usb.c), `kernel6/usb.config` | the socket as a USB host, when U-Boot has started it |
-| The engine | [`t48-install`](../buildroot/board/t48s/rootfs-overlay/usr/bin/t48-install) | status, backup, install, restore, restart |
+| The engine | [`t48-install`](../buildroot/board/t48s/rootfs-overlay/usr/bin/t48-install) | status, backup, install, restore, eject, restart |
+| Progress | [`native/t48-meter.c`](../native/t48-meter.c) | a pipe that counts bytes; the long reads go through it |
 | The page | `shell/settings.c`, Install | rows from `t48-install status`; its jobs run as a child with a progress bar |
 | The app step | [`tools/phone/t48-flash.sh`](../tools/phone/t48-flash.sh), in the image as `/usr/lib/t48/t48-flash.sh` | the same script `tools/t48install.sh` copies over |
 | The BOOTMODE flag | `t48s_nand_userenv_rewrite()` in [`kernel6/drivers/t48s_nand.c`](../kernel6/drivers/t48s_nand.c) | the one block of `userenv` |
@@ -37,7 +54,7 @@ The socket is the SoC's USB controller 1: a standard EHCI whose registers start 
 
 ## The backup
 
-`t48-install backup`, about 10 minutes, 138 MB:
+`t48-install backup`, about 3 minutes on Tom's phone, 138 MB. The page shows `Copying, 52 of 138 MB` for step 1 and `Checking, 52 of 138 MB` for steps 2 to 4:
 
 1. Each of the twelve partitions is read with its spare bytes (`nandread -o`) straight onto the stick, and its SHA-256 taken on the way. A bad block or a read error stops it.
 2. The page cache is dropped and each file read back from the stick: same SHA-256.
@@ -62,7 +79,13 @@ Both begin the same way and stop at the first thing that is not right:
 
 **Restore**: `app` from the backup, then `kernel`, each page with its spare bytes, compared afterwards. `kernel` goes last: a restore cut short leaves a phone that still starts our kernel and shows rescue.
 
-Both end by looking at U-Boot's BOOTMODE flag and clearing it if it is still set. If it cannot be cleared the last line says `Take the stick out before restarting`.
+Both end by looking at U-Boot's BOOTMODE flag and clearing it if it is still set. The stick comes out before the restart whether or not it cleared.
+
+## The restart that needed two presses
+
+On the phone the page's Restart said `Installer stopped` and worked at the second press. `t48-install restart` stopped the watchdog's feeder with `sv -w 5 down` and then ran `t48-watchdog reset`. busybox `sv` waits only with `-v`; without it the command returns as soon as the request is written, so the reset opened `/dev/watchdog` while the feeder still held it, got `EBUSY` and exited. The page saw a job end with no result. By the second press the feeder had gone. Read from the code and the serial log, not reproduced on the phone.
+
+Now: `sv -v -w 5 down` (here and in `back-to-yealink`), `t48-watchdog reset` waits up to 5 seconds for a busy watchdog, and a restart that still does not happen says `Not restarted. Unplug the power`.
 
 Found by the rehearsal: a new, empty UBI volume has no filesystem and cannot be mounted read-only, which is what the app step did next on a phone with no earlier `/data`. It now mounts it for writing once.
 
@@ -84,7 +107,7 @@ If the rewrite fails after the erase, `userenv` is empty. U-Boot then uses its b
 tools/test-owner.sh bytes SET BACKUP      # any PC, 30 seconds
 sudo tools/test-owner.sh ubi SET          # Linux with nandsim
 tools/test-userenv.sh
-make -C shell check                       # 11-install.script
+make -C shell check                       # 11-install, 13-restore, 14-install-states
 ```
 
 | | How |
@@ -94,7 +117,9 @@ make -C shell check                       # 11-install.script
 | Install: the kernel partition is exactly what `tools/t48flash.py` works out, U-Boot's read of it gives the file back, 599 blocks of app erased, nothing else changed | `bytes` |
 | Restore: the whole flash is the backup again, byte for byte | `bytes` |
 | The app step on a phone that never had our `/data`: 599 blocks of somebody else's data, UBI from nothing, slot A, an empty `/data` that mounts, a second run changes nothing, the first start loads slot A | `ubi`, on studybox |
-| The page: greyed Install, the backup's progress, the question, a failure's words, the way back | simulator, against a stand-in for `t48-install` |
+| Progress: MB copied and checked, never backwards; the same twelve files without `t48-meter` | `bytes` |
+| The end: the restart waits for the stick to come out, the feeder is stopped first, a restart that fails says so | `bytes` |
+| The page: one action in each state, the backup's progress, the question, a failure's words and the step offered again, `Take the stick out to restart`, a stick that arrives while the page is open | simulator, against a stand-in for `t48-install` (`11-install`, `13-restore`, `14-install-states`) |
 | Kernels with USB and the userenv window build; the flash kernel fits | `kernel6/build.sh` with `LIVE=1` and `FLASH=1` |
 
 ## Test plan for a real phone
@@ -115,7 +140,7 @@ Serial log running throughout (`ssh root@proxmox0 tail -f /root/t48s/session4.lo
 7. Copy Tom's backup onto the stick as `t48s-backup`, with a `VERIFIED` made by hand. Settings, Install, Restore Yealink firmware. Time it. `tools/nandbackup.sh verify` from the stick start: every partition but `userenv` identical to the backup.
 8. Stick out, power on: Yealink's firmware, settings intact.
 9. From Yealink: stick start, Settings, Install, Back up. Time it. Compare the stick's backup with Tom's on a PC.
-10. Install. Time it. Restart. Our firmware from flash, `/data` empty and writable.
+10. Install. Time it. `Take the stick out to restart`: take it out, and the phone restarts within a few seconds with nothing pressed. Our firmware from flash, `/data` empty and writable. The same at the end of step 7.
 11. A power cut during the app step (pull the plug at "Writing the system"), then Install again.
 
 **C. Another phone** (the T46S tester's, or a T48S on newer Yealink firmware):

@@ -40,7 +40,7 @@ enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16 };
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
               A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME,
               A_UPD_CHANNEL, A_UPD_CHECK, A_UPD_INSTALL, A_UPD_KERNEL, A_UPD_RESTART,
-              A_FW_BACKUP, A_FW_INSTALL, A_FW_RESTORE, A_FW_RESTART };
+              A_FW_BACKUP, A_FW_INSTALL, A_FW_RESTORE };
 
 struct row {
     int kind, flags;
@@ -80,6 +80,7 @@ static struct {
     char extra[120];              /* O_CONFIRM: one more line in small print, such as a key's fingerprint */
     const char *yes, *no;         /* O_CONFIRM: what the two buttons say */
     int percent;
+    int plain;                    /* O_BUSY: words only, no bar (waiting for the stick to come out) */
     enum action act;
     char arg[64];
 } ov;
@@ -407,6 +408,45 @@ static int fw_live(void)
     return access(f, F_OK) == 0;
 }
 
+/* what t48-install status last said. Asked for when the page opens, when one
+ * of its jobs ends and every few seconds while the page waits: never while a
+ * job runs, as status mounts the stick */
+#define FW_CHECK_MS 3000
+static struct {
+    int loaded, stick, files, ours, backup, free_mb;   /* backup: 0 none, 1 unfinished, 2 checked */
+    char date[12];
+    char again[12];               /* a job that stopped part way: it is offered again */
+    long long asked;
+} fw;
+
+static int fw_status(void)
+{
+    char cmd[300], line[120], date[12] = "";
+    int stick = 0, files = 0, ours = 0, backup = 0, free_mb = 0;
+    FILE *f;
+    snprintf(cmd, sizeof cmd, "%s status 2>/dev/null", fw_tool());
+    if ((f = popen(cmd, "r"))) {
+        while (fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (!strcmp(line, "stick=yes")) stick = 1;
+            else if (!strcmp(line, "files=yes")) files = 1;
+            else if (!strcmp(line, "flash=ours")) ours = 1;
+            else if (!strcmp(line, "backup=checked")) backup = 2;
+            else if (!strcmp(line, "backup=unfinished")) backup = 1;
+            else if (!strncmp(line, "free_mb=", 8)) free_mb = atoi(line + 8);
+            else if (!strncmp(line, "backup_date=", 12)) snprintf(date, sizeof date, "%.10s", line + 12);
+        }
+        pclose(f);
+    }
+    int changed = !fw.loaded || stick != fw.stick || files != fw.files || ours != fw.ours || backup != fw.backup ||
+                  free_mb != fw.free_mb || strcmp(date, fw.date);
+    fw.loaded = 1;
+    fw.stick = stick; fw.files = files; fw.ours = ours; fw.backup = backup; fw.free_mb = free_mb;
+    snprintf(fw.date, sizeof fw.date, "%s", date);
+    fw.asked = t48_now_ms();
+    return changed;
+}
+
 static int job_start(int kind, const char *cmd, const char *arg)
 {
     int p[2];
@@ -532,6 +572,8 @@ static void message(const char *t, const char *text)
     snprintf(ov.text, sizeof ov.text, "%s", text);
 }
 
+static void fw_eject(const char *done);
+
 int settings_reaped(pid_t pid, int status)
 {
     if (update_reaped(pid, status)) return 1;
@@ -550,7 +592,11 @@ int settings_reaped(pid_t pid, int status)
     } else if (job.kind == J_FIRMWARE) {
         ok = ok && job.ok;
         logmsg("install: %s: %s", job.verb, ok ? job.result : job.result[0] ? job.result : "stopped");
-        if (ok) message(job.result, "");
+        int wrote = !strcmp(job.verb, "install") || !strcmp(job.verb, "restore");
+        snprintf(fw.again, sizeof fw.again, "%s", wrote && !ok ? job.verb : "");
+        fw_status();
+        if (ok && wrote) fw_eject(job.result);
+        else if (ok) message(job.result, "");
         else message("Stopped", job.result[0] ? job.result : "Installer stopped");
     } else {
         char t[120];
@@ -1117,38 +1163,32 @@ static void build_storeapp(const char *id)
     else if (inst) add_action("Remove", A_REMOVE, id)->flags = F_DANGER;
 }
 
-/* Install: what t48-install status says, and its three jobs */
+/* Install: one step at a time. A phone on Yealink's firmware is backed up, then
+ * installed; an installed one can be restored. Only the next step is offered */
 static void build_install(void)
 {
-    char cmd[300], line[120], v[120];
-    int stick = 0, files = 0, ours = 0, backup = 0, free_mb = 0;
-    char date[40] = "";
-    FILE *f;
+    char v[120];
     snprintf(title, sizeof title, "Install");
-    snprintf(cmd, sizeof cmd, "%s status 2>/dev/null", fw_tool());
-    if ((f = popen(cmd, "r"))) {
-        while (fgets(line, sizeof line, f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            if (!strcmp(line, "stick=yes")) stick = 1;
-            else if (!strcmp(line, "files=yes")) files = 1;
-            else if (!strcmp(line, "flash=ours")) ours = 1;
-            else if (!strcmp(line, "backup=checked")) backup = 2;
-            else if (!strcmp(line, "backup=unfinished")) backup = 1;
-            else if (!strncmp(line, "free_mb=", 8)) free_mb = atoi(line + 8);
-            else if (!strncmp(line, "backup_date=", 12)) snprintf(date, sizeof date, "%.10s", line + 12);
-        }
-        pclose(f);
-    }
-    if (stick) snprintf(v, sizeof v, "%d MB free", free_mb); else snprintf(v, sizeof v, "Not found");
+    if (!fw.loaded) fw_status();
+    int restore = fw.ours || !strcmp(fw.again, "restore");
+    add_info("Phone", fw.ours ? "Open firmware" : "Yealink firmware");
+    if (fw.stick) snprintf(v, sizeof v, "%d MB free", fw.free_mb); else snprintf(v, sizeof v, "Not found");
     add_info("Stick", v);
-    add_info("Phone", ours ? "Open firmware" : "Yealink firmware");
-    if (backup == 2) snprintf(v, sizeof v, "Checked, %s", date); else snprintf(v, sizeof v, "%s", backup ? "Unfinished" : "None");
+    if (!fw.stick) return;
+    if (fw.backup == 2) snprintf(v, sizeof v, "Checked, %s", fw.date); else snprintf(v, sizeof v, "%s", fw.backup ? "Unfinished" : "None");
     add_info("Backup", v);
-    if (backup != 2 && !ours) add_action("Back up", A_FW_BACKUP, "")->flags = stick ? 0 : F_DISABLED;
-    if (!ours) add_action("Install", A_FW_INSTALL, "")->flags = backup == 2 && files ? 0 : F_DISABLED;
-    if (ours) add_action("Restore Yealink firmware", A_FW_RESTORE, "")->flags = backup == 2 ? F_DANGER : F_DISABLED;
-    add_action("Restart", A_FW_RESTART, "");
-    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Power supply: 5 V, 1.5 A or more. Do not unplug while writing");
+    if (restore) {
+        if (fw.backup == 2) add_action("Restore Yealink firmware", A_FW_RESTORE, "")->flags = F_DANGER;
+        else snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Restore needs the stick that holds this phone's backup");
+    } else if (fw.backup != 2) {
+        snprintf(add_action("Back up", A_FW_BACKUP, "")->value, sizeof rows[0].value, "Step 1 of 2");
+    } else {
+        struct row *r = add_action("Install", A_FW_INSTALL, "");
+        snprintf(r->value, sizeof r->value, "%s", fw.files ? "Step 2 of 2" : "No install files");
+        if (!fw.files) r->flags = F_DISABLED;
+    }
+    if (restore ? fw.backup == 2 : 1)
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Power supply: 5 V, 1.5 A or more. Do not unplug while writing");
 }
 
 static void fw_job(const char *cmd, const char *doing)
@@ -1161,6 +1201,22 @@ static void fw_job(const char *cmd, const char *doing)
     ov.percent = 0;
     snprintf(ov.title, sizeof ov.title, "%s", doing);
     snprintf(ov.text, sizeof ov.text, "Starting");
+}
+
+/* installed, or restored: the stick is let go, and the phone restarts when it is
+ * taken out. Nothing to press, so nothing to press in the wrong order: Yealink's
+ * firmware must not find the stick at its next start */
+static void fw_eject(const char *done)
+{
+    char t[96];
+    snprintf(t, sizeof t, "%s", done);   /* done is the last job's result, which starting a job clears */
+    snprintf(job.verb, sizeof job.verb, "eject");
+    if (job_start(J_FIRMWARE, "eject", NULL) < 0) { message(t, "Take the stick out, then unplug the power"); return; }
+    memset(&ov, 0, sizeof ov);
+    ov.kind = O_BUSY;
+    ov.plain = 1;
+    snprintf(ov.title, sizeof ov.title, "%s", t);
+    snprintf(ov.text, sizeof ov.text, "Take the stick out to restart");
 }
 
 static void rebuild(void)
@@ -1192,6 +1248,9 @@ static void rebuild(void)
     }
     for (int i = 0; keep[0] && i < nrows; i++)
         if (rows[i].kind == R_ACTION && !strcmp(rows[i].label, keep)) stack[depth].sel = i;
+    /* the Install page has one thing to choose, and it stays chosen as the steps change */
+    for (int i = 0; stack[depth].page == P_INSTALL && i < nrows; i++)
+        if (rows[i].kind == R_ACTION) stack[depth].sel = i;
     if (stack[depth].sel >= nrows) stack[depth].sel = nrows ? nrows - 1 : 0;
     if (stack[depth].top > stack[depth].sel) stack[depth].top = stack[depth].sel;
     if (stack[depth].sel >= stack[depth].top + VISIBLE) stack[depth].top = stack[depth].sel - VISIBLE + 1;
@@ -1209,6 +1268,7 @@ static void push(enum page p, const char *arg)
     snprintf(stack[depth].arg, sizeof stack[0].arg, "%s", arg ? arg : "");
     logmsg("settings: page %s", page_names[p]);
     if (p == P_UPDATE) { upd.loaded = 0; update_info(); }   /* what the updater says now; no check of the channel */
+    if (p == P_INSTALL) { fw.loaded = 0; fw.again[0] = 0; }
     rebuild();
     /* start on the first row that does something */
     while (stack[depth].sel < nrows - 1 && (rows[stack[depth].sel].kind == R_NOTE || rows[stack[depth].sel].kind == R_INFO)) stack[depth].sel++;
@@ -1334,7 +1394,6 @@ static void do_action(const struct row *r)
         break;
     }
     case A_FW_BACKUP: fw_job("backup", "Backing up"); break;
-    case A_FW_RESTART: fw_job("restart", "Restarting"); break;
     case A_FW_INSTALL:
     case A_FW_RESTORE:
         memset(&ov, 0, sizeof ov);
@@ -1349,7 +1408,7 @@ static void do_action(const struct row *r)
             snprintf(ov.title, sizeof ov.title, "Restore Yealink firmware?");
             snprintf(ov.text, sizeof ov.text, "Removes the open firmware and its settings");
         }
-        snprintf(ov.extra, sizeof ov.extra, "About 10 minutes. Do not unplug");
+        snprintf(ov.extra, sizeof ov.extra, "About 3 min. Do not unplug");
         break;
     case A_FEED_DEFAULT:
         cfg_set("feed", "url", NULL);
@@ -1690,6 +1749,8 @@ int settings_timeout(long long now)
         return acc_checked + ACCESS_CHECK_MS > now ? (int)(acc_checked + ACCESS_CHECK_MS - now) : 0;
     if (depth >= 0 && stack[depth].page == P_UPDATE && update_busy())
         return upd.asked + UPDATE_CHECK_MS > now ? (int)(upd.asked + UPDATE_CHECK_MS - now) : UPDATE_CHECK_MS;
+    if (depth >= 0 && stack[depth].page == P_INSTALL && job.pid <= 0 && ov.kind == O_NONE)
+        return fw.asked + FW_CHECK_MS > now ? (int)(fw.asked + FW_CHECK_MS - now) : 0;
     return -1;
 }
 
@@ -1699,6 +1760,9 @@ void settings_tick(long long now)
     /* work is going on: how far it has got, about once a second */
     if (depth >= 0 && stack[depth].page == P_UPDATE && update_busy() && upd.info_pid <= 0 && now >= upd.asked + UPDATE_CHECK_MS)
         update_info();
+    /* a stick put in or taken out while the Install page waits */
+    if (depth >= 0 && stack[depth].page == P_INSTALL && job.pid <= 0 && ov.kind == O_NONE && now >= fw.asked + FW_CHECK_MS &&
+        fw_status()) { rebuild(); redraw_me(); }
     if (depth < 0 || kbd_open || stack[depth].page != P_ACCESS || now < acc_checked + ACCESS_CHECK_MS) return;
     static long shown_left = -1;
     int was_open = acc.door, changed = access_read();
@@ -1822,6 +1886,10 @@ static void draw_overlay(void)
     ui_dialog(OV_X, OV_Y, OV_W, OV_H, danger ? B_STOP : B_PLAIN);
     ui_dialog_ink(&ink);
     t48_text_centre(&ui, SW / 2, OV_Y + 30, &t48_font_head, ink.text, ov.title);
+    if (ov.kind == O_BUSY && ov.plain) {
+        t48_text_centre(&ui, SW / 2, OV_Y + 118, &t48_font_normal, ink.text, ov.text);
+        return;
+    }
     if (ov.kind == O_BUSY) {
         t48_text_centre(&ui, SW / 2, OV_Y + 88, &t48_font_normal, ink.dim, ov.text);
         int bx = OV_X + 60, bw = OV_W - 120, by = OV_Y + 150;
@@ -1932,6 +2000,11 @@ const char *settings_state(const char *key)
     if (!strcmp(key, "overlay")) return ov.kind == O_BUSY ? "busy" : ov.kind == O_MSG ? "message" : ov.kind == O_CONFIRM ? "confirm" :
                                         ov.kind == O_DOOR ? "door" : "none";
     if (!strcmp(key, "door.password")) return door_password[0] ? "(shown)" : "(none)";   /* never the password */
+    if (!strcmp(key, "overlay.text")) {
+        snprintf(b, sizeof b, "%s", ov.kind != O_NONE && ov.text[0] ? ov.text : "-");
+        for (char *p = b; *p; p++) if (*p == ' ') *p = '_';
+        return b;
+    }
     if (!strcmp(key, "overlay.title")) {
         snprintf(b, sizeof b, "%s", ov.kind != O_NONE ? ov.title : "-");
         for (char *p = b; *p; p++) if (*p == ' ') *p = '_';
