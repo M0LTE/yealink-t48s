@@ -32,7 +32,7 @@ The BCM11188 row, decoded from the image:
 | BBL (RTC, battery-backed RAM) | 0 | absent |
 | EHSS | 1 | channel 0 only |
 | APM | 3 | channels A and B; 2 APM channels, 1 PCM channel |
-| Speeds | | ARM 300 MHz, bus 100 MHz, DDR 200 MHz, VPM 200 MHz, LCD clock 206 MHz |
+| Speeds | | ARM 300 MHz (nominal; the phone measures 499 BogoMIPS, so U-Boot runs it at 500 MHz), bus 100 MHz, DDR 200 MHz, VPM 200 MHz, LCD clock 206 MHz |
 
 For comparison, VDEC is 1 only for the 11107, 11211, 11221 and 11189 (the 11189 row is a 500 MHz part with VDEC and TSC, **inferred** to be the video-phone sibling). The other chips in the table: 11109, 11170, 11110, 11195, 11198, 11199.
 
@@ -48,7 +48,7 @@ Caveats:
 - **Which Hantro core, codecs, resolution**: **unknown**. No datasheet is public (Broadcom NDA only; a distributor page for the BCM11107 shows a "video decoder" box in the block diagram and nothing more). By the chip's date (2008 to 2009) an 8170 or 8190 class core is likely (**inferred**; those do H.264, MPEG-4, H.263, VC-1 and JPEG). Hantro cores carry an id in their first register, which would settle it on a chip that has one.
 - **Code in the Yealink source**: only scaffolding. `CONFIG_VDEC` in `drivers/char/broadcom/Kconfig` reserves memory at boot (`include/linux/broadcom/vdec_cfg.h`, `bootmemheap.h`; 14 MB in the BCM5892 board file), `BCM_VDEC_MAJOR` 210 is allotted, and chipc has a bus clock gate (BusIntfClock bit 1) and a reset bit (soft reset bit 44). No driver, no register header, no library. Yealink's kernel image has the strings `bcm-vdec-memalloc` and `VdecHeapSize` but no decoder driver symbols.
 - **Elsewhere**: nothing found. GitHub code search finds no bcmring Hantro driver. Mainline never carried one (mainline `mach-bcmring`, 2.6.32 to 3.6, has only the clock, DMA and timer support code). Mainline's `hantro-vpu` driver handles the later G1 lineage on other SoCs; whether its register layout fits this core is **unknown**.
-- **Conclusion**: absent on the BCM11188 per Broadcom's table, undocumented, and dependent on a closed library even where present. Not a route to a media player on the T48S. Software decoding on a 300 MHz ARM1176 (no NEON) is the only option: audio is easy, video only at small sizes.
+- **Conclusion**: absent on the BCM11188 per Broadcom's table, undocumented, and dependent on a closed library even where present. Not a route to a media player on the T48S. Software decoding on the 500 MHz ARM1176 (no NEON) is the only option: audio is easy, video only at small sizes.
 
 ## GE: the 2D graphics engine
 
