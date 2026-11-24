@@ -44,12 +44,12 @@ key speaker
 expect idle
 expectstate led.speaker off
 # volume keys with the phone on the hook change the ringer
-expectstate vol.ringer 10
+expectstate vol.ringer 13
 key volup
-expectstate vol.ringer 11
+expectstate vol.ringer 14
 shot shots/phone-alone-volume.png
 key voldown
-expectstate vol.ringer 10
+expectstate vol.ringer 13
 # call history: Up on the idle screen; OK puts the number in the dialler
 wait 1700
 key up

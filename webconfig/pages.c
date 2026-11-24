@@ -258,7 +258,7 @@ void page_overview(struct req *r)
     H("<a class='card tile' href='/time'><h2>Date and time</h2><p>%s</p><p class='dim'>%s</p></a>", now, val("system", "timezone", "UTC"));
 
     H("<a class='card tile' href='/sound'><h2>Sound and screen</h2><p>Ringer %s of 15</p><p>Brightness %s of 10</p></a>",
-      val("audio", "ringer", "10"), val("screen", "brightness", "10"));
+      val("audio", "ringer", "13"), val("screen", "brightness", "10"));
 
     contacts_load();
     H("<a class='card tile' href='/contacts'><h2>Contacts</h2><p>%d</p></a>", cn);
@@ -475,7 +475,7 @@ static void page_sound(struct req *r)
     page_begin(r, "Sound and screen", "/sound");
     H("<div class='card'><h2>Sound</h2>");
     form_begin(r, "/sound", NULL);
-    level("Ringer", "ringer", val("audio", "ringer", "10"), 0, 15, NULL);
+    level("Ringer", "ringer", val("audio", "ringer", "13"), 0, 15, NULL);
     level("Handset", "handset", val("audio", "handset", "10"), 0, 15, NULL);
     level("Speaker", "speaker", val("audio", "speaker", "10"), 0, 15, NULL);
     level("Headset", "headset", val("audio", "headset", "10"), 0, 15, NULL);

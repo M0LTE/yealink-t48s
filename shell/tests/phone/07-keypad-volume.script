@@ -31,7 +31,7 @@ key volup
 key volup
 expectstate vol.handset 12
 waitstate audio.vol.handset 12 2000
-expectstate vol.ringer 10
+expectstate vol.ringer 13
 shot shots/phone-in-call-volume.png
 # the End button
 touch 720 424

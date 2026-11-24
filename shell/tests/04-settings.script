@@ -239,16 +239,16 @@ expectstate settings.page sound
 expectstate settings.row Ringer
 key right
 key right
-expectstate vol.ringer 12
+expectstate vol.ringer 15
 key left
-expectstate vol.ringer 11
+expectstate vol.ringer 14
 # touch on minus and plus of the handset row
 touch 470 139
 expectstate vol.handset 9
 touch 740 139
 touch 740 139
 expectstate vol.handset 11
-expectstate cfg.audio.ringer 11
+expectstate cfg.audio.ringer 14
 expectstate cfg.audio.handset 11
 shot shots/settings-sound.png
 key x

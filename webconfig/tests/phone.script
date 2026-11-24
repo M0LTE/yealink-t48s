@@ -124,7 +124,7 @@ key down
 key ok
 expectstate settings.page sound
 expectstate settings.row Ringer
-expectstate settings.value 10
+expectstate settings.value 13
 run $B post /sound ringer=3 handset=9 speaker=12 headset=7
 waitstate settings.value 3 3000
 shot shots/web-phone-sound.png
