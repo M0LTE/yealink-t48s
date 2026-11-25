@@ -8,26 +8,29 @@ Issue [#24](https://github.com/M0LTE/yealink-t48s/issues/24). Design: [architect
 - **Tested off the phone, with nothing played anywhere.** Unit tests, a test of the real daemon over its sockets, and real calls: a sound file as one phone's microphone goes through its audio service, baresip, SIP and RTP to a second baresip and its audio service, and the same back. That passes in G.722 and G.711, and with one side running the phone's own ARM binaries under qemu.
 - **Runs on the phone (2026-11-23).** With the kernel driver's playback it plays tones and call audio through the loudspeaker and the handset, and a real call to an echo service went round the whole loop. [Results below](#on-the-phone). Which input and output is which is settled by the daytime tests and kept in [one table](#the-route-table) that a text file can override. How it sounds still needs an ear.
 - **Cost, measured on the phone:** about 2.6% of the processor while a speakerphone call's audio runs, kernel side included. The sample work alone is 0.4%; the rest is waking up fifty times a second. All integer.
+- **Apps can play sound** (issue [#63](https://github.com/M0LTE/yealink-t48s/issues/63)): 16 kHz mono from a ring in memory the app shares with the service, mixed in with everything else, under the loudspeaker's limit, and silent whenever the phone rings or is in a call. [Below](#an-apps-sound).
 - **Echo:** nothing for handset and headset. The speakerphone uses voice switching (whoever is talking gets the channel), which costs almost nothing. [Reasons below](#echo). A real echo canceller is built in as `echo aec`, off until it has been tried by ear: [aec.md](aec.md).
 
 ## What it does
 
 ```
-                  control socket (the shell: route, volume, mute, tones, ring, keys)
+                  control socket (the shell: route, volume, mute, tones, ring, keys, the app's ring)
                          |
  baresip  <-- call -->  t48-audiod  <-->  backend: null | file | alsa (the phone's codecs)
  (t48audio)  socket      one thread, one 20 ms tick
+                         |
+ the app in front  -->  shared memory (a ring of samples; no socket)
 ```
 
 Each 20 ms tick, driven by the hardware's own sample clock:
 
 1. take a microphone frame from the hardware;
 2. take the loudspeaker frame baresip sent in answer to the last tick, if it came;
-3. loudspeaker = call audio at the route's volume, plus any tone or key sound;
+3. loudspeaker = call audio at the route's volume, plus any tone or key sound, plus the app's sound if nothing above wants the loudspeaker;
 4. microphone = DC removed, echo control on the speakerphone, silence if muted or on hook;
 5. play the loudspeaker frame, send the microphone frame to baresip.
 
-When nothing is wanted (on hook, no call audio, no tone) the hardware is closed and the process sleeps. It uses no CPU at all while the phone is idle.
+When nothing is wanted (on hook, no call audio, no tone, no app writing sound) the hardware is closed and the process sleeps. It uses no CPU at all while the phone is idle.
 
 Rules worth knowing:
 
@@ -82,14 +85,15 @@ For the shell to adopt: [`audiod/include/t48_audio_ctl.h`](../audiod/include/t48
 |---|---|---|
 | HELLO | `u16 version` (1) | first; answered with STATE |
 | ROUTE | `u8`: 0 none, 1 handset, 2 speaker, 3 headset | none = on hook |
-| VOLUME | `u8 which` (1 handset, 2 speaker, 3 headset, 4 ringer), `u8 level` 0 to 15 | 0 is silent. Handset, speaker and headset: 3 dB a step, 15 is full level. Ringer: 2 dB a step, 15 is the [loudspeaker's limit](#the-loudspeakers-limit) |
+| VOLUME | `u8 which` (1 handset, 2 speaker, 3 headset, 4 ringer, 5 apps), `u8 level` 0 to 15 | 0 is silent. Handset, speaker and headset: 3 dB a step, 15 is full level. Ringer and apps: 2 dB a step, 15 is the [loudspeaker's limit](#the-loudspeakers-limit) |
 | MUTE | `u8 on` | microphone only; cleared by ROUTE none |
 | TONE | `u8`: 0 off, 1 dial, 2 ringback, 3 busy, 4 error, 5 call waiting | plays until replaced or stopped |
 | RING | `u8 on` | an incoming call is alerting |
 | KEY | `u8 character` | DTMF sound for `0-9 * #`, a click for anything else; for the owner's ear only, baresip sends the real DTMF |
 | GET | none | answered with STATE |
+| APP | `u8`: 0 gone, 1 off the screen, 2 in front; with a new app, its ring as a descriptor beside the message | [An app's sound](#an-apps-sound) |
 
-The service sends STATE (route, mute, tone, ring, whether baresip's call stream is up, the four volumes, what the hardware can do) in answer to HELLO and GET and whenever any of it changes, and ERROR for a message it refuses.
+The service sends STATE (route, mute, tone, ring, whether baresip's call stream is up, the volumes, what the hardware can do, where the app is and whether its sound is playing) in answer to HELLO and GET and whenever any of it changes, and ERROR for a message it refuses.
 
 What the shell does with it:
 
@@ -97,9 +101,35 @@ What the shell does with it:
 - **Handset lifted, or Speaker or Headset pressed:** ROUTE, then TONE dial if there is no call. First digit: TONE off. Each digit: KEY.
 - **Dialling out:** TONE ringback on baresip's `CALL_RINGING`, TONE off on `CALL_ESTABLISHED`, TONE busy or error if the call fails. On hook: TONE off, ROUTE none.
 - **Call coming in:** RING 1. To answer: RING 0, then ROUTE, then tell baresip to accept. (In that order, so the answering owner never hears a call waiting beep.) Rejected or missed: RING 0.
-- **Volume keys:** VOLUME for the route in use, or the ringer when on hook; the shell saves the number.
+- **Volume keys:** VOLUME for the route in use; on hook the ringer, or apps while an app with sound is in front. The shell saves the number.
+- **An app with the `audio-out` permission starts:** APP 2 with its ring. APP 1 the moment it is paused, 2 when it is back, 0 when it has gone. Sent again, with the ring, if the service restarts.
 
 Tones are the UK plan (dial 350+440 Hz; ringback 400+450 Hz in the double-ring rhythm; busy 400 Hz, 0.375 s on and off; error 400 Hz steady). The ringer is two notes (1000 and 1250 Hz) taking turns 20 times a second in the same double-ring rhythm; each note is a sine that fades into the other over 6 ms, and each burst fades in and out over 20 ms. Every tone starts and stops on a half-cosine fade. Another country is another small table in `tone.c`.
+
+## An app's sound
+
+Issue [#63](https://github.com/M0LTE/yealink-t48s/issues/63). The app's side is in [app-protocol.md](app-protocol.md#sound); `appsnd.c` is the service's.
+
+**Transport: a ring of samples in shared memory.** The shell makes a memfd (4096 bytes of header, then 4096 samples), gives one descriptor to the app when it starts it and one to the service with APP. The app writes samples and moves `wr`; each tick the service copies one frame out and moves `rd`. That one copy is all there is: no socket, no system call for either side while sound flows. If the app is asleep waiting for room, the service wakes it with a futex after a take (one system call, only then). Format: 16 kHz, mono, 16-bit, the codecs' own, so nothing is resampled here.
+
+**The app is not trusted, and the service runs as root at real-time priority.** So:
+
+- the memfd is sealed against changing size, and the service refuses a ring that is not: reading it can never fault;
+- the service believes nothing in the ring but `wr`. Its own count of what it has taken is kept outside, and the ring's size and layout are constants. A `wr` that cannot be right (further ahead than the ring is long) empties the ring;
+- the app has no socket to the service. The control socket stays root only.
+
+**Rules:**
+
+- **Where.** On hook: the loudspeaker (the alert row of the route table, microphones off). If a route is set with no call on it, that route; the shell does not do this today, since lifting the handset or pressing Speaker or Headset starts a call and pauses the app.
+- **How loud.** Its own volume (5, "Apps"), 0 to 15, 2 dB a step. On the loudspeaker a full-scale sample at 15 is exactly on the [limit](#the-loudspeakers-limit) (1800), so the limiter never has to squash an app's sound by itself; it is still there for an app with a key sound on top. In an earpiece the scale is the call's (3 dB a step, 15 is full scale).
+- **Calls win.** While RING is on, a tone is playing, or a route is set with the call stream up, the app's samples are taken at the same rate and not played, and the ring's `state` says held. The change is a 20 ms fade each way, so nothing clicks. A key sound does not hold it.
+- **Off the screen is silent.** APP 1 drops what is waiting and nothing more is taken until APP 2.
+- **An app that stops writing is silence.** A frame is taken only if it is there; a part frame is played out and padded. Nothing is ever played twice.
+- **The hardware.** Sound from an app starts it, as a tone does. With the hardware idle the service looks at the ring every 20 ms while an app with sound is in front (nothing tells it when the app writes; that look costs about as much as nothing). After an app's last sound the hardware is kept for 2 s, so a game's next beep starts at once and the amplifier is not switched for every one.
+
+**Delay.** A sample waits in the ring for the next tick (10 ms on average), then behind the 20 ms the playback buffer holds, then 5 ms in the driver: 35 ms, plus whatever the app keeps waiting in the ring so as never to run out. An app that writes every 10 ms and keeps 640 samples at most is about 60 ms from write to loudspeaker.
+
+**Cost.** One more source to mix: about 5 microseconds a frame on the phone by the bench's scale. The clock is the cost, as for anything else that makes sound: 2.6% of the processor while it runs.
 
 ## The route table
 
@@ -252,7 +282,9 @@ Run on 2026-11-23. Nothing in this section touched the phone or any sound device
 | `test_echo` | far-end echo cut 35 dB including its first and last 60 ms; the owner alone passes untouched; break-in works within 40 ms; background noise never switches anything |
 | `test_engine` | on hook the microphone is silent and the call is not played; mute; per-route volume; the ring melody stops the moment a route is set. The limit: the loudest call with a tone and a key sound on top at speaker volume 15, and the ringer at every volume, never pass 1800; a quiet call and the earpiece are untouched; a routes file cannot raise the loudspeaker's gains, and a route that switches the amplifier on is limited whatever its name |
 | `test_msg` | messages whole, a byte at a time, oversized, and to a peer that has stopped reading |
-| `socket_test.py` | the real daemon with a stand-in for baresip: 100 frames arrive 20.0 ms apart, numbered from 0; silence on hook, the microphone file off hook; three late answers are played as silence and counted; an old-version client is refused; tones, ringer and key sounds land in the loudspeaker file and the hardware goes idle after each |
+| `test_appsnd` | an app's sound. The ring: only a sealed memfd of the right size is taken; every sample comes out once and in order, round the ring many times; a sound starts on a whole frame and a short one is not kept waiting; an app that scribbles on the ring is emptied, not believed; off the screen nothing is taken and what waited is dropped. The engine: volume 15 is the limit and each step is 2 dB; silence when the app stops; faded out within a frame for ringing, a tone and a call, and back after; never past the limit with a key sound on top |
+| `socket_test.py`, an app | the real daemon with a stand-in for the shell and an app: an unsealed ring is refused; writing starts the hardware and is taken at 16000 samples a second without running dry; a full-scale tone at volume 15 lands on the limit; while the phone rings the app's sound is taken and not played; paused, what waited is dropped and nothing is taken; the hardware idles 2 s after; when the shell's connection closes the ring is let go |
+| `socket_test.py`, calls | the real daemon with a stand-in for baresip: 100 frames arrive 20.0 ms apart, numbered from 0; silence on hook, the microphone file off hook; three late answers are played as silence and counted; an old-version client is refused; tones, ringer and key sounds land in the loudspeaker file and the hardware goes idle after each |
 
 `sip/test/audiod-test.sh`, in the build container on another machine, through a throwaway Kamailio with password login:
 
@@ -302,7 +334,6 @@ Found and fixed on the way: switching a microphone on makes a thump (14000 count
 
 ## Not done
 
-- The playback stream for apps (silenced during calls) that the architecture mentions. Message types are free for it on both sockets.
 - A runit service. The Buildroot package is done (#16): `t48-audiod` and `t48-audioctl` are in the image, not started at boot.
 - (Done since, in #26: the shell's client, `shell/audioc.c`. See [phone.md](phone.md).)
 - Tone plans for other countries, and a choice of ring melodies.

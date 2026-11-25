@@ -1,0 +1,9 @@
+{
+  "id": "tones",
+  "name": "Tones",
+  "version": "0.1.0",
+  "description": "Plays four notes, to check sound from apps",
+  "api": 4,
+  "exec": "tones",
+  "permissions": ["audio-out"]
+}

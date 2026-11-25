@@ -480,6 +480,7 @@ static void page_sound(struct req *r)
     level("Handset", "handset", val("audio", "handset", "10"), 0, 15, NULL);
     level("Speaker", "speaker", val("audio", "speaker", "10"), 0, 15, NULL);
     level("Headset", "headset", val("audio", "headset", "10"), 0, 15, NULL);
+    level("Apps", "apps", val("audio", "apps", "10"), 0, 15, NULL);
     H("<div class='actions'><button class='primary' type='submit'>Save</button></div></form></div>");
     H("<div class='card'><h2>Screen</h2>");
     form_begin(r, "/screen", NULL);
@@ -515,12 +516,12 @@ static long whole(const struct req *r, const char *name, long min, long max)
 
 static void post_sound(struct req *r)
 {
-    static const char *const keys[] = {"ringer", "handset", "speaker", "headset"};
-    long v[4];
+    static const char *const keys[] = {"ringer", "handset", "speaker", "headset", "apps"};
+    long v[5];
     char b[8];
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < 5; i++)
         if ((v[i] = whole(r, keys[i], 0, 15)) < 0) { flash(r, 1, "Not saved: levels are 0 to 15."); redirect(r, "/sound"); return; }
-    for (int i = 0; i < 4; i++) { snprintf(b, sizeof b, "%ld", v[i]); cfg_set("audio", keys[i], b); }
+    for (int i = 0; i < 5; i++) { snprintf(b, sizeof b, "%ld", v[i]); cfg_set("audio", keys[i], b); }
     flash(r, 0, "Sound saved.");
     redirect(r, "/sound");
 }

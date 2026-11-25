@@ -305,4 +305,48 @@ void t48_flip_wait(void);             /* until the last t48_flip() is on the scr
 void t48_flip_stop(void);
 int t48_flip_period_us(void);         /* one refresh of the screen, in microseconds (14746 on the T48S); 0: cannot flip */
 
+/* ---------- sound (level 4) ----------
+ *
+ * For an app whose manifest has the "audio-out" permission. One format: 16000
+ * samples a second, one channel, signed 16-bit (t48_resample turns other
+ * sound into it). Samples go straight into memory shared with the audio
+ * service; nothing is sent.
+ *
+ *     if (t48_sound_open() == 0) t48_sound_write(samples, n);
+ *
+ * It comes from the loudspeaker at the owner's Apps volume (the volume keys,
+ * while the app is in front). A call silences it and it comes back after.
+ * Off the screen the app is silent. In both cases, and in the simulator,
+ * writing goes on working at the same pace, into nothing: an app need not
+ * know. An app that stops writing is silence. */
+int t48_sound_open(void);                         /* 0, or -1: no sound for this app (no permission, or an older shell) */
+void t48_sound_close(void);
+/* Write n samples, waiting for room. Returns n, or -1 if sound is not open. */
+int t48_sound_write(const int16_t *samples, int n);
+/* The same without waiting: as many as there is room for now. Returns how many. */
+int t48_sound_put(const int16_t *samples, int n);
+int t48_sound_free(void);                         /* how many t48_sound_put would take now */
+int t48_sound_queued(void);                       /* samples written and not yet taken */
+/* How many samples may wait (default 1024, 64 ms; 320 to 4096). Fewer is less
+ * delay; too few and a late app leaves a gap. The service takes 320 at a time. */
+void t48_sound_buffer(int samples);
+/* From a sample written now to the loudspeaker, in microseconds, to within 10 ms. */
+int t48_sound_latency_us(void);
+int t48_sound_playing(void);                      /* 1: heard now. 0: held by a call, off the screen, or no audio service */
+unsigned t48_sound_dry(void);                     /* times the queue ran empty while playing: a count of gaps, and of sounds that ended */
+int t48_sound_rate(void);                         /* 16000 */
+
+/* Other rates and stereo, in whole numbers and cheaply: 44100 or 48000 stereo
+ * to the phone's format costs under 1% of its processor. Down, each output
+ * sample is the mean of the input it covers; up, a straight line. Good for
+ * games and speech, not for hi-fi. Feed it in pieces of any size. */
+typedef struct t48_resampler {
+    int rate, channels;
+    int32_t step, need, inv, acc, last, p1, p2;
+} t48_resampler;
+void t48_resample_init(t48_resampler *r, int rate, int channels);   /* 4000 to 96000; 1 or 2 channels, interleaved */
+/* in_frames of input (a frame is one sample for each channel) to at most cap samples of output. Returns how many. */
+int t48_resample(t48_resampler *r, const int16_t *in, int in_frames, int16_t *out, int cap);
+int t48_resample_max(const t48_resampler *r, int in_frames);   /* the most that many frames can give */
+
 #endif

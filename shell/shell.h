@@ -266,6 +266,7 @@ void audioc_mute(int on);
 void audioc_tone(int tone);
 void audioc_ring(int on);
 void audioc_key(int ch);
+void audioc_app(int what, int ring_fd);       /* T48AC_APP_*; ring_fd: the app's sound ring to hand over, or -1 */
 
 /* ---------- the backlight (backlight.c): bright, dimmed, off ---------- */
 
@@ -322,6 +323,7 @@ extern struct manifest apps[MAX_APPS];
 extern int napps;
 void manifests_scan(const char *dirs);
 int manifest_id_ok(const char *id);
+int manifest_may(const struct manifest *m, const char *perm);   /* a permission it asks for, such as "audio-out" */
 /* read one app folder's manifest: 0, or -1 with the reason in err */
 int manifest_read(const char *dir, struct manifest *m, char *err, size_t errn);
 void manifest_free(struct manifest *m);
@@ -343,6 +345,8 @@ void app_key(int code, int down);
 void app_touch(int state, int x, int y);
 void app_theme(void);                      /* tell it the look, which has changed */
 int app_fd(void);                          /* -1 if none */
+int app_sound(void);                       /* the app in front has sound: the volume keys are its */
+void app_sound_link(void);                 /* the audio service is there (again): hand it the app's ring */
 int app_flip(void);                        /* the flip buffer the app last asked for, -1: it draws by DAMAGE */
 void app_flip_show(void);                  /* put that buffer on the screen (again) */
 void app_flipped(int n, unsigned frame, long long time_us);   /* from the screen: buffer n is showing */

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Sound from an app (API level 4) with no audio service, as the simulator runs:
+# the app gets its ring, plays into nothing and keeps time all the same. With
+# the audio service: tests/sound-test.sh.
+run mkdir -p simdata/installed && cp -r extra/tones simdata/installed/
+key ok
+expect launcher
+# Clock, Crasher, Tones, Get apps
+key right
+key right
+key ok
+waitframe 3000
+expect app
+expectstate appid tones
+shot shots/sound-tones.png
+# four notes of 180 ms: 11520 samples, and they take 0.72 s to go
+wait 400
+run ! grep -q "tones: played" sim.log
+wait 1100
+run grep -q "tones: played: 11520 samples written, 0 waiting, .* not playing" sim.log
+# the volume keys are the app's while it is in front, the ringer's when it is not
+expectstate vol.apps 10
+key volup
+expectstate vol.apps 11
+expectstate vol.ringer 13
+key x 1000
+expect launcher
+key voldown
+expectstate vol.apps 11
+expectstate vol.ringer 12
+key ok
+expect app
+key x
+waitscreen launcher 2000
+expectstate app none
+run grep -q "tones: closing" sim.log

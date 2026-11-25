@@ -27,7 +27,7 @@
 #define T48_ENV_FONTS "T48_FONTS_FD"     /* level 2: number of the font file's descriptor (struct t48_fonts_hdr) */
 #define T48_ENV_FLIP "T48_FLIP_FD"       /* level 3: number of the flip buffers' descriptor (struct t48_msg_flipinfo) */
 #define T48_ENV_SOUND "T48_SOUND_FD"     /* level 4: number of the sound ring's descriptor (struct t48_sound_ring);
-                                          * only for an app whose manifest asks for "sound" */
+                                          * only for an app whose manifest has the "audio-out" permission */
 
 struct t48_msg_hdr {
     uint16_t type;

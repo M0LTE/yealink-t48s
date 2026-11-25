@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Sound from an app, with the audio service running on its file backend
+# (tests/sound-test.sh starts it and reads what was played afterwards).
+run mkdir -p simdata/installed && cp -r extra/tones simdata/installed/
+waitstate audio up 3000
+key ok
+expect launcher
+key right
+key right
+key ok
+waitframe 3000
+expect app
+expectstate appid tones
+# the audio service has the ring and is playing the four notes
+waitstate audio.app 2 1000
+waitstate audio.app.sound 1 1000
+wait 1500
+run grep -q "tones: played: 11520 samples written, 0 waiting, .* ms, playing, dry" sim.log
+# the volume keys: the app's level, told to the audio service
+key volup
+key volup
+expectstate vol.apps 12
+waitstate audio.vol.apps 12 500
+expectstate vol.ringer 13
+# a steady tone, and the handset is lifted: the dialler takes the screen, the app is silent at once
+key 2
+wait 1000
+expectstate audio.app.sound 1
+hook off
+expect call
+waitstate audio.app 1 500
+wait 1000
+hook on
+expect app
+waitstate audio.app 2 500
+# it stopped its tone when it was paused; a beep now
+wait 800
+key 1
+wait 600
+# Home: off the screen, silent
+key 2
+wait 500
+key x 1000
+expect launcher
+waitstate audio.app 1 500
+wait 500
+key ok
+expect app
+waitstate audio.app 2 500
+key x
+waitscreen launcher 2000
+expectstate app none
+waitstate audio.app 0 500

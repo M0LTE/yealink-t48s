@@ -26,7 +26,8 @@ enum ph { PH_IDLE, PH_DIAL, PH_OUTGOING, PH_INCOMING, PH_INCALL, PH_ENDED };
 static const char *const ph_names[] = {"idle", "dial", "outgoing", "incoming", "incall", "ended"};
 static const char *const route_names[] = {"none", "handset", "speaker", "headset"};
 static const char *const route_labels[] = {"On hook", "Handset", "Speaker", "Headset"};
-static const char *const vol_labels[] = {"", "Handset", "Speaker", "Headset", "Ringer"};
+static const char *const vol_labels[] = {"", "Handset", "Speaker", "Headset", "Ringer", "Apps"};
+static const char *const vol_keys[] = {"", "handset", "speaker", "headset", "ringer", "apps"};   /* in the audio settings file */
 
 enum reg { REG_NONE, REG_TRYING, REG_OK, REG_FAIL };
 
@@ -234,7 +235,7 @@ static void load_settings(void)
         while (fgets(line, sizeof line, f)) {
             int v;
             for (int i = 1; i < T48AC_VOL_COUNT; i++) {
-                const char *name = i < 4 ? route_names[i] : "ringer";
+                const char *name = vol_keys[i];
                 size_t k = strlen(name);
                 if (!strncmp(line, name, k) && line[k] == '=' && sscanf(line + k + 1, "%d", &v) == 1 && v >= 0 && v <= T48AC_VOL_MAX)
                     P.vol[i] = v;
@@ -282,11 +283,10 @@ void phone_set_volume(int which, int level)
 
 static void save_volumes(void)
 {
-    static const char *const keys[] = {"", "handset", "speaker", "headset", "ringer"};
     for (int i = 1; i < T48AC_VOL_COUNT; i++) {
         char v[8];
         snprintf(v, sizeof v, "%d", P.vol[i]);
-        cfg_set("audio", keys[i], v);
+        cfg_set("audio", vol_keys[i], v);
     }
 }
 
@@ -919,6 +919,7 @@ void phone_audio_link(int up)
         }
         P.audio_seen = 1;
         update_lamps();
+        app_sound_link();
     }
     changed();
 }
@@ -1055,7 +1056,8 @@ static void route_key(int r)
 
 static void volume_key(int step)
 {
-    int which = P.route != T48AC_ROUTE_NONE ? P.route : T48AC_VOL_RINGER;
+    /* the route in use; on hook the ringer, or the sound of the app in front if it has any */
+    int which = P.route != T48AC_ROUTE_NONE ? P.route : app_sound() ? T48AC_VOL_APP : T48AC_VOL_RINGER;
     int v = P.vol[which] + step;
     if (v < 0) v = 0;
     if (v > T48AC_VOL_MAX) v = T48AC_VOL_MAX;
@@ -1835,7 +1837,7 @@ const char *phone_state(const char *key)
     if (!strcmp(key, "last.name")) { snprintf(b, sizeof b, "%s", nhist ? hist_name(&hist[0]) : ""); return under(b); }
     if (!strncmp(key, "vol.", 4)) {
         for (int i = 1; i < T48AC_VOL_COUNT; i++)
-            if (!strcmp(key + 4, i < 4 ? route_names[i] : "ringer")) { snprintf(b, sizeof b, "%d", P.vol[i]); return b; }
+            if (!strcmp(key + 4, vol_keys[i])) { snprintf(b, sizeof b, "%d", P.vol[i]); return b; }
         return NULL;
     }
     if (!strncmp(key, "led.", 4)) return leds_state(key + 4);
@@ -1849,9 +1851,11 @@ const char *phone_state(const char *key)
         else if (!strcmp(key, "tone")) v = a->tone;
         else if (!strcmp(key, "ring")) v = a->ring;
         else if (!strcmp(key, "call")) v = a->call;
+        else if (!strcmp(key, "app")) v = a->app;
+        else if (!strcmp(key, "app.sound")) v = a->app_sound;
         else if (!strncmp(key, "vol.", 4)) {
             for (int i = 1; i < T48AC_VOL_COUNT; i++)
-                if (!strcmp(key + 4, i < 4 ? route_names[i] : "ringer")) v = a->vol[i];
+                if (!strcmp(key + 4, vol_keys[i])) v = i == T48AC_VOL_APP ? a->vol_app : a->vol[i];
         }
         if (v < 0) return NULL;
         snprintf(b, sizeof b, "%d", v);

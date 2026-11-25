@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # libt48: the app library. Plain make.
 #   make                                   for this PC, into build/
+#   make check                             the sound tests
 #   make CC=~/src-build/t48s/bin/armcc O=build-arm     for the phone (static, musl)
 CC ?= cc
 AR ?= ar
@@ -8,10 +9,10 @@ O ?= build
 CFLAGS ?= -O2
 CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections -Iinclude
 
-OBJ = $(O)/draw.o $(O)/image.o $(O)/json.o $(O)/app.o $(O)/ws.o $(O)/kbd.o $(O)/theme.o $(O)/ui.o \
+OBJ = $(O)/draw.o $(O)/image.o $(O)/json.o $(O)/app.o $(O)/ws.o $(O)/kbd.o $(O)/theme.o $(O)/ui.o $(O)/sound.o \
 	$(O)/fonts_gen.o $(O)/fonts_plex.o $(O)/fonts_figtree.o
 
-all: $(O)/libt48.a $(O)/examples/clock/clock $(O)/examples/fliptest/fliptest
+all: $(O)/libt48.a $(O)/examples/clock/clock $(O)/examples/fliptest/fliptest $(O)/examples/tones/tones
 
 $(O)/libt48.a: $(OBJ)
 	rm -f $@ && $(AR) rcs $@ $(OBJ)
@@ -32,6 +33,19 @@ $(O)/examples/fliptest/fliptest: examples/fliptest/fliptest.c $(O)/libt48.a exam
 	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@ $< $(O)/libt48.a
 	cp examples/fliptest/manifest.json $(O)/examples/fliptest/
 
+# sound from an app (API level 4): four notes
+$(O)/examples/tones/tones: examples/tones/tones.c $(O)/libt48.a examples/tones/manifest.json
+	@mkdir -p $(O)/examples/tones
+	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@ $< $(O)/libt48.a -lm
+	cp examples/tones/manifest.json $(O)/examples/tones/
+
+# the resampler and the sound queue with nobody taking (no shell needed)
+$(O)/test_sound: tests/test_sound.c $(O)/libt48.a
+	$(CC) $(CFLAGS) -o $@ $< $(O)/libt48.a -lm
+
+check: $(O)/test_sound
+	$(O)/test_sound
+
 # regenerate the committed font tables from fonts/ (needs python3-pil)
 fonts:
 	python3 tools/mkfont.py
@@ -39,4 +53,4 @@ fonts:
 clean:
 	rm -rf build build-arm
 
-.PHONY: all fonts clean
+.PHONY: all check fonts clean
