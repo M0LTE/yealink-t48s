@@ -83,7 +83,7 @@ Left on the idle screen, or the Contacts button. A list of names and numbers, in
 
 ## Do not disturb
 
-Right on the idle screen, or the DND button. While it is on, callers are told the phone is not available (SIP 480), nothing rings, and each call is listed as missed. Calls out work as usual. It is kept in `/data/config/phone` (`dnd=on`) so it survives a restart, and the idle screen says so in red.
+Right on the idle screen, or the DND button. While it is on, callers are told the phone is not available (SIP 480), nothing rings, and each call is listed as missed. Calls out work as usual. It is kept in `/data/config/phone` (`dnd=on`) so it survives a restart, and the idle screen says so: a lit DND button and a notice on a T48S, a DND tag in the header on a T46S, whatever other notice is up.
 
 ## Messages waiting
 

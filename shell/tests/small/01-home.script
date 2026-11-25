@@ -24,16 +24,26 @@ key soft4
 expect settings
 key x
 expect idle
-# do not disturb stays on Right, and shows as a notice
+# do not disturb stays on Right, and shows in the header, not as a notice
 key right
 expectstate dnd on
-expectstate notices 1
+expectstate notices 0
 shot shots/t46s-home-dnd.png
 # the notice of a start from a USB stick: both its lines clear of the soft keys
 run sh -c "printf 'Running from USB. Nothing is installed.\nTo go back to Yealink: unplug the power, take the stick out, plug the power in.\n' > simdata/notice"
 wait 1500
-expectstate notices 2
+expectstate notices 1
 shot shots/t46s-home-notice.png
+key right
+expectstate dnd off
+# issue 10: a notice that fills the row leaves do not disturb in the header, and keeps its size
+run sh -c "printf 'Started in recovery mode. Nothing is installed.\nTo go back to Yealink: unplug the power and plug it in again.\n' > simdata/notice"
+wait 1500
+shot shots/t46s-home-recovery.png
+key right
+expectstate dnd on
+expectstate notices 1
+shot shots/t46s-home-recovery-dnd.png
 key right
 expectstate dnd off
 # the longest first line t48-live writes is kept whole

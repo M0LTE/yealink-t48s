@@ -313,7 +313,8 @@ static void draw_idle(void)
     /* One row of notices, the most important first: the standing notice from a file
      * (t48-live: nothing is installed, which the owner must not lose sight of), missed
      * calls, voice messages, do not disturb. What does not fit the row is left out from
-     * the end: do not disturb shows on its button too, and messages on the lamp. */
+     * the end: do not disturb shows on its button too, and messages on the lamp. A small
+     * screen shows do not disturb in the header instead, so a notice never crowds it out. */
     char note[4][96], file[2][96];
     int role[4];
     int nn = 0, total = 0;
@@ -327,7 +328,7 @@ static void draw_idle(void)
         snprintf(note[nn], sizeof note[0], "%d new message%s", phone_messages(), phone_messages() == 1 ? "" : "s");
         role[nn++] = B_LIT;
     }
-    if (phone_dnd()) {
+    if (phone_dnd() && !SMALL) {
         snprintf(note[nn], sizeof note[0], "Do not disturb");
         role[nn++] = B_LIT;
     }
@@ -350,7 +351,7 @@ static void draw_idle(void)
     for (int i = 0, x = (SW - total) / 2; i < idle_notices; i++) x = ui_notice(x, ny, note[i], role[i]);
     t48_ui_notice_tight(0);
     if (SMALL) {
-        /* the soft keys; do not disturb is Right, and shows as a notice */
+        /* the soft keys; do not disturb is Right, and shows in the header */
         ui_bar("Apps", B_PLAIN, "Calls", B_PLAIN, "Contacts", B_PLAIN, "Settings", B_PLAIN);
         if (file[1][0] && several) t48_text_fit(&ui, 12, y2, SW - 24, &t48_font_small, C_DIM, file[1]);
         else if (file[1][0]) ui_two_lines_centred(SW / 2, y2, SW - 24, &t48_font_small, C_DIM, file[1]);
