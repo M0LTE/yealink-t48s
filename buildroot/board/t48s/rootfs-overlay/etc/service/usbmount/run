@@ -1,0 +1,5 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# USB sticks for apps, read-only on /run/media/NAME (t48-usbmount, docs/apps.md)
+exec 2>&1 </dev/null
+exec t48-usbmount watch

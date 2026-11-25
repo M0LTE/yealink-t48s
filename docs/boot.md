@@ -18,7 +18,7 @@ A boot is made of two files, both from one Buildroot run:
         nothing usable?  -> stays up as RESCUE
    -> the system image's own init
         rcS: /data (flash or RAM), network, SSH
-        runit: shell, audio service, baresip, watchdog
+        runit: shell, audio service, baresip, watchdog, USB sticks
 ```
 
 ## Where the system image comes from
@@ -44,7 +44,7 @@ On an installed phone it is also where a start ends when neither slot starts, or
 
 ## Services
 
-`runsvdir` (busybox runit) keeps four programs running and starts any of them again if it stops:
+`runsvdir` (busybox runit) keeps five programs running and starts any of them again if it stops:
 
 | Service | Runs | Waits for |
 |---|---|---|
@@ -52,6 +52,7 @@ On an installed phone it is also where a start ends when neither slot starts, or
 | `audiod` | `t48-audiod --backend alsa` | nothing |
 | `sip` | `t48-sip` (baresip) | an account in `/data/config/sip`, the audio service, an address |
 | `watchdog` | `t48-watchdog` | nothing |
+| `usbmount` | `t48-usbmount watch`: USB sticks read-only on `/run/media` for apps ([app-protocol.md](app-protocol.md#what-an-app-is-given)) | nothing |
 
 ```
 sv status /run/service/*

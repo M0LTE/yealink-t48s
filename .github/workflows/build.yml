@@ -56,6 +56,9 @@ jobs:
       - name: Updater tests (check, install and kernel from a channel, on files)
         run: sh tools/test-update.sh
 
+      - name: USB stick tests (t48-usbmount, on folders)
+        run: sh tools/test-usbmount.sh
+
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 150

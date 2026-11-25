@@ -1,0 +1,137 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# t48-usbmount: USB sticks for apps, read-only (docs/app-protocol.md).
+#
+#   t48-usbmount watch      the service (/etc/service/usbmount): follow the
+#                           kernel's events, after a first sync
+#   t48-usbmount sync       mount what is in, unmount what has gone
+#   t48-usbmount hold DEV   unmount DEV (sda1) and leave it alone until it is
+#                           taken out or freed: t48-install mounts it read-write.
+#                           Fails if an app still has it open after 5 seconds
+#   t48-usbmount free DEV   mount it again
+#
+# Every FAT or exFAT filesystem on a USB disk (each partition, or the whole disk
+# when it has no partition table) goes on /run/media/NAME: NAME is its label,
+# anything but A-Za-z0-9._- made _, leading ._- and trailing _ dropped; or the
+# device (sda1) when that leaves nothing or the label is taken. Read-only, owned by
+# root, directories 755 and files 644, no programs, no devices: every app can
+# read it, none can change it, and pulling it out loses nothing. Gone, it is
+# unmounted, lazily if something still has it open. A device already mounted
+# elsewhere (by hand, or by the installer) is left alone.
+# The lock in $RUN/lock keeps this and the installer's look at a stick apart;
+# T48_USBLOCKED=1 says the caller holds it already.
+# T48_* variables are for tools/test-usbmount.sh.
+SYS=${T48_SYS:-/sys}
+PROC=${T48_PROC:-/proc}
+DEV=${T48_DEV:-/dev}
+MEDIA=${T48_MEDIA:-/run/media}
+RUN=${T48_USBRUN:-/run/t48-usbmount}
+OPTS=ro,nosuid,nodev,noexec,noatime,uid=0,gid=0,fmask=0133,dmask=0022
+
+mkdir -p "$RUN" "$MEDIA"
+# one at a time: the service and the installer. Waits up to $1 seconds (busybox
+# flock has no timeout of its own): a stick that hangs blkid or mount must not
+# hang the installer's status, which the Settings screen waits for
+lock() {
+    [ "${T48_USBLOCKED:-}" = 1 ] && return 0
+    exec 9> "$RUN/lock"
+    i=0
+    until flock -n 9; do
+        i=$((i + 1)); [ $i -lt "$1" ] || { echo "locked: skipped" >&2; return 1; }
+        sleep 1
+    done
+}
+
+# where /dev/NAME is mounted, if it is
+where() { awk -v d="$DEV/$1" '$1 == d { print $2; exit }' "$PROC/mounts"; }
+# gone: out of sysfs, or the device of a remove event (which can come first)
+gone() {
+    [ "$1" = "${GONE:-}" ] && return 0
+    case ${GONE:-} in sd*[a-z]) case $1 in "$GONE"[0-9]*) return 0 ;; esac ;; esac
+    [ ! -e "$SYS/class/block/$1" ]
+}
+
+# what to mount: partitions of sd disks, or a disk with none
+candidates() {
+    for d in "$SYS"/block/sd*; do
+        [ -e "$d" ] || continue
+        n=${d##*/}; p=
+        for q in "$d/$n"*; do [ -e "$q/partition" ] && { p=1; echo "${q##*/}"; }; done
+        [ -n "$p" ] || echo "$n"
+    done
+}
+
+name() {
+    # the first line only: a label holding a newline gives no name, so the device's
+    l=$(blkid "$DEV/$1" 2>/dev/null | head -n 1 | sed -n 's/.* LABEL="\([^"]*\)".*/\1/p' | sed 's/[^A-Za-z0-9._-]/_/g; s/^[._-]*//; s/_*$//')
+    case $l in ""|NO_NAME) l=$1 ;; esac
+    if mountpoint -q "$MEDIA/$l" 2>/dev/null; then l=$l-$1; fi
+    echo "$l"
+}
+
+mount_one() {
+    [ -e "$DEV/$1" ] || return 0
+    m=$MEDIA/$(name "$1")
+    mkdir -p "$m" && chmod 755 "$m"
+    # names in UTF-8: FAT's own option (iocharset=utf8 would make it case
+    # sensitive); exFAT's default, with NLS_UTF8 in the kernel
+    for t in vfat:,utf8 vfat: exfat:; do
+        if mount -t ${t%%:*} -o $OPTS${t#*:} "$DEV/$1" "$m" 2>/dev/null; then
+            echo "$1: ${t%%:*} on $m"; return 0
+        fi
+    done
+    rmdir "$m" 2>/dev/null
+    echo "$1: not FAT or exFAT, not mounted"
+}
+
+unmount_one() {
+    if umount "$2" 2>/dev/null; then echo "$1: unmounted"
+    elif umount -l "$2" 2>/dev/null; then echo "$1: busy, let go lazily"
+    else echo "$1: not unmounted"; fi
+    rmdir "$2" 2>/dev/null
+}
+
+sync_all() {
+    # gone: unmount, forget its hold
+    awk -v d="$DEV/" -v m="$MEDIA/" 'index($1, d) == 1 && index($2, m) == 1 { print substr($1, length(d) + 1), $2 }' "$PROC/mounts" |
+        while read -r n m; do gone "$n" && unmount_one "$n" "$m"; done
+    for h in "$RUN"/hold-*; do [ -e "$h" ] && gone "${h##*/hold-}" && rm -f "$h"; done
+    # in: mount unless held or mounted already
+    for n in $(candidates); do
+        [ -e "$RUN/hold-$n" ] || [ -n "$(where "$n")" ] || gone "$n" && continue
+        mount_one "$n"
+    done
+}
+
+case "${1:-}" in
+sync) lock 60 && sync_all ;;
+event)
+    # run by uevent for each of the kernel's events
+    case "${SUBSYSTEM:-}:${DEVNAME:-}" in block:sd*) ;; *) exit 0 ;; esac
+    [ "${ACTION:-}" = remove ] && GONE=$DEVNAME
+    lock 60 && sync_all ;;
+watch)
+    # a first sync once the events are being heard; not this shell's child, or
+    # uevent would leave it a zombie
+    ( ( sleep 1; "$0" sync ) & )
+    exec uevent "$0" event ;;
+hold)
+    [ -n "${2:-}" ] || exit 2
+    lock 5 || exit 1
+    : > "$RUN/hold-$2"
+    m=$(where "$2")
+    case $m in "$MEDIA"/*) ;; *) exit 0 ;; esac
+    # not lazily: the installer's read-write mount needs it truly gone. An app
+    # reading from it has 5 seconds to let go
+    for i in 1 2 3 4 5; do
+        umount "$m" 2>/dev/null && { rmdir "$m" 2>/dev/null; echo "$2: unmounted, held"; exit 0; }
+        [ $i = 5 ] || sleep 1
+    done
+    rm -f "$RUN/hold-$2"
+    echo "$2: in use, not held" >&2; exit 1 ;;
+free)
+    [ -n "${2:-}" ] || exit 2
+    lock 5 || exit 1
+    rm -f "$RUN/hold-$2"; sync_all ;;
+*)  sed -n '5,10p' "$0" | sed 's/^# //' >&2; exit 2 ;;
+esac
