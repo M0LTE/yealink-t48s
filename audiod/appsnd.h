@@ -18,7 +18,7 @@
 #include "include/t48_audio_ctl.h"
 
 struct appsnd {
-	struct t48_sound_ring *ring;	/* NULL: no app has sound */
+	volatile struct t48_sound_ring *ring;	/* NULL: no app has sound; the app writes to it as we read */
 	const int16_t *data;
 	int front;		/* the app is on the screen */
 	int playing;		/* frames are being taken; 0 until one is ready */

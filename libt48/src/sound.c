@@ -21,7 +21,8 @@
 #define STALE_US 250000   /* a full ring that has not moved for this long has nobody taking from it */
 #define HALF_TICK 160     /* the service takes every 320 samples: on average a sample waits half of that */
 
-static struct t48_sound_ring *ring, *mapped;   /* mapped once; ring is NULL while sound is closed */
+/* volatile: the audio service writes to it behind our back */
+static volatile struct t48_sound_ring *ring, *mapped;   /* mapped once; ring is NULL while sound is closed */
 static int16_t *data;
 static uint32_t frames, mask, wr;
 static int limit = 1024;          /* samples that may wait */
@@ -125,7 +126,8 @@ static void put(const int16_t *s, int n)
     memcpy(data + at, s, first * sizeof *s);
     memcpy(data, s + first, ((uint32_t)n - first) * sizeof *s);
     wr += (uint32_t)n;
-    __atomic_store_n(&ring->wr, wr, __ATOMIC_RELEASE);   /* the samples first, then the count that says they are there */
+    __asm__ __volatile__("" ::: "memory");   /* the samples first, then the count that says they are there */
+    ring->wr = wr;
 }
 
 int t48_sound_put(const int16_t *s, int n)
@@ -156,9 +158,9 @@ static void wait_rd(uint32_t rd, long long timeout_us)
     struct timespec ts = {(time_t)(timeout_us / 1000000), (long)(timeout_us % 1000000 * 1000)};
     long nr = SYS_futex;
 #endif
-    __atomic_store_n(&ring->waiting, 1, __ATOMIC_SEQ_CST);
-    if (__atomic_load_n(&ring->rd, __ATOMIC_SEQ_CST) != rd) return;
-    if (syscall(nr, &ring->rd, FUTEX_WAIT, rd, &ts, NULL, 0) < 0 && errno == ENOSYS) {
+    ring->waiting = 1;
+    if (ring->rd != rd) return;   /* it moved before we said we were waiting: the kernel checks once more itself */
+    if (syscall(nr, (void *)&ring->rd, FUTEX_WAIT, rd, &ts, NULL, 0) < 0 && errno == ENOSYS) {
         struct timespec nap = {0, 5000000};
         nanosleep(&nap, NULL);
     }

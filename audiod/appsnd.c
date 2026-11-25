@@ -49,7 +49,7 @@ void appsnd_close(struct appsnd *a)
 	if (!a->ring)
 		return;
 	a->ring->state = T48_SOUND_OFF;
-	munmap(a->ring, T48AC_APP_BYTES);
+	munmap((void *)a->ring, T48AC_APP_BYTES);
 	a->ring = 0;
 	a->front = a->playing = 0;
 }
@@ -59,7 +59,7 @@ static void wake(struct appsnd *a)
 	if (!a->ring->waiting)
 		return;
 	a->ring->waiting = 0;
-	syscall(SYS_futex, &a->ring->rd, FUTEX_WAKE, INT_MAX, 0, 0, 0);
+	syscall(SYS_futex, (void *)&a->ring->rd, FUTEX_WAKE, INT_MAX, 0, 0, 0);
 }
 
 /* Samples waiting. A count that cannot be (more than the ring holds: the app
