@@ -31,6 +31,10 @@ const [url, statusFile, out] = process.argv.slice(2);
     if (name === 'apps') await page.click('details.sub summary');
     await shot(name, true);
   }
+  // Accounts, Advanced: the dial plan, open
+  await page.goto(url + '/accounts');
+  await page.click('#advanced summary');
+  await page.locator('#advanced').screenshot({ path: `${out}/web-accounts-advanced.png` });
   // a change, and what the page says about it
   await page.goto(url + '/contacts');
   await page.fill('input[name=name]', 'Workshop');

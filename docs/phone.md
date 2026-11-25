@@ -1,6 +1,6 @@
 # The phone: dialler, calls, history, contacts
 
-Issues [#26](https://github.com/M0LTE/yealink-t48s/issues/26), [#27](https://github.com/M0LTE/yealink-t48s/issues/27) (contacts, do not disturb, a second call, the message lamp) and [#36](https://github.com/M0LTE/yealink-t48s/issues/36) (several accounts). Design: [architecture.md](architecture.md#the-shell). Source: [`shell/phone.c`](../shell/phone.c), [`contacts.c`](../shell/contacts.c), with [`sipc.c`](../shell/sipc.c) (baresip), [`audioc.c`](../shell/audioc.c) (the audio service) and [`leds.c`](../shell/leds.c) (lamps).
+Issues [#26](https://github.com/M0LTE/yealink-t48s/issues/26), [#27](https://github.com/M0LTE/yealink-t48s/issues/27) (contacts, do not disturb, a second call, the message lamp) [#36](https://github.com/M0LTE/yealink-t48s/issues/36) (several accounts) and [#77](https://github.com/M0LTE/yealink-t48s/issues/77) (the dial plan). Design: [architecture.md](architecture.md#the-shell). Source: [`shell/phone.c`](../shell/phone.c), [`contacts.c`](../shell/contacts.c), [`dialplan.c`](../shell/dialplan.c), with [`sipc.c`](../shell/sipc.c) (baresip), [`audioc.c`](../shell/audioc.c) (the audio service) and [`leds.c`](../shell/leds.c) (lamps).
 
 ## Summary
 
@@ -8,6 +8,7 @@ Issues [#26](https://github.com/M0LTE/yealink-t48s/issues/26), [#27](https://git
 - A call takes the screen from whatever is showing, including an app, and gives it back afterwards.
 - **New (2026-11-23, #27):** a contact list kept on the phone, with names shown wherever a number is; do not disturb; a second call (call waiting, hold one and talk to the other, swap); asking someone first before a transfer; the lamp at the top right as the ringing, voicemail and missed-call lamp; the Message key calls voicemail.
 - **New (2026-11-23, #36):** up to six SIP accounts, each with its own registration, and a choice of which one a call goes out from. See [Several accounts](#several-accounts).
+- **New (2026-11-25, #77):** with the handset lifted (or Speaker or Headset on), a number is called without the Call key: at once when it is complete, such as 999 or an eleven-digit UK number, otherwise 4 s after the last digit. See [Dial plan](#dial-plan).
 - **Tested in the simulator against the real services**: baresip with our modules, `t48-audiod` on its silent backend and a throwaway SIP server, with two more baresips as the people at the other end. Eighteen scripted scenarios pass, and pass again with the phone's own ARM builds of the shell, baresip and the audio service running under qemu. The new parts (#27, #36) have not run on the phone yet.
 - Apps can no longer reach call control: baresip's TCP control port is gone, replaced by our own module on a socket only root can open ([sip.md](sip.md#control-interface)).
 
@@ -35,7 +36,7 @@ Issues [#26](https://github.com/M0LTE/yealink-t48s/issues/26), [#27](https://git
 | **Lift the handset** | dial tone | calls the number typed; else dial tone | answers | moves the sound to the handset |
 | **Put it down** | | closes the dialler | | ends the call, if the sound was on the handset |
 | **Speaker**, **Headset** | dial tone there | calls the number typed there | answers there | moves the sound there. Pressed again: back to the handset if it is lifted, otherwise ends the call |
-| **Digits, `*`, `#`** | start a number | add to it | | send tones |
+| **Digits, `*`, `#`** | start a number | add to it; with the sound on, the number goes when complete ([dial plan](#dial-plan)). `#` is Call where the plan has no place for it | | send tones |
 | **OK** | apps | calls (on the speaker if the handset is down) | answers | answers a call that is waiting; with a call on hold, swaps to it |
 | **X** | | rubs out a digit; closes when empty | declines | cancels a call that has not connected; turns away a call that is waiting; closes the keypad |
 | **Mute** | | | silences the ringer | microphone off and on; silences the call waiting beep |
@@ -58,7 +59,7 @@ Other things worth knowing:
 - If the shell is restarted in the middle of a call, the call carries on (it lives in baresip and the audio service) and the new shell picks it up: same screen, same timer, same route and mute.
 - If baresip stops, the idle screen says "No phone service" and a call in progress ends as "Call lost".
 
-Not done: a three-way conference; call forwarding; speed-dial line keys; dialling a number by itself after a pause; a choice of ringing tones (the audio service has one melody; the ringer's volume is in Settings, Sound and on the volume keys).
+Not done: a three-way conference; call forwarding; speed-dial line keys; a choice of ringing tones (the audio service has one melody; the ringer's volume is in Settings, Sound and on the volume keys).
 
 ## A second call
 
@@ -80,6 +81,33 @@ Left on the idle screen, or the Contacts button. A list of names and numbers, in
 |---|---|
 | ![typing a number](img/contacts-number.png) | ![deleting asks first](img/contacts-delete.png) |
 | ![from the list to the dialler](img/contacts-dial.png) | ![the history with names](img/phone-history-names.png) |
+
+## Dial plan
+
+With the handset lifted, or Speaker or Headset on, the dialler calls a number by itself. A **digit map** decides when: one setting for all accounts, in Settings, Accounts, Advanced, and on the web setup page under Accounts, Advanced. It is kept in `/data/config/phone` as `dialplan`; empty or missing is the default.
+
+- **Complete**: called as the last digit is typed.
+- **Could still go on**: called 4 s after the last digit. The dialler shows `Dialling in 3 s` beside the route and counts down. Another digit, X or Left and Right starts the time again.
+- **`#`** is Call, and is not sent, unless the map has a place for it there (a code such as `*21*number#`).
+- **Call, OK, the handset or Speaker** still call whatever has been typed, complete or not.
+- **On the hook** nothing goes by itself: the number waits for Call or the handset, as before.
+
+The syntax is the MGCP one (RFC 3435) that Polycom, Cisco and others take, so a provider's map can be pasted in. Patterns are separated by `|`; in a pattern `0`-`9 * # +` are themselves, `x` is any digit, `[2-9]` or `[*#x]` one of a set, `.` after an element any number of it (none included), and `T` at the end "when typing stops", 4 s, or `T2` for 2 s. A number matched by a pattern without `T`, which no other such pattern could make longer, is complete; patterns with `T` never hold one up, so `x.T` can be the catch-all.
+
+The default suits the UK; anything it does not know waits for the pause:
+
+```
+999|112|101|105|111|116xxx|118xxx|0[1237]xxxxxxxxx|05[56]xxxxxxxx|08[47]xxxxxxxx|0808xxxxxxx|09xxxxxxxxx|[*#][*#x][*#x].T|+xx.T|x.T
+```
+
+Emergency and service numbers, then the UK numbers that are always eleven digits (geographic, 03, mobiles, 055 and 056, 084, 087, 0808, 09); the ten-digit 01 numbers and 0800 wait for the pause. Elsewhere, eleven digits starting 01, 02, 03, 05, 07, 08 or 09 would go at once: paste the local plan, or `x.T` for the pause alone. A map that is not valid is refused on the phone and on the page; one broken by hand in the file is ignored and the default used.
+
+| | |
+|---|---|
+| ![the countdown](img/dialplan-countdown.png) | ![the countdown on a T46S](img/t46s-dialplan-countdown.png) |
+| ![Settings, Accounts, Advanced](img/settings-advanced.png) | ![the same on a T46S](img/t46s-settings-advanced.png) |
+
+![the web setup page, Accounts, Advanced](img/web-accounts-advanced.png)
 
 ## Do not disturb
 
@@ -160,9 +188,10 @@ Result on 2026-11-23, all passing, both as PC builds and with `ARM=1`:
 | 14 do not disturb | the caller gets 480, nothing rings, the call is listed as missed; calls out still work; off again and the next call rings |
 | 15 message waiting | the server says two messages: the idle screen and the slow lamp; the Message key calls voicemail; a ringing call takes the lamp and gives it back; the server says none and the lamp shows the missed call alone |
 | 16 contact names | a contact added on the phone names the caller in place of what the caller sends, in the call, the history and when dialled from the list; a stranger keeps their own name |
+| 22 dial plan | 1002 with the handset lifted goes out 4 s after the last digit and the far end rings; with a map of `1002\|x.T` it goes on the fourth digit; `#` calls 1003 at once without sending the # |
 | 20 several accounts | a second account is typed in on the Settings screens and the phone service restarts with both registered; a call out from the chosen account arrives from 1004, Redial uses it again, a plain call still goes from 1001; calls in to each say which was called; the history has the account; the usual account is changed and changed back; the account is removed and one is left |
 
-`make -C shell check` also runs `08-contacts.script`: the contact list, the history's buttons and do not disturb with no services behind them.
+`make -C shell check` also runs `tests/test_dialplan.c` (the matcher: the syntax refused and taken, and what the default and other maps say of some 170 numbers), `19-dialplan.script` and `small/05-dialplan.script` (the dialler and the Advanced page on both models, with no services), and `08-contacts.script`: the contact list, the history's buttons and do not disturb with no services behind them.
 
 Also checked by hand in the container, with baresip running as root: root can connect to the control socket; another user gets "permission denied" (the folder and the socket are closed to it); and with those opened up on purpose the module still turns that user away by its user number. The older tests (`call-test.sh`, `audiod-test.sh`) now drive baresip through the same socket and still pass, including the ARM baresip under qemu.
 

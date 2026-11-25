@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The dial plan (issue #77): with the handset lifted, a number goes out by itself 4 s after the last digit, or at
+# once when the map says it is complete; # is Call. No OK, no Call button.
+waitstate reg ok 8000
+waitstate audio up 3000
+expect idle
+hook off
+expectstate phone dial
+key 1
+key 0
+key 0
+key 2
+expectstate phone dial
+expectstate autodial 4
+waitstate phone outgoing 5000
+expectstate peer 1002
+run $FAR waitlog $BOBLOG CALL_INCOMING 8
+run $FAR $BOB accept
+waitstate phone incall 5000
+hook on
+expectstate phone ended
+run $FAR waitlog $BOBLOG CALL_CLOSED 5
+waitstate phone idle 4000
+# the owner's own map: 1002 is complete on its fourth digit
+run : > $BOBLOG
+run $CONFIG set phone dialplan "1002|x.T"
+hook off
+key 1
+key 0
+key 0
+expectstate autodial 4
+key 2
+expectstate phone outgoing
+run $FAR waitlog $BOBLOG CALL_INCOMING 8
+hook on
+waitstate phone idle 5000
+# # is Call: 1003 goes at once, without the #
+run : > $BOBLOG
+key speaker
+key 1
+key 0
+key 0
+key 3
+key hash
+expectstate phone outgoing
+expectstate peer 1003
+key speaker
+waitstate phone idle 5000
+run $CONFIG unset phone dialplan
+expectstate last o:1003
+quit

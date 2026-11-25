@@ -14,7 +14,7 @@ Press **Down** on the idle screen, or touch **Settings**. Everything here can al
 
 | Page | What it sets | Takes effect |
 |---|---|---|
-| Accounts | up to six accounts ([phone.md](phone.md#several-accounts)), and which is the default for calls. For each: User, Password, Server host (`host:port` for a port), Outbound proxy, Auth user, Display name, Transport, Label (a short name for this phone's screens), Voicemail, Enabled, and Remove account | on leaving an account's page: baresip is restarted if it is running. The usual account changes at once |
+| Accounts | up to six accounts ([phone.md](phone.md#several-accounts)), and which is the default for calls. For each: User, Password, Server host (`host:port` for a port), Outbound proxy, Auth user, Display name, Transport, Label (a short name for this phone's screens), Voicemail, Enabled, and Remove account. Advanced: the dial plan ([phone.md](phone.md#dial-plan)), empty for the default | on leaving an account's page: baresip is restarted if it is running. The usual account changes at once |
 | Do not disturb | on or off, the same as Right on the idle screen ([phone.md](phone.md#do-not-disturb)) | at once |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server | on leaving the page. If the address is a different one, baresip is started again, as it listens on the address it started with |
 | Date and time | time zone, from a list | at once, in the shell and in apps started afterwards |
@@ -45,7 +45,7 @@ Plain text in `/data/config`, one file per subject, `key=value` a line, `#` for 
 |---|---|
 | `sip` | account 1: `user`, `password`, `domain`, `outbound_proxy`, `auth_user`, `display_name`, `transport` (udp, tcp, tls), `register_seconds`: the file `t48-sip` has always read ([sip.md](sip.md#running-it)). Also `enabled` (on or off), `label` (the name on this phone's screens), `voicemail` (the number the Message key calls), `mwi` (off: do not ask the server about waiting messages) |
 | `sip2` to `sip6` | accounts 2 to 6, the same keys |
-| `phone` | `default_account`: 1 to 6, the account calls go out from unless another is chosen. `dnd`: on or off |
+| `phone` | `default_account`: 1 to 6, the account calls go out from unless another is chosen. `dnd`: on or off. `dialplan`: a digit map ([phone.md](phone.md#dial-plan)); missing is the default |
 | `network` | `mode` (dhcp or static), `address`, `netmask`, `gateway`, `dns` |
 | `system` | `timezone`: a name from the list (`Europe/London`), or any POSIX TZ string (`XYZ-3`) for a zone the list lacks |
 | `audio` | `ringer`, `handset`, `speaker`, `headset`: 0 to 15 |

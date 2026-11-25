@@ -460,6 +460,35 @@ class Paired(unittest.TestCase):
         self.assertNotIn("hunter2", log)
         self.assertNotIn("pbx.example.org", log)
 
+    def test_11_dial_plan(self):
+        b, p = self.b, self.p
+        default = "999|112|101|105|111|116xxx|118xxx|0[1237]xxxxxxxxx|05[56]xxxxxxxx|08[47]xxxxxxxx|0808xxxxxxx|09xxxxxxxxx|[*#][*#x][*#x].T|+xx.T|x.T"
+        # not set: the field is empty and the default is shown beside it
+        self.assertIsNone(p.get("phone", "dialplan"))
+        page = b.get("/accounts").body
+        self.assertIn("<h2>Advanced</h2>", page)
+        self.assertIn("<span>Dial plan</span>", page)
+        self.assertIn("<code>%s</code>" % default, page)
+        self.assertIn("name='dialplan' value=''", page)
+        # an owner's own map, kept with its spaces inside
+        text = self.ok("/accounts/advanced", {"dialplan": " [2-9]xxxxxxxxx | 07xxxxxxxxx|999|112|00x.T2 "}, "/accounts")
+        self.assertIn("Dial plan saved", text)
+        self.assertEqual(p.get("phone", "dialplan"), "[2-9]xxxxxxxxx | 07xxxxxxxxx|999|112|00x.T2")
+        self.assertIn("value='[2-9]xxxxxxxxx | 07xxxxxxxxx|999|112|00x.T2'", b.get("/accounts").body)
+        # what is not a digit map is refused, and says where; the map set stays
+        for bad, at in (("07xxxxxxxxx|", 13), ("x.T5x", 5), ("[9-2]", 2), ("0e7", 2), ("x" * 161, None)):
+            text = self.bad("/accounts/advanced", {"dialplan": bad}, "/accounts")
+            self.assertIn("Dial plan not saved", text)
+            if at: self.assertIn("character %d" % at, text)
+            self.assertEqual(p.get("phone", "dialplan"), "[2-9]xxxxxxxxx | 07xxxxxxxxx|999|112|00x.T2")
+        # the default typed out, or nothing: not stored
+        self.ok("/accounts/advanced", {"dialplan": default}, "/accounts")
+        self.assertIsNone(p.get("phone", "dialplan"))
+        self.ok("/accounts/advanced", {"dialplan": "555"}, "/accounts")
+        self.assertEqual(p.get("phone", "dialplan"), "555")
+        self.ok("/accounts/advanced", {"dialplan": ""}, "/accounts")
+        self.assertIsNone(p.get("phone", "dialplan"))
+
     def test_20_network(self):
         b, p = self.b, self.p
         before = len(p.applied_list())
