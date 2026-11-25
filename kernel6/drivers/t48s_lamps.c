@@ -12,10 +12,12 @@
  * each goes off when its share of the frame is over. A lamp that is fully on
  * or off costs nothing, and with none in between the timer does not run. The
  * handler waits out anything shorter than 50 us with interrupts off instead of
- * taking another interrupt, so the short pulses of a dim lamp are exact; a
- * longer one ends on a timer interrupt and is as late as that interrupt is.
- * Its width is measured from the moment the lamp went on, not from when the
- * frame should have started.
+ * taking another interrupt, so the short pulses of a dim lamp are exact. A
+ * longer one ends on a timer interrupt asked for 12 us early, which is about
+ * as late as an interrupt usually comes here; the rest is waited out, so that
+ * pulse is exact too unless the interrupt was later than that. A pulse is
+ * measured from the moment the lamp went on, not from when the frame should
+ * have started.
  *
  * They are ordinary LED devices, /sys/class/leds/<label>/brightness, 0 to 255.
  * Brightness is as the eye takes it, not time lit: the time is the CIE
@@ -33,7 +35,7 @@
  *     irqs          timer interrupts taken
  *     busy_ns       time spent in them, the waits included
  *     late_us       the latest a frame started
- *     off_late_us   the latest a lamp went off after its time
+ *     off_late_us   the latest a lamp went off after its time (0: never late)
  *     late_sum_us   all the interrupts' lateness added up
  *
  * GPL v2.
@@ -56,6 +58,7 @@
 #define DRV_NAME	"t48s_lamps"
 #define MAX_LAMPS	4
 #define BUSY_NS		50000		/* wait this long or less in the handler; more, take another interrupt */
+#define LEAD_NS		12000		/* ask for a lamp's off interrupt this early, and wait the rest out */
 #define FULL_NS		4000		/* dark for less than this in a frame: leave the lamp on */
 
 struct lamp {
@@ -179,7 +182,7 @@ static enum hrtimer_restart lamps_tick(struct hrtimer *t)
 		now = ktime_get();
 	}
 	if (running)
-		hrtimer_set_expires(t, due);
+		hrtimer_set_expires(t, off ? ktime_sub_ns(due, LEAD_NS) : due);
 	busy_ns += ktime_to_ns(ktime_sub(ktime_get(), in));
 	raw_spin_unlock(&lamps_lock);
 	return running ? HRTIMER_RESTART : HRTIMER_NORESTART;
