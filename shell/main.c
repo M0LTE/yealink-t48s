@@ -715,6 +715,7 @@ const char *shell_state(const char *key)
     if (!strcmp(key, "app")) return app_states[app_state()];
     if (!strcmp(key, "appid")) return app_id()[0] ? app_id() : "-";
     if (!strcmp(key, "flip")) return app_flip() >= 0 ? "on" : "off";
+    if (!strncmp(key, "lamp.", 5)) return leds_shown(key + 5);
     if (!strcmp(key, "theme")) return T->name;
     if (!strcmp(key, "font")) return T->font;
     const char *v = contacts_state(key);
@@ -875,6 +876,7 @@ int main(int argc, char **argv)
         if (scr == SCR_CONTACTS && (t = contacts_timeout(now)) >= 0 && t < wait) wait = t;
         if ((t = backlight_timeout(now)) >= 0 && t < wait) wait = t;
         if ((t = watch_timeout(now)) < wait) wait = t;
+        if ((t = leds_timeout(now)) >= 0 && t < wait) wait = t;
         if (x_deadline && x_deadline - now < wait) wait = (int)(x_deadline > now ? x_deadline - now : 0);
 
         pf[n].fd = chld_pipe[0]; pf[n++].events = POLLIN;
@@ -918,6 +920,7 @@ int main(int argc, char **argv)
         be->tick(now);
         backlight_tick(now);
         watch_tick(now);
+        leds_tick(now);
         if (x_deadline && now >= x_deadline && scr == SCR_APP) go_home();
         if (now >= next_clock) {
             next_clock = now + 1000;

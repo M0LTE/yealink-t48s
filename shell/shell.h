@@ -294,12 +294,19 @@ const char *watch_web_url(void);             /* "" until the web page is running
 int watch_web_paired(void);                  /* browsers paired with it */
 const char *watch_state(const char *key);
 
-/* ---------- lamps (leds.c): a place for the driver of issue #3 ---------- */
+/* ---------- lamps (leds.c) ---------- */
 
 enum led { LAMP_MESSAGE, LAMP_SPEAKER, LAMP_HEADSET, LAMP_MUTE, LAMP_COUNT };
 enum led_mode { LAMP_OFF, LAMP_ON, LAMP_BLINK, LAMP_SLOW };
-void leds_set(enum led which, enum led_mode mode);
-const char *leds_state(const char *name);    /* "off", "on", "blink", "slow", or NULL for no such lamp */
+void leds_set(enum led which, enum led_mode mode);   /* what the phone wants shown */
+const char *leds_state(const char *name);    /* the phone's: "off", "on", "blink", "slow", or NULL for no such lamp */
+/* The app in front may borrow lamps (docs/app-protocol.md). Masks and levels are the protocol's: bit T48_LAMP_*. */
+void leds_app_set(unsigned mask, const uint8_t *level);
+void leds_app_pattern(unsigned mask, int loop, const struct t48_lamp_key *key, int n);
+void leds_app_release(unsigned mask);        /* back to what the phone wants */
+const char *leds_shown(const char *name);    /* what is lit: the phone's word, or the app's level "0" to "255" */
+int leds_timeout(long long now);
+void leds_tick(long long now);
 
 /* ---------- installed apps ---------- */
 

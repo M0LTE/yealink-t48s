@@ -12,7 +12,7 @@ CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffuncti
 OBJ = $(O)/draw.o $(O)/image.o $(O)/json.o $(O)/app.o $(O)/ws.o $(O)/kbd.o $(O)/theme.o $(O)/ui.o $(O)/sound.o \
 	$(O)/fonts_gen.o $(O)/fonts_plex.o $(O)/fonts_figtree.o
 
-all: $(O)/libt48.a $(O)/examples/clock/clock $(O)/examples/fliptest/fliptest $(O)/examples/tones/tones
+all: $(O)/libt48.a $(O)/examples/clock/clock $(O)/examples/fliptest/fliptest $(O)/examples/tones/tones $(O)/examples/lamps/lamps
 
 $(O)/libt48.a: $(OBJ)
 	rm -f $@ && $(AR) rcs $@ $(OBJ)
@@ -38,6 +38,12 @@ $(O)/examples/tones/tones: examples/tones/tones.c $(O)/libt48.a examples/tones/m
 	@mkdir -p $(O)/examples/tones
 	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@ $< $(O)/libt48.a -lm
 	cp examples/tones/manifest.json $(O)/examples/tones/
+
+# the lamps (API level 5)
+$(O)/examples/lamps/lamps: examples/lamps/lamps.c $(O)/libt48.a examples/lamps/manifest.json
+	@mkdir -p $(O)/examples/lamps
+	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@ $< $(O)/libt48.a
+	cp examples/lamps/manifest.json $(O)/examples/lamps/
 
 # the resampler and the sound queue with nobody taking (no shell needed)
 $(O)/test_sound: tests/test_sound.c $(O)/libt48.a

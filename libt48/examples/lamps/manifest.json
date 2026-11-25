@@ -1,0 +1,9 @@
+{
+  "id": "lamps",
+  "name": "Lamps",
+  "version": "0.1.0",
+  "description": "Levels, fades and runs on the phone's lamps, to check lamps from apps",
+  "api": 5,
+  "exec": "lamps",
+  "permissions": ["lamps"]
+}

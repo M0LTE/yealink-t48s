@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Lamps from an app (API level 5): levels, a pattern the shell steps, a run,
+# the message lamp; the phone gets them back at Home, for a call and when the
+# app closes; and an app without the permission gets nothing.
+run mkdir -p simdata/installed && cp -r extra/lamps extra/nolamps simdata/installed/
+key ok
+expect launcher
+# Clock, Crasher, Lamps, No lamps, Get apps
+key right
+key right
+key ok
+waitframe 3000
+expect app
+expectstate appid lamps
+# nothing asked for yet: the phone's
+expectstate lamp.headset off
+expectstate lamp.message off
+# a level
+key 1
+waitstate lamp.headset 50
+key 1
+waitstate lamp.headset 100
+expectstate led.headset off
+expectstate lamp.mute off
+# a pattern: up at once, down to a glow in 300 ms, and it stays there
+key 2
+wait 100
+run test "$(grep -c 'lamp mute: the app' sim.log)" = 1
+waitstate lamp.mute 40 1000
+wait 200
+expectstate lamp.mute 40
+expectstate lamp.headset 100
+# the message lamp: lit, then dark again
+key 4
+waitstate lamp.message 0 1000
+# the app fades one itself
+key 6
+wait 300
+run ! grep -q "Not responding" sim.log
+# a run goes round and round
+key 3
+wait 700
+expectstate app running
+# a call takes them all back at once, and the phone shows its own
+hook off
+waitscreen call
+expectstate lamp.headset off
+expectstate lamp.mute off
+expectstate lamp.speaker off
+expectstate lamp.message off
+key speaker
+waitstate lamp.speaker on
+hook on
+key speaker
+waitscreen app 3000
+# back in front, nothing is the app's until it asks again
+expectstate lamp.speaker off
+key 5
+waitstate lamp.speaker 255 1500
+# back to the phone when the app says so
+key 0
+waitstate lamp.speaker off
+waitstate lamp.headset off
+# Home
+key 1
+waitstate lamp.headset 50
+key x 1000
+expect launcher
+expectstate lamp.headset off
+key ok
+expect app
+expectstate lamp.headset off
+key 1
+waitstate lamp.headset 50
+# closing
+key x
+waitscreen launcher 2000
+expectstate app none
+expectstate lamp.headset off
+# without the permission: nothing, and the log says so once
+key right
+key ok
+waitframe 3000
+expectstate appid nolamps
+key 1
+wait 300
+expectstate lamp.headset off
+key 2
+wait 200
+expectstate lamp.mute off
+run test "$(grep -c 'nolamps set a lamp without the lamps permission' sim.log)" = 1
+key x
+waitscreen launcher 2000
