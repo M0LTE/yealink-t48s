@@ -51,7 +51,7 @@ Yealink's firmware is replaced. The backup is the way back, so it comes first: t
 4. **Install**, and answer the question. About 3 minutes. Do not unplug.
 5. `Installed`. **Take the stick out.** The phone restarts by itself, into the open firmware from now on.
 
-Copy `t48s-backup` from the stick to a computer and keep it. It is the only copy of this phone's Yealink firmware, and it holds Yealink's settings, passwords included.
+Copy `t48s-backup` from the stick to a computer and keep it. It is the only copy of this phone's Yealink firmware, and it holds Yealink's settings, passwords included, and the phone's private keys. Keep it private.
 
 If the power fails during Install: start from the stick again and choose Install again. The steps are made to be repeated.
 

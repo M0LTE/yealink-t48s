@@ -2,6 +2,8 @@
 
 Issue [#30](https://github.com/M0LTE/yealink-t48s/issues/30). Do this before anything of ours is written to a phone. How the flash is laid out and read is in [nand.md](nand.md); what we write is in [flash.md](flash.md).
 
+**A backup is secret.** Its `cfg` partition holds the phone's Yealink device certificate with its private key, and a private key Yealink put on every phone. Keep backups private; never publish or share one.
+
 ## Take the backup
 
 With the phone running our kernel (a kexec boot, nothing written yet) or Yealink's firmware with SSH:
