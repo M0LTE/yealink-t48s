@@ -24,8 +24,8 @@ const t48_theme t48_themes[] = {
     {   /* Directory. Paper, ink, and one telephone yellow: the header band, and the line a finger is on. */
         .name = "directory", .font = "plex", .dark = 0,
         .bg = 0xF7F7F4, .panel = 0xFFFFFF, .line = 0xCFD0CA,
-        .text = 0x151514, .dim = 0x5C5D58, .faint = 0x9B9C96,
-        .key = 0xFFFFFF, .on_key = 0x151514, .on_key_dim = 0x5C5D58,
+        .text = 0x151514, .dim = 0x4A4B47, .faint = 0x9B9C96,
+        .key = 0xFFFFFF, .on_key = 0x151514, .on_key_dim = 0x4A4B47,
         .accent = 0xFFCE00, .on_accent = 0x151514,
         .good = 0x0B8F4C, .on_good = 0xFFFFFF, .bad = 0xD63A22, .on_bad = 0xFFFFFF,
         .sel = 0xFFCE00, .on_sel = 0x151514, .on_sel_dim = 0x5A4A00,

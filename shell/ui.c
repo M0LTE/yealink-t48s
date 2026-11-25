@@ -135,6 +135,14 @@ void ui_header_idle(void)
     ui_network_status(net, sizeof net, &up);
     ui_lamp(m, HEAD_H / 2 - 6, up ? C_GOOD : C_BAD);
     int nx = t48_text(&ui, m + 22, y, &t48_font_normal, T->on_head, net);
+    if (SMALL && phone_dnd()) {
+        /* a small screen has no DND button: do not disturb is a tag after the address, clear of the notices */
+        const t48_font *f = &t48_font_small;
+        int lit = T->head != T->accent, tw = t48_text_width(f, "DND") + 14, th = f->height + 4;
+        t48_round_fill(&ui, nx + 12, (HEAD_H - th) / 2, tw, th, T->radius < 6 ? T->radius : th / 2, lit ? T->accent : T->on_head);
+        t48_text_centre(&ui, nx + 12 + tw / 2, (HEAD_H - f->height) / 2, f, lit ? T->on_accent : T->head, "DND");
+        nx += 12 + tw;
+    }
     phone_account_text(acc, sizeof acc, &acc_colour);
     int w = t48_text_width(&t48_font_normal, acc);
     if (SMALL && w > SW - m - 22 - nx - 16) {
