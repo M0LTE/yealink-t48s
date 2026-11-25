@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /*
- * The T48 app protocol, API level 4: what goes over the socket between the
+ * The T48 app protocol, API level 5: what goes over the socket between the
  * shell and an app. The written description is docs/app-protocol.md; this
  * header is the same thing for C programs.
  *
@@ -16,8 +16,9 @@
 /* 2 added THEME and the font file; a level 1 app or shell skips both.
  * 3 added flipping (FLIPINFO, FLIP, FLIPPED, the flip buffers), times on KEY
  * and TOUCH, and the soft keys; an older app or shell sees none of it.
- * 4 added sound (the sound ring); nothing on the socket changed. */
-#define T48_API_LEVEL 4
+ * 4 added sound (the sound ring); nothing on the socket changed.
+ * 5 added the lamps (LAMPS, LAMP_PATTERN), for an app with the "lamps" permission. */
+#define T48_API_LEVEL 5
 
 /* The shell starts the app with these in its environment. */
 #define T48_ENV_SOCKET "T48_SOCKET_FD"   /* number of the socket file descriptor */
@@ -53,6 +54,8 @@ struct t48_msg_hdr {
 #define T48_MSG_PAUSED 0x83  /* no payload: optional answer to PAUSE, "freeze me now" */
 /* 0x84 is not used */
 #define T48_MSG_FLIP 0x85    /* level 3: struct t48_msg_flip: show this flip buffer at the next refresh */
+#define T48_MSG_LAMPS 0x86         /* level 5: struct t48_msg_lamps: these lamps to these levels now, those back to the phone */
+#define T48_MSG_LAMP_PATTERN 0x87  /* level 5: struct t48_msg_lamp_pattern, then its keys: the shell fades these lamps by itself */
 
 #define T48_FORMAT_XRGB8888 0  /* one 32-bit word per pixel, 0x00RRGGBB */
 
@@ -122,6 +125,44 @@ struct t48_msg_flipped {
     uint16_t pad;
     uint32_t frame;     /* the screen's refreshes, counted: a step of more than one is a missed refresh */
     uint64_t time_us;   /* when it reached the screen: microseconds of CLOCK_MONOTONIC */
+};
+
+/* Lamps (level 5), for an app whose manifest has the "lamps" permission, while
+ * it is in front. A lamp the app has set is the app's until it gives it back,
+ * is paused or goes; the phone then shows on it what it would have shown all
+ * along. PAUSE takes every lamp back at once: set them again after RESUME.
+ * Levels are 0 to 255 as the eye takes them, so a fade is a plain count. A
+ * lamp that can only be on or off is on from 128. */
+#define T48_LAMP_MESSAGE 0   /* red, at the top right of the case; on or off only, and slow: a few changes a second */
+#define T48_LAMP_HEADSET 1   /* green, in the Headset key */
+#define T48_LAMP_MUTE 2      /* red, in the Mute key, under Headset */
+#define T48_LAMP_SPEAKER 3   /* green, in the Speaker key, under Mute */
+#define T48_LAMPS 4
+#define T48_LAMP_KEYS 32     /* the most keys in one pattern */
+
+struct t48_msg_lamps {
+    uint8_t set;                /* bit n: lamp n to level[n], now; a pattern on it ends */
+    uint8_t release;            /* bit n: lamp n back to the phone */
+    uint8_t level[T48_LAMPS];
+};
+
+/* A pattern: from where the lamp is now, a straight fade to each key's level
+ * over that key's time, one after another. ms 0 is a jump. At the end the lamp
+ * stays at the last level, or with T48_LAMP_LOOP starts again from the first
+ * key. The shell does the fading, fifty steps a second. */
+#define T48_LAMP_LOOP 1
+
+struct t48_lamp_key {
+    uint16_t ms;                /* how long the fade to this level takes */
+    uint8_t level;
+    uint8_t pad;
+};
+
+struct t48_msg_lamp_pattern {
+    uint8_t mask;               /* bit n: lamp n runs this pattern, all in step */
+    uint8_t flags;              /* T48_LAMP_* */
+    uint16_t count;             /* keys that follow: 1 to T48_LAMP_KEYS */
+    /* struct t48_lamp_key key[count] */
 };
 
 /* The look: colours by what they are for, shapes, and the font family. A later

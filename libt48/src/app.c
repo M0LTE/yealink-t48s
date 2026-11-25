@@ -19,6 +19,7 @@
 #define NSETTINGS 32
 
 static int sock = -1, closed;
+static int shell_api;              /* the level the shell said in HELLO */
 static t48_surface screen;
 static unsigned char rx[4096];
 static size_t rx_n;
@@ -113,7 +114,7 @@ long long t48_now_us(void)
 
 static void send_msg(int type, const void *payload, size_t len)
 {
-    unsigned char b[64];
+    unsigned char b[160];   /* the longest is a lamp pattern of 32 keys */
     struct t48_msg_hdr h = {(uint16_t)type, (uint16_t)len};
     if (sock < 0 || closed || len > sizeof b - sizeof h) return;
     memcpy(b, &h, sizeof h);
@@ -173,6 +174,7 @@ int t48_app_init(void)
         if (type == T48_MSG_HELLO && len >= sizeof(struct t48_msg_hello)) {
             struct t48_msg_hello h;
             memcpy(&h, p, sizeof h);
+            shell_api = h.api;
             if (h.format != T48_FORMAT_XRGB8888 || h.stride % 4) {
                 fprintf(stderr, "libt48: the shell offers a screen format this library does not know\n");
                 return -1;
@@ -457,4 +459,52 @@ t48_surface *t48_flip(void)
     }
     flip_draw = next;
     return &flip_s[flip_draw];
+}
+
+/* ---------- lamps (level 5) ---------- */
+
+int t48_lamps_ok(void) { return shell_api >= 5; }
+
+void t48_lamps_set(unsigned mask, const uint8_t *level)
+{
+    struct t48_msg_lamps m = {(uint8_t)(mask & 15), 0, {0}};
+    if (!t48_lamps_ok() || !m.set) return;
+    memcpy(m.level, level, sizeof m.level);
+    send_msg(T48_MSG_LAMPS, &m, sizeof m);
+}
+
+void t48_lamp(int lamp, int level)
+{
+    uint8_t l[T48_LAMPS] = {0};
+    if (lamp < 0 || lamp >= T48_LAMPS) return;
+    l[lamp] = (uint8_t)(level < 0 ? 0 : level > 255 ? 255 : level);
+    t48_lamps_set(1u << lamp, l);
+}
+
+void t48_lamps_release(unsigned mask)
+{
+    struct t48_msg_lamps m = {0, (uint8_t)(mask & 15), {0}};
+    if (t48_lamps_ok() && m.release) send_msg(T48_MSG_LAMPS, &m, sizeof m);
+}
+
+void t48_lamp_pattern(unsigned mask, const struct t48_lamp_key *key, int n, int loop)
+{
+    unsigned char b[sizeof(struct t48_msg_lamp_pattern) + T48_LAMP_KEYS * sizeof *key];
+    struct t48_msg_lamp_pattern m = {(uint8_t)(mask & 15), loop ? T48_LAMP_LOOP : 0, (uint16_t)n};
+    if (!t48_lamps_ok() || !m.mask || n < 1 || n > T48_LAMP_KEYS) return;
+    memcpy(b, &m, sizeof m);
+    memcpy(b + sizeof m, key, (size_t)n * sizeof *key);
+    send_msg(T48_MSG_LAMP_PATTERN, b, sizeof m + (size_t)n * sizeof *key);
+}
+
+void t48_lamp_fade(unsigned mask, int level, int ms)
+{
+    struct t48_lamp_key k = {(uint16_t)ms, (uint8_t)level, 0};
+    t48_lamp_pattern(mask, &k, 1, 0);
+}
+
+void t48_lamp_pulse(unsigned mask, int level, int ms)
+{
+    struct t48_lamp_key k[2] = {{0, (uint8_t)level, 0}, {(uint16_t)ms, 0, 0}};
+    t48_lamp_pattern(mask, k, 2, 0);
 }

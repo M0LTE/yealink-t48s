@@ -1155,7 +1155,7 @@ static void build_storeapp(const char *id)
         for (char *p = strtok_r(perms, " ", &save); p; p = strtok_r(NULL, " ", &save)) {
             size_t at = strlen(v);
             snprintf(v + at, sizeof v - at, "%s%s", at ? ", " : "",
-                     !strcmp(p, "network") ? "Network" : !strcmp(p, "audio-out") ? "Sound" : p);
+                     !strcmp(p, "network") ? "Network" : !strcmp(p, "audio-out") ? "Sound" : !strcmp(p, "lamps") ? "Lamps" : p);
         }
     }
     add_info("Permissions", v);

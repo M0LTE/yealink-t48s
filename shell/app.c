@@ -46,6 +46,7 @@ static struct {
     int sound_fd;             /* its sound ring (level 4), ours to hand to the audio service; -1: it has no sound */
     int sound_told;           /* what the audio service was last told: T48AC_APP_*, -1: nothing, it has not got the ring */
     int api;                  /* the level it answered READY with */
+    int lamps;                /* 1: it may set the lamps (level 5, the "lamps" permission); 2: it tried without, and the log says so */
     uint32_t *flip_map;       /* the flip buffers, where the shell copies them; NULL: the screen shows them itself */
     int flip_count;
     size_t flip_size;
@@ -154,6 +155,18 @@ void app_sound_link(void)
 {
     app.sound_told = -1;
     sound_sync();
+}
+
+/* ---------- lamps (level 5) ---------- */
+
+/* May the app touch the lamps now? Only with the permission, and only in front. */
+static int lamps_ok(void)
+{
+    if (app.lamps == 0) {
+        logmsg("app %s set a lamp without the lamps permission: ignored", app.id);
+        app.lamps = 2;
+    }
+    return app.lamps == 1 && app.state == APP_RUNNING;
 }
 
 static void kill_app(int sig)
@@ -339,6 +352,7 @@ int app_launch(const struct manifest *m)
     app.flip_now = app.flip_wait = -1;
     app.sound_fd = sound_fd;   /* ours stays open: the audio service may need it again */
     app.sound_told = -1;
+    app.lamps = manifest_may(m, "lamps");
     app.state = APP_STARTING;
     app.pid = pid;
     app.sock = sv[0];
@@ -388,6 +402,7 @@ void app_pause(void)
     app.state = APP_PAUSING;
     app.deadline = t48_now_ms() + GRACE_MS;
     sound_sync();   /* silent now, not when it is frozen */
+    leds_app_release(~0u);   /* and the lamps are the phone's */
 }
 
 static void freeze(void)
@@ -415,6 +430,7 @@ void app_quit(void)
     app.state = APP_QUITTING;
     app.deadline = t48_now_ms() + GRACE_MS;
     sound_sync();
+    leds_app_release(~0u);
 }
 
 void app_kill_now(void)
@@ -422,6 +438,7 @@ void app_kill_now(void)
     if (app.state == APP_NONE) return;
     app.state = APP_QUITTING;
     sound_sync();
+    leds_app_release(~0u);
     kill_app(SIGKILL);
 }
 
@@ -493,6 +510,23 @@ void app_readable(void)
             memcpy(&f, p, sizeof f);
             if (f.buffer >= app.flip_count) { misbehaved("Protocol error"); return; }
             if (app.state == APP_RUNNING || app.state == APP_PAUSING) flip(f.buffer);
+        } else if (h.type == T48_MSG_LAMPS && h.len >= sizeof(struct t48_msg_lamps)) {
+            struct t48_msg_lamps l;
+            memcpy(&l, p, sizeof l);
+            if (lamps_ok()) {
+                leds_app_release(l.release & ~l.set);
+                leds_app_set(l.set, l.level);
+            }
+        } else if (h.type == T48_MSG_LAMP_PATTERN && h.len >= sizeof(struct t48_msg_lamp_pattern)) {
+            struct t48_msg_lamp_pattern lp;
+            struct t48_lamp_key key[T48_LAMP_KEYS];
+            memcpy(&lp, p, sizeof lp);
+            if (lp.count < 1 || lp.count > T48_LAMP_KEYS || h.len < sizeof lp + lp.count * sizeof key[0]) {
+                misbehaved("Protocol error");
+                return;
+            }
+            memcpy(key, p + sizeof lp, lp.count * sizeof key[0]);
+            if (lamps_ok()) leds_app_pattern(lp.mask, lp.flags & T48_LAMP_LOOP, key, lp.count);
         } else if (h.type == T48_MSG_PAUSED) {
             if (app.state == APP_PAUSING) freeze();
         }
@@ -568,6 +602,7 @@ void app_reaped(pid_t pid, int status)
         reason = why;
     }
     logmsg("app %s gone: %s", app.id, reason ? reason : "closed");
+    leds_app_release(~0u);
     snprintf(name, sizeof name, "%s", app.name);
     if (app.sock >= 0) close(app.sock);
     munmap(app.buf, BUF_BYTES);

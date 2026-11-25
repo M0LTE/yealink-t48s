@@ -3,7 +3,8 @@
  * Not a phone: QEMU's "versatilepb" machine with an ARM1176, described just
  * far enough to smoke-test the T48S kernel configuration and root filesystem
  * on a PC (kernel6/qemu-test.sh). It has the same kinds of parts as the
- * BCM11188 (a VIC, SP804 timers, a PL011) at other addresses. Its RAM starts
+ * BCM11188 (a VIC, SP804 timers, a PL011) at other addresses, and a PL061 for
+ * the lamps' pins. Its RAM starts
  * at 0, but only what the phone has is declared (from 0x00400000), so the
  * kernel is placed as on the phone.
  */
@@ -65,6 +66,26 @@
 		};
 	};
 
+	/* three lamps on pins that go nowhere: the timer and the LED devices are real */
+	lamps {
+		compatible = "yealink,t4xs-lamps";
+
+		led-headset {
+			label = "t48s:green:headset";
+			gpios = <&gpio0 3 1>;
+		};
+
+		led-mute {
+			label = "t48s:red:mute";
+			gpios = <&gpio0 4 1>;
+		};
+
+		led-speaker {
+			label = "t48s:green:speaker";
+			gpios = <&gpio0 5 1>;
+		};
+	};
+
 	soc {
 		compatible = "simple-bus";
 		#address-cells = <1>;
@@ -92,6 +113,19 @@
 			interrupts = <4>;
 			clocks = <&clk_1m>, <&clk_1m>, <&clk_24m>;
 			clock-names = "timer1", "timer2", "apb_pclk";
+		};
+
+		/* the board's first PL061, for drivers/t48s_lamps.c to switch */
+		gpio0: gpio@101e4000 {
+			compatible = "arm,pl061", "arm,primecell";
+			reg = <0x101e4000 0x1000>;
+			interrupts = <6>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			clocks = <&clk_24m>;
+			clock-names = "apb_pclk";
 		};
 
 		uart0: serial@101f1000 {

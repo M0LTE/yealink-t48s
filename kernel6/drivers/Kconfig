@@ -18,6 +18,10 @@ config T48S_HOLTEK
 	bool "T48S Holtek chip (its watchdog, the message lamp)"
 	depends on NEW_LEDS && LEDS_CLASS
 
+config T48S_LAMPS
+	bool "T48S key lamps with brightness (software PWM on their GPIO pins)"
+	depends on NEW_LEDS && LEDS_CLASS && GPIOLIB && HIGH_RES_TIMERS
+
 config T48S_BACKLIGHT
 	bool "T48S screen backlight"
 	depends on BACKLIGHT_CLASS_DEVICE

@@ -43,12 +43,16 @@ $(O)/apps: $(LIB) tests/crasher.c tests/crasher.json
 	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@/crasher/crasher tests/crasher.c $(LIB)
 	cp tests/crasher.json $@/crasher/manifest.json
 
-# more for tests/15-flip.script and 16-sound.script, which install them themselves so the other tests' launcher
-# stays as it was: the flipping test, an app that speaks the protocol as level 2 did, and the one that plays notes
-$(O)/extra: $(LIB) tests/level2.c tests/level2.json $(wildcard ../libt48/examples/fliptest/* ../libt48/examples/tones/*)
+# more for tests/15-flip.script, 16-sound.script and 17-lamps.script, which install them themselves so the other
+# tests' launcher stays as it was: the flipping test, an app that speaks the protocol as level 2 did, the one that
+# plays notes, and the one that sets the lamps (and the same again without the permission to)
+$(O)/extra: $(LIB) tests/level2.c tests/level2.json $(wildcard ../libt48/examples/fliptest/* ../libt48/examples/tones/* ../libt48/examples/lamps/*)
 	rm -rf $@ && mkdir -p $@/level2
 	cp -r ../libt48/$(O)/examples/fliptest $@/fliptest
 	cp -r ../libt48/$(O)/examples/tones $@/tones
+	cp -r ../libt48/$(O)/examples/lamps $@/lamps
+	cp -r ../libt48/$(O)/examples/lamps $@/nolamps
+	sed -i -e 's/"id": "lamps"/"id": "nolamps"/' -e 's/"name": "Lamps"/"name": "No lamps"/' -e 's/\["lamps"\]/[]/' $@/nolamps/manifest.json
 	$(CC) $(CFLAGS) -o $@/level2/level2 tests/level2.c
 	cp tests/level2.json $@/level2/manifest.json
 

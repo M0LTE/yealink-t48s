@@ -48,26 +48,26 @@
 		memory-region = <&flip_mem>;
 	};
 
-	/* the lamps inside three keys; the message lamp is on the Holtek chip */
-	leds {
-		compatible = "gpio-leds";
+	/*
+	 * The lamps inside three keys, with brightness (drivers/t48s_lamps.c);
+	 * the message lamp is on the Holtek chip.
+	 */
+	lamps {
+		compatible = "yealink,t4xs-lamps";
 
 		led-headset {
 			label = "t48s:green:headset";
 			gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
-			default-state = "off";
 		};
 
 		led-mute {
 			label = "t48s:red:mute";
 			gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
-			default-state = "off";
 		};
 
 		led-speaker {
 			label = "t48s:green:speaker";
 			gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;
-			default-state = "off";
 		};
 	};
 

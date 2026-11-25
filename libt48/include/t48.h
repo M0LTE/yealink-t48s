@@ -336,6 +336,33 @@ int t48_sound_playing(void);                      /* 1: heard now. 0: held by a 
 unsigned t48_sound_dry(void);                     /* times the queue ran empty while playing: a count of gaps, and of sounds that ended */
 int t48_sound_rate(void);                         /* 16000 */
 
+/* ---------- lamps (level 5) ----------
+ *
+ * For an app whose manifest has the "lamps" permission, while it is in front:
+ * T48_LAMP_MESSAGE (red, top right of the case), and the lamps in three keys,
+ * top to bottom T48_LAMP_HEADSET (green), T48_LAMP_MUTE (red) and
+ * T48_LAMP_SPEAKER (green). Levels are 0 to 255 and look evenly spaced. The
+ * message lamp is on or off (on from 128) and slow: use it for the odd flash.
+ * A mask is 1 << lamp, or several of them.
+ *
+ *     t48_lamp_pulse(1 << T48_LAMP_MUTE, 255, 200);       a flash that dies away in 200 ms
+ *
+ * Two ways to move them. Set levels yourself, as often as you draw; or hand
+ * the shell a pattern of fades and it runs it without another message. A lamp
+ * you have set is yours until you release it. T48_EV_PAUSE takes them all
+ * back (a call, Home): set them again after T48_EV_RESUME. On an older shell,
+ * or without the permission, these do nothing. */
+int t48_lamps_ok(void);                           /* 1: this shell lends lamps to apps */
+void t48_lamp(int lamp, int level);               /* one lamp, now */
+void t48_lamps_set(unsigned mask, const uint8_t *level);   /* several at once: level[T48_LAMPS], those in the mask */
+/* From where each lamp is now, a straight fade to each key's level over its
+ * ms, in turn (ms 0 jumps); then it stays, or with loop goes round again. Up
+ * to T48_LAMP_KEYS keys. A new pattern or level replaces the one running. */
+void t48_lamp_pattern(unsigned mask, const struct t48_lamp_key *key, int n, int loop);
+void t48_lamp_fade(unsigned mask, int level, int ms);    /* to that level over ms */
+void t48_lamp_pulse(unsigned mask, int level, int ms);   /* to that level at once, then down to dark over ms */
+void t48_lamps_release(unsigned mask);            /* back to the phone: mute, message waiting and so on */
+
 /* Other rates and stereo, in whole numbers and cheaply: 44100 or 48000 stereo
  * to the phone's format costs under 1% of its processor. Down, each output
  * sample is the mean of the input it covers; up, a straight line. Good for
