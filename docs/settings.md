@@ -9,12 +9,14 @@ Press **Down** on the idle screen, or touch **Settings**. Everything here can al
 | ![settings](img/settings.png) | ![the accounts](img/settings-accounts.png) |
 | ![keyboard](img/keyboard.png) | ![typing a password](img/keyboard-password.png) |
 | ![time zone](img/settings-timezone.png) | ![sound](img/settings-sound.png) |
+| ![an account's Advanced page](img/settings-account-advanced.png) | ![codecs, in the order offered](img/settings-codecs.png) |
+| ![eight accounts on the idle screen](img/phone-idle-eight-accounts.png) | ![codecs on the T46S](img/t46s-settings-codecs.png) |
 
 ## What is there
 
 | Page | What it sets | Takes effect |
 |---|---|---|
-| Accounts | up to six accounts ([phone.md](phone.md#several-accounts)), and which is the default for calls. For each: User, Password, Server host (`host:port` for a port), Outbound proxy, Auth user, Display name, Transport, Label (a short name for this phone's screens), Voicemail, Ringtone, Call forwarding (its own page: Always, Busy, No answer, each with a number, and the No answer delay; [phone.md](phone.md#call-forwarding)), Enabled, and Remove account. Advanced: the dial plan ([phone.md](phone.md#dial-plan)), empty for the default; Block direct calls ([sip.md](sip.md#block-direct-calls)) | on leaving an account's page: baresip is restarted if it is running. Ringtone and forwarding at once, with no restart. The usual account changes at once |
+| Accounts | up to 16 accounts ([phone.md](phone.md#several-accounts)), and which is the default for calls. For each: User, Password, Server host (`host:port` for a port), Outbound proxy, Auth user, Display name, Transport, Account name (the name on this phone's screens), Voicemail, Ringtone, Call forwarding (its own page: Always, Busy, No answer, each with a number, and the No answer delay; [phone.md](phone.md#call-forwarding)), Enabled, Advanced, and Remove account. The account's Advanced: Registration expiry, DTMF, Codecs (each on or off, moved with ^ and v, or Up and Down on a small screen), NAT keepalive ([sip.md](sip.md#running-it)). The Accounts page's own Advanced: the dial plan ([phone.md](phone.md#dial-plan)), empty for the default; Block direct calls ([sip.md](sip.md#block-direct-calls)) | on leaving an account's page: baresip is restarted if it is running. Ringtone and forwarding at once, with no restart. The usual account changes at once |
 | Do not disturb | on or off, the same as Right on the idle screen ([phone.md](phone.md#do-not-disturb)) | at once |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server | on leaving the page. If the address is a different one, baresip is started again, as it listens on the address it started with |
 | Date and time | time zone, from a list | at once, in the shell and in apps started afterwards |
@@ -43,10 +45,10 @@ Plain text in `/data/config`, one file per subject, `key=value` a line, `#` for 
 
 | File | Keys |
 |---|---|
-| `sip` | account 1: `user`, `password`, `domain`, `outbound_proxy`, `auth_user`, `display_name`, `transport` (udp, tcp, tls), `register_seconds`: the file `t48-sip` has always read ([sip.md](sip.md#running-it)). Also `enabled` (on or off), `label` (the name on this phone's screens), `voicemail` (the number the Message key calls), `mwi` (off: do not ask the server about waiting messages) |
-| `sip2` to `sip6` | accounts 2 to 6, the same keys |
+| `sip` | account 1: `user`, `password`, `domain`, `outbound_proxy`, `auth_user`, `display_name`, `transport` (udp, tcp, tls), `register_seconds`: the file `t48-sip` has always read ([sip.md](sip.md#running-it)). Also `enabled` (on or off), `label` (the account name on this phone's screens), `voicemail` (the number the Message key calls), `mwi` (off: do not ask the server about waiting messages), `keepalive` (off), `dtmf` (rfc2833, inband, info), `codecs` (`opus,g722,-pcmu,pcma`: the order offered, `-` for off) |
+| `sip2` to `sip16` | accounts 2 to 16, the same keys |
 | | in each account file, for the shell (#77): `ringtone` (standard, long, chime, pulse, custom), `forward_always`, `forward_busy`, `forward_noanswer` (on or off), `forward_always_to`, `forward_busy_to`, `forward_noanswer_to` (a number or a SIP address), `forward_noanswer_after` (seconds, 20) |
-| `phone` | `default_account`: 1 to 6, the account calls go out from unless another is chosen. `dnd`: on or off. `dialplan`: a digit map ([phone.md](phone.md#dial-plan)); missing is the default. `block_direct`: on, or off (when missing), read by `t48-sip` when baresip starts |
+| `phone` | `default_account`: 1 to 16, the account calls go out from unless another is chosen. `dnd`: on or off. `dialplan`: a digit map ([phone.md](phone.md#dial-plan)); missing is the default. `block_direct`: on, or off (when missing), read by `t48-sip` when baresip starts |
 | `network` | `mode` (dhcp or static), `address`, `netmask`, `gateway`, `dns` |
 | `system` | `timezone`: a name from the list (`Europe/London`), or any POSIX TZ string (`XYZ-3`) for a zone the list lacks |
 | `audio` | `ringer`, `handset`, `speaker`, `headset`: 0 to 15 |

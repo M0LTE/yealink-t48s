@@ -7,6 +7,7 @@ Typing a SIP password on the phone's on-screen keyboard works but is fiddly. Thi
 | | |
 |---|---|
 | ![the overview](img/web-overview.png) | ![phone accounts](img/web-accounts.png) |
+| ![an account's Advanced part](img/web-account-advanced.png) | |
 | ![contacts](img/web-contacts-saved.png) | ![access](img/web-access.png) |
 
 ## Turning it on, and pairing a browser
@@ -33,7 +34,7 @@ Open that address in a browser. A browser the phone has not seen gets one page o
 | Page | What it does |
 |---|---|
 | Overview | where things stand, a tile for each page |
-| Accounts | all six SIP accounts: every field the phone's screen has, ringtone and call forwarding included. A custom ringtone: a WAV of up to 2 MB, made into the phone's format here ([phone.md](phone.md#ringtones)), or removed. The default account. Remove. Advanced: the dial plan ([phone.md](phone.md#dial-plan)), Block direct calls ([sip.md](sip.md#block-direct-calls)) |
+| Accounts | the SIP accounts that are set and one to add, up to 16: every field the phone's screen has, ringtone and call forwarding included, and the account's Advanced (registration expiry, DTMF, codecs with Up and Down, NAT keepalive), folded until one is changed. A custom ringtone: a WAV of up to 2 MB, made into the phone's format here ([phone.md](phone.md#ringtones)), or removed. The default account. Remove. The page's own Advanced: the dial plan ([phone.md](phone.md#dial-plan)), Block direct calls ([sip.md](sip.md#block-direct-calls)) |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server |
 | Date and time | the time zone, from the phone's list, or a TZ string for a place the list lacks |
 | Sound and screen | ringer, handset, speaker and headset levels; brightness, and when the screen dims and goes off; the theme, which the page wears too ([design](design/README.md)) |
@@ -198,5 +199,5 @@ And one in the shell that the test rig found: a touch in line with the last touc
 - The registration state of each account (the phone's screen has it; the page does not ask the shell).
 - Do not disturb, and anything about a call in progress.
 - Uploading an app package from the computer.
-- A page per account for a narrow screen; six accounts on one page is long.
+- A page per account for a narrow screen; many accounts on one page is long.
 - The pairing box does not show over an app. The page says to leave the app.

@@ -17,6 +17,14 @@
  *    codecs with another packet time.
  *  - Always 16 kHz, mono, signed 16-bit. baresip resamples for 8 kHz codecs
  *    (config: ausrc_srate/auplay_srate 16000, channels 1).
+ *  - In-band DTMF (issue #77): for an account whose DTMF is "inband" the
+ *    shell sends the command t48inband with the digits, and each becomes
+ *    100 ms of its two tones in place of the microphone, then 60 ms of
+ *    the microphone again, before the next. t48inband with no digits
+ *    empties the queue (the shell sends it when the call in front
+ *    changes), as does a source opening or closing, so a tone never
+ *    reaches another call. baresip has no in-band mode of its own; RFC
+ *    2833 and SIP INFO are its dtmfmode.
  *  - If the service is not there (not started, or restarting), a call still
  *    works: this module keeps its own 20 ms clock, feeds silence as the
  *    microphone, drops the loudspeaker audio, and tries the socket again
@@ -27,6 +35,7 @@
  *          t48audio_socket /run/t48-audiod/call.sock     (optional)
  */
 #include <errno.h>
+#include <math.h>
 #include <poll.h>
 #include <string.h>
 #include <unistd.h>
@@ -76,6 +85,83 @@ static struct {
 
 static struct ausrc *ausrc;
 static struct auplay *auplay;
+
+/* In-band DTMF: digits waiting, and how far into the first one we are */
+enum {
+	DTMF_QUEUE = 32,
+	DTMF_ON = T48A_SRATE * 100 / 1000,    /* samples of tone */
+	DTMF_GAP = T48A_SRATE * 60 / 1000,    /* then of the microphone */
+	DTMF_RAMP = T48A_SRATE * 25 / 10000,  /* 2.5 ms up and down: no click */
+};
+static struct {
+	char q[DTMF_QUEUE];
+	size_t n;
+	uint32_t pos;         /* samples into q[0]'s tone and gap */
+} dtmf;                   /* under cs.lock */
+
+/* one sine cycle in 1024 steps, made once: the phone has no FPU, so a
+ * tone is a table lookup a sample, not a sin() */
+static int16_t sine[1024];
+
+
+/* with the lock held: no tone left for whatever call comes next */
+static void dtmf_clear(void)
+{
+	dtmf.n = 0;
+	dtmf.pos = 0;
+}
+
+
+/* the two frequencies of a key, or false if it is not one */
+static bool dtmf_freqs(char key, uint32_t *lo, uint32_t *hi)
+{
+	static const char keys[] = "123A456B789C*0#D";
+	static const uint32_t row[] = { 697, 770, 852, 941 };
+	static const uint32_t col[] = { 1209, 1336, 1477, 1633 };
+	const char *p = key ? strchr(keys, key) : NULL;
+
+	if (!p)
+		return false;
+	*lo = row[(p - keys) / 4];
+	*hi = col[(p - keys) % 4];
+	return true;
+}
+
+
+/* With the lock held: the next 20 ms of the digit being sent into frame,
+ * in place of the microphone while its tone lasts. */
+static void dtmf_frame(int16_t *frame)
+{
+	uint32_t lo, hi;
+	size_t k;
+
+	if (!dtmf.n)
+		return;
+	if (dtmf_freqs(dtmf.q[0], &lo, &hi)) {
+		for (k = 0; k < T48A_FRAME; k++) {
+			uint32_t t = dtmf.pos + (uint32_t)k;
+
+			if (t >= DTMF_ON)
+				break;
+			uint32_t edge = t < DTMF_ON - 1 - t ? t : DTMF_ON - 1 - t;
+			int32_t v;
+
+			/* The phase in 1024ths of a cycle. The low tone at
+			 * -11 dBm0 and the high at -9 (a full-scale sine is
+			 * +3.14 dBm0, G.711), faded in and out. */
+			v = (6500 * sine[(lo * t * 1024 / T48A_SRATE) & 1023] +
+			     8200 * sine[(hi * t * 1024 / T48A_SRATE) & 1023]) >> 15;
+			if (edge < DTMF_RAMP)
+				v = v * (int32_t)edge / DTMF_RAMP;
+			frame[k] = (int16_t)v;
+		}
+	}
+	dtmf.pos += T48A_FRAME;
+	if (dtmf.pos >= DTMF_ON + DTMF_GAP) {
+		memmove(dtmf.q, dtmf.q + 1, --dtmf.n);
+		dtmf.pos = 0;
+	}
+}
 
 
 /* Read or write exactly len bytes, giving up after STALL_MS without progress */
@@ -218,6 +304,7 @@ static bool stream_tick(int16_t *mic, int16_t *spk)
 
 	mtx_lock(&cs.lock);
 
+	dtmf_frame(mic);
 	for (i = 0; i < MAX_CALLS; i++) {
 		if (!cs.src[i])
 			continue;
@@ -342,6 +429,9 @@ static int stream_open(void)
 
 	cs.frames = 0;
 	cs.said_missing = false;
+	mtx_lock(&cs.lock);
+	dtmf_clear();         /* nothing left over from the last call */
+	mtx_unlock(&cs.lock);
 	re_atomic_rlx_set(&cs.run, true);
 
 	err = thread_create_name(&cs.thread, "t48audio", stream_thread, NULL);
@@ -389,6 +479,7 @@ static void src_destructor(void *arg)
 	for (i = 0; i < MAX_CALLS; i++)
 		if (cs.src[i] == st)
 			cs.src[i] = NULL;
+	dtmf_clear();
 	last = stream_idle();
 	mtx_unlock(&cs.lock);
 
@@ -451,6 +542,7 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 		return EBUSY;
 	}
 	cs.src[i] = st;
+	dtmf_clear();
 	mtx_unlock(&cs.lock);
 
 	err = stream_open();
@@ -511,12 +603,45 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 }
 
 
+/* t48inband DIGITS: queue them as tones in the call's audio. With no
+ * digits: drop any still waiting. */
+static int cmd_inband(struct re_printf *pf, void *arg)
+{
+	const struct cmd_arg *carg = arg;
+	const char *p;
+	uint32_t lo, hi;
+	(void)pf;
+
+	mtx_lock(&cs.lock);
+	if (!carg->prm || !*carg->prm)
+		dtmf_clear();
+	for (p = carg->prm ? carg->prm : ""; *p; p++) {
+		if (!dtmf_freqs(*p, &lo, &hi) || dtmf.n >= DTMF_QUEUE)
+			continue;
+		dtmf.q[dtmf.n++] = *p;
+		info("t48audio: in-band DTMF '%c'\n", *p);
+	}
+	mtx_unlock(&cs.lock);
+
+	return 0;
+}
+
+
+static const struct cmd cmdv[] = {
+	{"t48inband", 0, CMD_PRM, "Send DTMF as tones in the audio",
+	 cmd_inband},
+};
+
+
 static int module_init(void)
 {
 	int err;
 
 	if (mtx_init(&cs.lock, mtx_plain) != thrd_success)
 		return ENOMEM;
+
+	for (size_t i = 0; i < RE_ARRAY_SIZE(sine); i++)
+		sine[i] = (int16_t)(32767 * sin(2 * M_PI * (double)i / RE_ARRAY_SIZE(sine)));
 
 	str_ncpy(cs.path, T48A_SOCKET, sizeof(cs.path));
 	(void)conf_get_str(conf_cur(), "t48audio_socket", cs.path,
@@ -526,6 +651,7 @@ static int module_init(void)
 			      src_alloc);
 	err |= auplay_register(&auplay, baresip_auplayl(), "t48audio",
 			       play_alloc);
+	err |= cmd_register(baresip_commands(), cmdv, RE_ARRAY_SIZE(cmdv));
 
 	return err;
 }
@@ -533,6 +659,7 @@ static int module_init(void)
 
 static int module_close(void)
 {
+	cmd_unregister(baresip_commands(), cmdv);
 	ausrc = mem_deref(ausrc);
 	auplay = mem_deref(auplay);
 	stream_close();

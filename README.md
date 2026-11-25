@@ -1,6 +1,6 @@
 # yealink-t48s
 
-Open firmware for the Yealink SIP-T48S desk phone: Linux 6.18, a SIP phone with six accounts, contacts and call history, apps, three themes, a web setup page, updates over the network, SSH. Try it from a USB stick without changing the phone. Install it from the phone's own screen, and go back to Yealink's firmware the same way.
+Open firmware for the Yealink SIP-T48S desk phone: Linux 6.18, a SIP phone with up to 16 accounts, contacts and call history, apps, three themes, a web setup page, updates over the network, SSH. Try it from a USB stick without changing the phone. Install it from the phone's own screen, and go back to Yealink's firmware the same way.
 
 ![the idle screen](docs/design/switchboard/phone-idle.png)
 

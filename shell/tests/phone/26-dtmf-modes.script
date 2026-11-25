@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# DTMF per account (issue #77): keys pressed in a call reach the far end as RFC 2833 events (the
+# default), as SIP INFO, and as tones in the audio, which the far end's recording is searched for.
+# Each mode is set in the account's file and the phone service restarted, as Settings does.
+waitstate reg ok 8000
+waitstate audio up 3000
+# ---- RFC 2833, the default: events, no SIP INFO ----
+run : > bob/log
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone outgoing 2000
+run $FAR $BOB accept
+waitstate phone incall 5000
+key 4
+wait 300
+key star
+run $FAR waitlog $BOBLOG CALL_DTMF_START.*4 5
+run $FAR waitlog $BOBLOG 'CALL_DTMF_START.*[*]' 5
+run ! grep -q "received SIP INFO DTMF" bob/log
+run $FAR $BOB cmd hangup
+waitstate phone ended 5000
+key x
+waitstate phone idle 3000
+# ---- SIP INFO ----
+run $CONFIG set sip dtmf info
+run ./apply sip
+wait 1500
+waitstate sip up 10000
+waitstate reg ok 15000
+run : > bob/log
+run : > $BOBLOG
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone outgoing 2000
+run $FAR $BOB accept
+waitstate phone incall 5000
+key 7
+wait 300
+key hash
+run $FAR waitlog $BOBLOG CALL_DTMF_START.*7 5
+run $FAR waitlog $BOBLOG 'CALL_DTMF_START.*#' 5
+run grep -q "received SIP INFO DTMF: '7'" bob/log
+run grep -q "received SIP INFO DTMF: '#'" bob/log
+run $FAR $BOB cmd hangup
+waitstate phone ended 5000
+key x
+waitstate phone idle 3000
+# ---- in-band: tones in the audio, no events and no SIP INFO ----
+run $CONFIG set sip dtmf inband
+run ./apply sip
+wait 1500
+waitstate sip up 10000
+waitstate reg ok 15000
+run : > bob/log
+run : > $BOBLOG
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone outgoing 2000
+run $FAR $BOB accept
+waitstate phone incall 5000
+wait 500
+key 5
+wait 300
+key 5
+wait 300
+key 9
+wait 300
+key star
+wait 1000
+expectstate dtmf 559*
+run $FAR $BOB cmd hangup
+waitstate phone ended 5000
+key x
+waitstate phone idle 3000
+wait 500
+run ! grep -q CALL_DTMF_START $BOBLOG
+run ! grep -q "received SIP INFO DTMF" bob/log
+run $DTMF bob/heard.wav 559*
+run $CONFIG unset sip dtmf
+run ./apply sip
+wait 1500
+waitstate sip up 10000
+waitstate reg ok 15000
+quit
