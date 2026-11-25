@@ -33,6 +33,8 @@ struct hw {
 	void (*destroy)(struct hw *hw);
 	/* T48AC_HW_CAPTURE | T48AC_HW_PLAYBACK: what the last start found */
 	int caps;
+	/* samples between playback() and the loudspeaker, more or less */
+	int play_delay;
 	/* counters for the log */
 	unsigned long cap_xruns, play_xruns, play_dropped;
 };

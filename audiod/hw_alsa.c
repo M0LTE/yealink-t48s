@@ -313,6 +313,9 @@ struct hw *hw_alsa_new(int card)
 	a->card = card;
 	a->ctl_fd = a->cap_fd = a->play_fd = -1;
 	a->hw.name = "alsa";
+	/* a frame is written behind one already queued, and the driver moves
+	 * 5 ms at a time */
+	a->hw.play_delay = PLAY_START - FRAME + 80;
 	a->hw.start = alsa_start;
 	a->hw.stop = alsa_stop;
 	a->hw.tick_fd = alsa_tick_fd;

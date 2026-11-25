@@ -29,13 +29,29 @@ enum t48ac_route {
 	T48AC_ROUTE_COUNT
 };
 
-/* Volumes the service keeps: one per route, and the ringer */
+/* Volumes the service keeps: one per route, the ringer, and apps' sound */
 enum t48ac_vol {
 	T48AC_VOL_HANDSET = 1,	/* same numbers as the routes */
 	T48AC_VOL_SPEAKER = 2,
 	T48AC_VOL_HEADSET = 3,
 	T48AC_VOL_RINGER  = 4,
+	T48AC_VOL_APP     = 5,
 	T48AC_VOL_COUNT
+};
+
+/* An app's sound (docs/audiod.md). The shell makes the ring the app writes
+ * its samples into (struct t48_sound_ring, t48_proto.h): a memfd of
+ * T48AC_APP_BYTES, sealed against changing size, with T48AC_APP_FRAMES
+ * samples at T48AC_APP_DATA. It hands the service the descriptor with APP. */
+#define T48AC_APP_FRAMES 4096	/* a quarter of a second */
+#define T48AC_APP_DATA   4096
+#define T48AC_APP_BYTES  (T48AC_APP_DATA + T48AC_APP_FRAMES * 2)
+
+enum t48ac_app {
+	T48AC_APP_GONE   = 0,	/* no app has sound: the ring is let go */
+	T48AC_APP_PAUSED = 1,	/* off the screen: silent, and what was waiting is dropped */
+	T48AC_APP_FRONT  = 2,	/* in front: what it writes is played */
+	T48AC_APP_COUNT
 };
 
 /* Call-progress tones, made in the service. One at a time; it plays until
@@ -62,6 +78,9 @@ enum t48ac_type {
 				 * anything else a click. Feedback for the owner
 				 * only; baresip sends the real DTMF. */
 	T48AC_GET    = 8,	/* none. Answered with STATE. */
+	T48AC_APP    = 9,	/* u8 t48ac_app. A descriptor sent with it
+				 * (SCM_RIGHTS) is the ring of a new app and
+				 * replaces any other. */
 
 	/* service to shell */
 	T48AC_STATE  = 0x81,	/* struct t48ac_state; sent in answer to HELLO
@@ -74,6 +93,7 @@ enum t48ac_error {
 	T48AC_ERR_VERSION = 1,
 	T48AC_ERR_LENGTH  = 2,
 	T48AC_ERR_VALUE   = 3,
+	T48AC_ERR_RING    = 4,	/* APP: no ring, or not one made as above */
 };
 
 /* Payload of STATE. All single bytes, so no byte order to mind. Later
@@ -85,10 +105,13 @@ struct t48ac_state {
 	unsigned char tone;		/* t48ac_tone */
 	unsigned char ring;
 	unsigned char call;		/* 1 while baresip's call stream is connected */
-	unsigned char vol[T48AC_VOL_COUNT];	/* [0] unused */
+	unsigned char vol[5];		/* [0] unused, then handset, speaker,
+					 * headset, ringer */
 	unsigned char hw;		/* bit 0 capture works, bit 1 playback works,
 					 * bit 2 the hardware is running now */
-	unsigned char pad;
+	unsigned char vol_app;		/* T48AC_VOL_APP */
+	unsigned char app;		/* t48ac_app, as last told */
+	unsigned char app_sound;	/* 1 while an app's sound is being played */
 };
 
 #define T48AC_HW_CAPTURE  1
@@ -104,5 +127,9 @@ struct t48ac_state {
  *    call waiting beep on that route, so the melody can never reach an
  *    earpiece. When a ringing call is answered send RING 0 before ROUTE.
  *  - MUTE silences the microphone only. It is cleared by ROUTE NONE.
+ *  - An app's sound: from the loudspeaker at the app volume, through the
+ *    loudspeaker's limit. With a route set and nothing else on it, on that
+ *    route. Calls win: while RING is on, a TONE plays, or a route is set
+ *    with the call stream up, it is taken at the same rate and not played.
  */
 #endif

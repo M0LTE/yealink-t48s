@@ -41,6 +41,12 @@ int dsp_vol_q15(int level);
  * 2 dB a step. Tones and key sounds on hook use it too. */
 int dsp_alert_q15(int level);
 
+/* The app volume 0..15 as a Q15 gain for the loudspeaker: 0 is silent, 15
+ * puts a full-scale sample exactly on SPK_LIMIT, 2 dB a step. So an app's
+ * sound reaches the limit only at 15 and is never squashed by the limiter
+ * on its own. */
+int dsp_app_q15(int level);
+
 /* Peak limiter: no sample leaves above ceiling. A peak above it turns the
  * gain down at once, and the gain comes back over about 60 ms, so a steady
  * tone is turned down, not clipped. */
@@ -52,6 +58,10 @@ void dsp_gain(int16_t *x, int n, int gain_q15);
 
 /* out = a + b * gain (Q15), saturated. a may be the same buffer as out. */
 void dsp_mix(int16_t *out, const int16_t *a, const int16_t *b, int gain_q15, int n);
+
+/* out += b * gain, the gain (Q15) moving in a straight line from g0 to g1
+ * over the n samples; rounded and saturated */
+void dsp_mix_ramp(int16_t *out, const int16_t *b, int g0, int g1, int n);
 
 /* Mean of |x| over the frame: the level measure used everywhere */
 int dsp_level(const int16_t *x, int n);

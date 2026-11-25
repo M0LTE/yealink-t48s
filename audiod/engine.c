@@ -15,6 +15,7 @@ void engine_init(struct engine *e)
 	for (i = 0; i < T48AC_VOL_COUNT; i++)
 		e->vol[i] = 8;
 	e->vol[T48AC_VOL_RINGER] = 13;	/* 4 dB under the loudspeaker's limit */
+	e->vol[T48AC_VOL_APP] = 10;
 	echo_init(&e->echo, ECHO_NONE, 0);
 }
 
@@ -87,6 +88,11 @@ void engine_set_ring(struct engine *e, int on)
 	update_alert(e);
 }
 
+void engine_set_call(struct engine *e, int up)
+{
+	e->call = !!up;
+}
+
 void engine_key(struct engine *e, int key)
 {
 	tone_start(&e->key, tone_for_key(key));
@@ -110,6 +116,25 @@ void engine_tick(struct engine *e, const int16_t *mic_in, const int16_t *spk_in,
 		dsp_mix(spk_out, spk_out, tbuf, vol, FRAME);
 	if (tone_render(&e->key, tbuf, FRAME))
 		dsp_mix(spk_out, spk_out, tbuf, vol, FRAME);
+	/* An app's sound, at its own volume: on the loudspeaker a full-scale
+	 * sample at 15 is on the limit; in an earpiece it is as loud as a
+	 * call. Held (a call, ringing, a tone) it fades out over one frame
+	 * and back in after, so nothing clicks. */
+	{
+		int row = engine_hw_row(e);
+		int want = engine_app_held(e) ? 0 :
+			routes[row].amp ? dsp_app_q15(e->vol[T48AC_VOL_APP]) : dsp_vol_q15(e->vol[T48AC_VOL_APP]);
+
+		e->app_heard = 0;
+		if (e->app) {
+			if (want || e->app_gain) {
+				dsp_mix_ramp(spk_out, e->app, e->app_gain, want, FRAME);
+				e->app_heard = 1;
+			}
+			e->app = 0;
+		}
+		e->app_gain = want;
+	}
 	/* The amplifier can reset the phone (issue #57): call, tones and
 	 * ringer all go through the limiter on their way to it */
 	if (routes[engine_hw_row(e)].amp)

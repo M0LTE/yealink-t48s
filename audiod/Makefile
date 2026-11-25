@@ -13,15 +13,17 @@ SPX_FLAGS = -O2 -fno-tree-vectorize -ffunction-sections -w -I$(SPX) -DFIXED_POIN
 CC ?= cc
 # the call stream's protocol header, shared with baresip's module
 T48AUDIO ?= ../sip/modules/t48audio
+# the app protocol's header, for the ring an app's sound comes in
+LIBT48_INCLUDE ?= ../libt48/include
 CFLAGS ?= -O2
-CFLAGS += -Wall -Wextra -std=gnu99 -D_GNU_SOURCE -I. -I$(T48AUDIO) -I$(SPX)
+CFLAGS += -Wall -Wextra -std=gnu99 -D_GNU_SOURCE -I. -I$(T48AUDIO) -I$(LIBT48_INCLUDE) -I$(SPX)
 # speexdsp has two unused floating-point helpers: dropped at link time
 LDFLAGS += -static -Wl,--gc-sections -lm
 
-CORE = dsp.c tone.c echo.c aec.c pace.c engine.c routes.c msg.c $(SPX_OBJS)
+CORE = dsp.c tone.c echo.c aec.c pace.c engine.c routes.c msg.c appsnd.c $(SPX_OBJS)
 SRCS = main.c hw_null.c hw_alsa.c $(CORE)
-HDRS = $(wildcard *.h include/*.h) $(T48AUDIO)/t48audio_proto.h
-TESTS = test_dsp test_tone test_pace test_echo test_aec test_engine test_msg
+HDRS = $(wildcard *.h include/*.h) $(T48AUDIO)/t48audio_proto.h $(LIBT48_INCLUDE)/t48_proto.h
+TESTS = test_dsp test_tone test_pace test_echo test_aec test_engine test_msg test_appsnd
 
 all: $(O)/t48-audiod $(O)/t48-audioctl
 

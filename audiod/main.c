@@ -34,6 +34,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include "appsnd.h"
 #include "engine.h"
 #include "hw.h"
 #include "msg.h"
@@ -42,9 +43,14 @@
 
 #define MAX_CTL      4
 #define LINGER_TICKS 5	/* run on 100 ms after the last sound, so it is played out */
+/* After an app's sound the hardware is kept for 2 s: a game's next beep then
+ * starts at once and the amplifier is not switched for each one */
+#define APP_LINGER_TICKS 100
+#define APP_HEARD_TICKS  25	/* STATE says an app is sounding for this long after */
 
 struct client {
 	int fd;
+	int passed;	/* a descriptor that came with a message, or -1 */
 	struct msgbuf mb;
 };
 
@@ -54,6 +60,8 @@ static struct hw *hw;
 static int hw_running, hw_row = -1, linger, verbose;
 static int64_t hw_retry_at;
 static struct client call = { .fd = -1 };
+static struct appsnd app;
+static int app_told, app_owner = -1, app_heard;
 
 /* --record: a test aid for measuring and tuning on the phone. While a call
  * stream is open, each tick's three frames go to a 3-channel WAV file:
@@ -226,13 +234,36 @@ static void fill_state(struct t48ac_state *s)
 	s->tone = (unsigned char)eng.tone;
 	s->ring = (unsigned char)eng.ring;
 	s->call = (unsigned char)call_ready;
-	for (i = 1; i < T48AC_VOL_COUNT; i++)
+	for (i = 1; i <= T48AC_VOL_RINGER; i++)
 		s->vol[i] = (unsigned char)eng.vol[i];
 	s->hw = (unsigned char)(hw->caps | (hw_running ? T48AC_HW_RUNNING : 0));
+	s->vol_app = (unsigned char)eng.vol[T48AC_VOL_APP];
+	s->app = (unsigned char)app_told;
+	s->app_sound = app_heard > 0;
+}
+
+/* An app's sound, as the log wants it when the app goes */
+static void app_drop(const char *why)
+{
+	if (!app.ring)
+		return;
+	say("app sound closed (%s): %lu samples in %lu frames, peak %d, ran dry %lu times, "
+	    "%lu resets; hardware underruns %lu, dropped %lu",
+	    why, app.samples, app.frames, app.peak, app.dry, app.resets,
+	    hw->play_xruns, hw->play_dropped);
+	appsnd_close(&app);
+	app_told = T48AC_APP_GONE;
+	app_owner = -1;
 }
 
 static void ctl_drop(int i)
 {
+	/* an app does not outlive the shell that started it */
+	if (app_owner == i)
+		app_drop("the shell went away");
+	if (ctl[i].passed >= 0)
+		close(ctl[i].passed);
+	ctl[i].passed = -1;
 	close(ctl[i].fd);
 	ctl[i].fd = -1;
 }
@@ -251,7 +282,7 @@ static void ctl_read(int i)
 	unsigned type, len;
 	int r;
 
-	if (msg_fill(ctl[i].fd, &ctl[i].mb) < 0) {
+	if (msg_fill_fd(ctl[i].fd, &ctl[i].mb, &ctl[i].passed) < 0) {
 		ctl_drop(i);
 		return;
 	}
@@ -259,9 +290,10 @@ static void ctl_read(int i)
 		static const unsigned char need[] = {
 			[T48AC_HELLO] = 2, [T48AC_ROUTE] = 1, [T48AC_VOLUME] = 2, [T48AC_MUTE] = 1,
 			[T48AC_TONE] = 1, [T48AC_RING] = 1, [T48AC_KEY] = 1, [T48AC_GET] = 0,
+			[T48AC_APP] = 1,
 		};
 
-		if (type < T48AC_HELLO || type > T48AC_GET)
+		if (type < T48AC_HELLO || type > T48AC_APP)
 			continue;	/* unknown: skipped, as the protocol says */
 		if (len < need[type]) {
 			ctl_error(i, type, T48AC_ERR_LENGTH);
@@ -312,6 +344,37 @@ static void ctl_read(int i)
 		case T48AC_KEY:
 			engine_key(&eng, p[0]);
 			break;
+		case T48AC_APP:
+			if (p[0] >= T48AC_APP_COUNT) {
+				ctl_error(i, type, T48AC_ERR_VALUE);
+				break;
+			}
+			if (p[0] == T48AC_APP_GONE) {
+				if (app_owner == i)
+					app_drop("the app has gone");
+				break;
+			}
+			if (ctl[i].passed >= 0) {
+				int fd = ctl[i].passed;
+
+				ctl[i].passed = -1;
+				app_drop("replaced by a new app");
+				if (appsnd_open(&app, fd) < 0) {
+					say("app sound: the ring is not a sealed memfd of %d bytes: refused", T48AC_APP_BYTES);
+					ctl_error(i, type, T48AC_ERR_RING);
+					break;
+				}
+				app_owner = i;
+				say("app sound open");
+			}
+			if (!app.ring || app_owner != i) {
+				ctl_error(i, type, T48AC_ERR_RING);
+				break;
+			}
+			app_told = p[0];
+			appsnd_front(&app, p[0] == T48AC_APP_FRONT);
+			appsnd_publish(&app, engine_app_held(&eng), hw->play_delay);
+			break;
 		}
 	}
 	if (ctl[i].fd >= 0 && r < 0)
@@ -332,6 +395,7 @@ static void ctl_accept(int lfd)
 		return;
 	}
 	ctl[i].fd = fd;
+	ctl[i].passed = -1;
 	ctl[i].mb.len = ctl[i].mb.used = 0;
 	ctl_wants_state[i] = 0;
 }
@@ -356,7 +420,7 @@ static void ctl_publish(void)
 
 static int wanted(void)
 {
-	return eng.route || call.fd >= 0 || engine_sounding(&eng);
+	return eng.route || call.fd >= 0 || engine_sounding(&eng) || appsnd_waiting(&app) > 0;
 }
 
 /* Open, switch or close the hardware to match what is wanted */
@@ -388,24 +452,35 @@ static void manage_hw(void)
 
 static void tick(const int16_t *mic)
 {
-	int16_t spk_in[FRAME], spk_out[FRAME];
+	int16_t spk_in[FRAME], spk_out[FRAME], app_in[FRAME];
 	struct { uint32_t seq; int16_t samples[FRAME]; } mic_msg;	/* little-endian hosts only */
 	int64_t t0 = now_us(), dt;
 	int have = call_ready && fq_pop(&spkq, spk_in);
 
+	engine_set_call(&eng, call_ready);
+	if (appsnd_take(&app, app_in, engine_app_held(&eng), hw->play_delay))
+		engine_app_frame(&eng, app_in);
 	engine_tick(&eng, mic, have ? spk_in : 0, mic_msg.samples, spk_out);
 	hw->playback(hw, spk_out);
-	if (call_ready)
+	if (call_ready || app.front)
 		rec_frame(mic_msg.samples, have ? spk_in : 0, spk_out);
 	if (call_ready) {
 		mic_msg.seq = mic_seq++;
 		if (msg_send(call.fd, T48A_MIC, &mic_msg, sizeof(mic_msg)) < 0)
 			call_drop("baresip stopped reading");
 	}
-	if (wanted())
+	if (!wanted()) {
+		if (linger > 0)
+			linger--;
+	} else if (linger < LINGER_TICKS) {
 		linger = LINGER_TICKS;
-	else if (linger > 0)
-		linger--;
+	}
+	if (app_heard > 0)
+		app_heard--;
+	if (eng.app_heard) {
+		linger = APP_LINGER_TICKS;
+		app_heard = APP_HEARD_TICKS;
+	}
 	dt = now_us() - t0;
 	st.ticks++;
 	st.tick_us_sum += (unsigned long)dt;
@@ -476,7 +551,7 @@ int main(int argc, char **argv)
 	engine_init(&eng);
 	fq_reset(&spkq);
 	for (i = 0; i < MAX_CTL; i++)
-		ctl[i].fd = -1;
+		ctl[i].fd = ctl[i].passed = -1;
 	signal(SIGPIPE, SIG_IGN);
 	sigemptyset(&sigs);
 	sigaddset(&sigs, SIGTERM);
@@ -508,6 +583,11 @@ int main(int argc, char **argv)
 			p[n++] = (struct pollfd){ hw->tick_fd(hw), POLLIN, 0 };
 		} else if (wanted()) {
 			timeout = 200;	/* the hardware would not start: try again soon */
+		} else if (app.front) {
+			/* nothing tells us when an app starts to write: look
+			 * every 20 ms while one with sound is on the screen */
+			timeout = FRAME_MS;
+			appsnd_publish(&app, engine_app_held(&eng), hw->play_delay);
 		}
 		if (call.fd >= 0) {
 			icall = n;
@@ -550,6 +630,7 @@ int main(int argc, char **argv)
 	}
 
 	call_drop("service stopping");
+	app_drop("service stopping");
 	if (rec) {
 		rec_header();
 		fclose(rec);
