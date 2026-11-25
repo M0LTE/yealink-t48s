@@ -4,7 +4,8 @@ Issue [#25](https://github.com/M0LTE/yealink-t48s/issues/25). Design: [architect
 
 ## Summary
 
-- baresip 4.13.0 and libre 4.13.0 (both BSD-3-Clause, current releases) build as one static ARMv6 musl soft-float binary of **956 KB**, with only the modules we need. With SIP over TLS it is **3.3 MB**, because TLS in libre means OpenSSL.
+- baresip 4.13.0 and libre 4.13.0 (both BSD-3-Clause, current releases) build as one static ARMv6 musl soft-float binary of **1.2 MB**, with only the modules we need. With SIP over TLS it is about **3.8 MB**, because TLS in libre means OpenSSL.
+- Calls offer **Opus, G.722, G.711**, in that order. Opus runs wideband at the audio service's 16 kHz, with in-band FEC for lossy links. CPU on the phone is measured below ([Codecs](#codecs)).
 - Proved off the phone, through a throwaway Kamailio registrar on loopback: two instances **register with a password** (one over UDP, one over TCP; a wrong password is refused), one **dials**, the other **answers**, both **hear the other's tone**, in G.711 and in G.722. The **ARM binary does the same under qemu-arm**: registers, calls, sends and receives audio.
 - Calls are driven with JSON in netstrings: commands in, answers and events out. That is the protocol of baresip's ctrl_tcp module, served by our own module **t48ctrl** on a Unix socket only root can open, so apps cannot place calls. The shell speaks it ([phone.md](phone.md)).
 - Our own audio module, **t48audio**, carries the call's audio to and from the audio service `t48-audiod` (#24, [audiod.md](audiod.md)). The boundary is written down in [`t48audio_proto.h`](../sip/modules/t48audio/t48audio_proto.h). With no audio service running it is a null device, so SIP work does not depend on it.
@@ -16,7 +17,7 @@ Issue [#25](https://github.com/M0LTE/yealink-t48s/issues/25). Design: [architect
 | `account` | reads the accounts file that `t48-sip` writes |
 | `menu` | the call commands (`dial`, `accept`, `hangup`, `reginfo`, ...) that t48ctrl runs |
 | `t48mwi` | ours: asks each account's server about waiting voicemail (RFC 3842) and passes the answer on as an event, for the message lamp. baresip's own `mwi` module is not built: it can spin for ever at start when an account registers before its start-up timer runs (seen against a server on the same machine), and it delays shutdown by half a second |
-| `g711`, `libg722` | codecs: G.711 (PCMU, PCMA) and G.722. G.722 is not inside baresip: `libg722` wraps sippy's [libg722](https://github.com/sippy/libg722) (two C files, BSD-2-Clause and public domain) |
+| `opus`, `g711`, `libg722` | codecs: Opus, G.711 (PCMU, PCMA) and G.722 ([Codecs](#codecs)). Neither Opus nor G.722 is inside baresip: `opus` wraps [libopus](https://opus-codec.org) 1.6.1 (BSD-3-Clause), built fixed point; `libg722` wraps sippy's [libg722](https://github.com/sippy/libg722) (two C files, BSD-2-Clause and public domain) |
 | `auresamp` | converts the 16 kHz device audio to and from 8 kHz for G.711 |
 | `t48audio` | ours: the call stream to the audio service (see below) |
 | `aufile`, `ausine` | WAV file and tone audio, for tests |
@@ -27,11 +28,11 @@ libre is built without BFCP, PCP, RTMP, zlib and backtraces. It needs a crypto l
 
 | Binary (stripped) | Size |
 |---|---|
-| ARM, no TLS (the default) | 982,968 bytes |
-| ARM, with TLS | 3,464,920 bytes |
-| x86-64, for the PC test | 1,058,424 bytes |
+| ARM, no TLS (the default) | 1,290,360 bytes |
+| ARM, with TLS | about 3.77 MB (3,464,920 before Opus, which adds 307,392) |
+| x86-64, for the PC test | 1,456,312 bytes |
 
-TLS costs about 2.4 MB of flash and RAM. Plain UDP and TCP first, as the design says; TLS is one build switch away when wanted.
+Opus costs 300 KB. TLS costs about 2.4 MB of flash and RAM. Plain UDP and TCP first, as the design says; TLS is one build switch away when wanted.
 
 One patch to libre ([`sip/patches`](../sip/patches)): it reads an address flag (`IFA_FLAGS`) that arrived in Linux 3.14, and we build against our 3.6.11 kernel's headers, whose kernel never sends it.
 
@@ -109,11 +110,55 @@ To try it by hand: `python3 sip/test/far.py /run/t48-sip/ctrl.sock cmd reginfo`.
 
 baresip's own `alsa` module is not built. In the design only the audio service touches the hardware; `alsa` would also pull in alsa-lib. It could still be useful for one quick on-phone test before #24 exists, at a size cost not yet measured.
 
+## Codecs
+
+Offered in this order: **Opus, G.722, G.711**. Measured on the phone on 2026-11-25, silently: a second baresip (the Buildroot build) ran from `/tmp`, called a PC with a speech file as its microphone and a file as its speaker, and its CPU was read over 25 s of the call. That includes RTP, the jitter buffer and the file audio, so most of G.711's 10% is not the codec.
+
+| Codec | Audio | CPU in a call | Offered |
+|---|---|---|---|
+| Opus, complexity 3, 32 kbit/s, FEC | wideband | 28% | yes, first |
+| G.722 | wideband, 64 kbit/s | 13% | yes |
+| G.711 (PCMU, PCMA) | narrowband, 64 kbit/s | 10% | yes, last |
+| G.729 | narrowband, 8 kbit/s | not built | no |
+| Speex | narrow or wideband | not built | no |
+| iLBC | narrowband | not built | no |
+| AMR-WB (G.722.2) | wideband | not built | no |
+| Codec2 | narrowband, under 3.2 kbit/s | not built | no |
+
+- **G.729:** narrowband and worse than G.711; its only use is a thin trunk, and a provider with G.729 also has G.711. bcg729 (GPL-3.0-or-later) would fit our licence if one is ever needed.
+- **Speex:** replaced by Opus, by the same people; few providers offer it.
+- **iLBC:** narrowband; Opus with FEC copes with loss better.
+- **AMR-WB:** a mobile-network codec with patents still licensed through a pool; rare on SIP providers.
+- **Codec2:** no registered RTP format, so only our own phones would speak it. baresip has a module, but there is no use for it yet.
+
+### Opus
+
+libopus 1.6.1, fixed point (the processor has no FPU) with its ARMv5E and ARMv6 assembly. The image uses Buildroot's own `opus` package, the same version, built with `-O2`; it would use NEON only after asking the processor, which has none. `sip/build.sh` builds the same with clang. It adds 300 KB to baresip.
+
+The codec alone, from [`sip/test/opus-bench.c`](../sip/test/opus-bench.c) on the phone: 60 s of speech in 20 ms frames, Buildroot's libopus, share of the processor.
+
+| Complexity | Encode, 24 or 32 kbit/s | Encode, 32 kbit/s with FEC | Decode |
+|---|---|---|---|
+| 0 | 9% | 11% | 1.6% |
+| 3 | 13% | 17% | 1.6% |
+| 5 | 19% | 24% | 1.7% |
+| 10 | 53% | 62% | 1.7% |
+
+At 48 kHz (fullband, 32 kbit/s) encoding costs 16, 21, 28 and 62% at the same complexities, and decoding 6%. The bitrate makes almost no difference. Above complexity 6 libopus adds an analysis in floating point, which this processor emulates, hence the jump at 10.
+
+The settings, in [`sip/config/config`](../sip/config/config):
+
+- **16 kHz:** the audio service's rate, so nothing is resampled, and a third cheaper than 48 kHz. A peer may still send fullband, as baresip cannot advertise `maxplaybackrate`; it is decoded at 16 kHz.
+- **Complexity 3:** a call costs 28% of the processor, against 21% at 0 and 34% at 5. That leaves room for the echo canceller (16.5%, [aec.md](aec.md)), the shell and an app. 5 adds perceptual noise shaping and is worth a listen: set `opus_complexity` in `/data/local/sip/config`.
+- **32 kbit/s, mono, voice.**
+- **In-band FEC, for 10% loss:** each packet carries a coarse copy of the one before, so a single lost packet is rebuilt rather than guessed. It costs about 4% more encoding. We ask peers for it and send it to peers that ask.
+- **No DTX:** on a steady tone it falls to comfort noise after a second (a test tone came out 15 dB down), so held notes and tones would suffer; and baresip still sends a packet every 20 ms, so it saves only bytes.
+
 ## The test
 
-`sip/test/call-test.sh` (in the build container) starts Kamailio on loopback with digest login for REGISTER and INVITE ([`kamailio.cfg`](../sip/test/kamailio.cfg)), then runs alice and bob through `t48-sip` with settings files, as on the phone. [`ctrl.py`](../sip/test/ctrl.py) checks both are registered, makes alice dial and bob answer over t48ctrl, waits 4 s, hangs up, and checks each recording for the other side's tone (alice sends 440 Hz, bob 1000 Hz).
+`sip/test/call-test.sh` (in the build container) starts Kamailio on loopback with digest login for REGISTER and INVITE ([`kamailio.cfg`](../sip/test/kamailio.cfg)), then runs alice and bob through `t48-sip` with settings files, as on the phone. [`ctrl.py`](../sip/test/ctrl.py) checks both are registered, makes alice dial and bob answer over t48ctrl, waits 4 s, hangs up, and checks each recording for the other side's tone (alice sends 440 Hz, bob 1000 Hz). Each call takes out the codecs offered ahead of the one under test, and checks from alice's log that the call used it.
 
-Result on 2026-11-23, all passing:
+Result on 2026-11-23, all passing (Opus rows 2026-11-25):
 
 | Check | Result |
 |---|---|
@@ -121,13 +166,17 @@ Result on 2026-11-23, all passing:
 | Wrong password | `401 Unauthorized`, refused |
 | G.711 (PCMU) call, dialled and answered over the control socket | bob heard 440 Hz, alice heard 1000 Hz |
 | G.722 call | the same |
+| Opus call, nothing taken out of the offer | the same, at the tone's full level |
 | G.722 call with bob on `t48audio` and no audio service running | established and closed cleanly; alice heard silence, as she should |
 | G.722 call with **alice as the ARM binary under qemu-arm** | bob heard 440 Hz, alice heard 1000 Hz |
+| Opus call with alice as the ARM binary under qemu-arm | the same |
+
+`sip/test/audiod-test.sh` adds an Opus call through two audio services, and one with alice's side as the ARM binaries under qemu; both pass. Two of its checks fail on main as well, whatever the codec, so they are not about codecs: bob's ringer (in every call) and, on the speakerphone, bob's loudspeaker playing alice.
 
 ## What's left for the phone
 
 1. Copy the ARM binary, `t48-sip`, the config and a settings file to the phone under our kernel and register to a real SIP server; dial out and in from an SSH session with `sip/test/far.py` on the control socket. The null backend is enough for this.
-2. Measure CPU for a G.722 call on the 500 MHz ARM11 (expected small; G.711 is trivial).
+2. Done: CPU of a call in each codec, measured on the phone ([Codecs](#codecs)).
 3. Done off the phone: our control module on a Unix socket (`t48ctrl`), and the shell's client for it ([phone.md](phone.md)).
 4. Done off the phone: the real `t48audio` and the audio service, tested with calls between two of each (`sip/test/audiod-test.sh`, results in [audiod.md](audiod.md#tests-and-results)). On the phone it waits for playback in the kernel driver.
 5. A runit service for `t48-sip`. (Buildroot packages: done, #16.)
@@ -135,4 +184,4 @@ Result on 2026-11-23, all passing:
 
 ## Licences
 
-baresip and libre are BSD-3-Clause, libg722 BSD-2-Clause and public domain, mbedTLS and OpenSSL Apache-2.0. Their sources are used unmodified apart from the one patch above, and their licence texts are installed with the binary. Our files in `sip/` are AGPL-3.0-or-later.
+baresip, libre and libopus are BSD-3-Clause, libg722 BSD-2-Clause and public domain, mbedTLS and OpenSSL Apache-2.0. Their sources are used unmodified apart from the one patch above, and their licence texts are installed with the binary. Our files in `sip/` are AGPL-3.0-or-later.

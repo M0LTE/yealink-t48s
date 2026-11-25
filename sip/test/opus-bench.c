@@ -12,6 +12,7 @@
 // transmission. OUT.wav gets the decoded audio, for listening.
 //
 // Build: $T/bin/armcc -O2 -I$OPUS/include/opus opus-bench.c $OPUS/lib/libopus.a -o opus-bench
+// (sip/build.sh leaves libopus in $T/sip-arm/prefix), or Buildroot's gcc with -static ... -lm.
 #include <opus.h>
 #include <stdint.h>
 #include <stdio.h>
