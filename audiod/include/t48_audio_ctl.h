@@ -66,6 +66,21 @@ enum t48ac_tone {
 	T48AC_TONE_COUNT
 };
 
+/* Ringtones (issue #77): the shell picks one per account. CUSTOM is a sound
+ * the owner gave the phone: 16 kHz mono s16le samples, at most
+ * T48AC_CUSTOM_MAX of them, in a file whose descriptor comes with the RING
+ * message (SCM_RIGHTS). Without one the last custom sound is used, or
+ * STANDARD if there is none. */
+enum t48ac_ringtone {
+	T48AC_RINGTONE_STANDARD = 0,	/* two notes in turn, UK double ring */
+	T48AC_RINGTONE_LONG     = 1,	/* the same notes, one long ring */
+	T48AC_RINGTONE_CHIME    = 2,	/* two falling notes */
+	T48AC_RINGTONE_PULSE    = 3,	/* three short beeps */
+	T48AC_RINGTONE_CUSTOM   = 4,
+	T48AC_RINGTONE_COUNT
+};
+#define T48AC_CUSTOM_MAX (10 * 16000)	/* ten seconds */
+
 enum t48ac_type {
 	/* shell to service */
 	T48AC_HELLO  = 1,	/* u16 version. Answered with STATE. */
@@ -73,7 +88,10 @@ enum t48ac_type {
 	T48AC_VOLUME = 3,	/* u8 which (t48ac_vol), u8 level 0..15 */
 	T48AC_MUTE   = 4,	/* u8 on: the microphone is silenced towards the call */
 	T48AC_TONE   = 5,	/* u8 tone */
-	T48AC_RING   = 6,	/* u8 on: an incoming call is alerting */
+	T48AC_RING   = 6,	/* u8 on: an incoming call is alerting. Then,
+				 * optional, u8 t48ac_ringtone (STANDARD if
+				 * absent); with CUSTOM, the sound's file as
+				 * a descriptor beside the message */
 	T48AC_KEY    = 7,	/* u8 key: '0'-'9', '*', '#' give the DTMF sound,
 				 * anything else a click. Feedback for the owner
 				 * only; baresip sends the real DTMF. */
@@ -112,6 +130,8 @@ struct t48ac_state {
 	unsigned char vol_app;		/* T48AC_VOL_APP */
 	unsigned char app;		/* t48ac_app, as last told */
 	unsigned char app_sound;	/* 1 while an app's sound is being played */
+	unsigned char ringtone;		/* t48ac_ringtone the ringer plays (CUSTOM
+					 * only once a sound is loaded) */
 };
 
 #define T48AC_HW_CAPTURE  1
@@ -122,8 +142,8 @@ struct t48ac_state {
  *  - Call audio: on the route. With route NONE it is dropped.
  *  - TONE and KEY: on the route, at that route's volume. With route NONE
  *    (on-hook dialling) they come from the loudspeaker at the ringer volume.
- *  - RING: with route NONE, the ring melody from the loudspeaker at the
- *    ringer volume. While a route is set (already in a call) it becomes the
+ *  - RING: with route NONE, the ring melody (its ringtone) from the
+ *    loudspeaker at the ringer volume. While a route is set (already in a call) it becomes the
  *    call waiting beep on that route, so the melody can never reach an
  *    earpiece. When a ringing call is answered send RING 0 before ROUTE.
  *  - MUTE silences the microphone only. It is cleared by ROUTE NONE.

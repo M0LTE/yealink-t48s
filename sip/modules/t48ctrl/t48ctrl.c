@@ -24,6 +24,11 @@
  *    are talking to with each other and takes us out: an attended transfer.
  *    The first call is the one sent away (it must be on hold), the second
  *    the one it is sent to.
+ *  - The command "redirect <call-id> <target>" turns away a call that is
+ *    still ringing with 302 Moved Temporarily and the target as its
+ *    Contact: call forwarding (issue #77). The caller's phone or server
+ *    calls the target. A target with no sip: and no @ is a number at the
+ *    account's own server.
  *
  * Who may connect: the socket is made mode 0600 inside t48-sip's run
  * directory (0700), and each connection's peer is checked: only root, or the
@@ -38,6 +43,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -302,9 +308,63 @@ static int cmd_joincalls(struct re_printf *pf, void *arg)
 }
 
 
+/* redirect <call-id> <target>: 302 to a call that is still ringing */
+static int cmd_redirect(struct re_printf *pf, void *arg)
+{
+	const struct cmd_arg *carg = arg;
+	struct pl id, to;
+	char cid[200], target[160], uri[300];
+	const struct uri *luri;
+	struct call *call;
+
+	if (re_regex(carg->prm, str_len(carg->prm), "[^ ]+ [^ ]+", &id, &to)) {
+		re_hprintf(pf, "usage: redirect <call-id> <target>");
+		return EINVAL;
+	}
+	pl_strcpy(&id, cid, sizeof(cid));
+	pl_strcpy(&to, target, sizeof(target));
+	call = uag_call_find(cid);
+	if (!call || call_state(call) != CALL_STATE_INCOMING) {
+		re_hprintf(pf, "no such ringing call");
+		return ENOENT;
+	}
+	/* nothing that would break out of the Contact header */
+	if (strpbrk(target, "<>\"\r\n,")) {
+		re_hprintf(pf, "bad target");
+		return EINVAL;
+	}
+	luri = account_luri(ua_account(call_get_ua(call)));
+	if (!strncasecmp(target, "sip:", 4) || !strncasecmp(target, "sips:", 5))
+		str_ncpy(uri, target, sizeof(uri));
+	else if (strchr(target, '@'))
+		re_snprintf(uri, sizeof(uri), "sip:%s", target);
+	else if (luri) {
+		/* an IPv6 server keeps its brackets */
+		bool v6 = pl_strchr(&luri->host, ':') != NULL;
+
+		re_snprintf(uri, sizeof(uri), "sip:%s@%s%r%s", target,
+			    v6 ? "[" : "", &luri->host, v6 ? "]" : "");
+		if (luri->port) {
+			size_t at = strlen(uri);
+			re_snprintf(uri + at, sizeof(uri) - at, ":%u",
+				    luri->port);
+		}
+	}
+	else
+		return EINVAL;
+
+	info("t48ctrl: call %s forwarded to %s\n", cid, uri);
+	ua_hangupf(call_get_ua(call), call, 302, "Moved Temporarily",
+		   "Contact: <%s>\r\nContent-Length: 0\r\n\r\n", uri);
+	return 0;
+}
+
+
 static const struct cmd cmdv[] = {
 	{"joincalls", 0, CMD_PRM, "Attended transfer <call-id> <call-id>",
 	 cmd_joincalls},
+	{"redirect", 0, CMD_PRM, "Forward a ringing call <call-id> <target>",
+	 cmd_redirect},
 };
 
 

@@ -10,6 +10,8 @@
 # (sip/config/sip.example). Paths can be moved for testing:
 #   T48_SIP_SETTINGS  default /data/config/sip: account 1. Accounts 2 to 6
 #                     are the same name with the number on the end (sip2).
+#   T48_PHONE_SETTINGS  default phone beside it (/data/config/phone): the
+#                     shell's own file, read here for block_direct only.
 #   T48_SIP_CONFIG    default /data/local/sip/config if present,
 #                     else /usr/share/t48/sip/config
 #   T48_SIP_RUN       default /run/t48-sip (holds the password: mode 0700).
@@ -72,7 +74,7 @@ account() {
             enabled) enabled=$val ;;
             mwi) mwi=$val ;;
             keepalive) keepalive=$val ;;
-            label|voicemail) ;;    # the shell's business
+            label|voicemail|ringtone|forward_*) ;;    # the shell's business
             *) echo "t48-sip: $f: ignoring unknown setting '$key'" >&2 ;;
         esac
     done < "$f"
@@ -105,7 +107,8 @@ account() {
     # the proxy is reached on the account's transport
     [ -n "$proxy" ] && line="$line;outbound=\"$scheme:$proxy;transport=$transport\""
     case "$mwi" in off|no|false|0) mwi=no ;; *) mwi=yes ;; esac
-    line="$line;regint=$regint;answermode=manual;mwi=$mwi"
+    # a 3xx answer to a call we make is followed (call forwarding at the far end)
+    line="$line;regint=$regint;answermode=manual;mwi=$mwi;sip_autoredirect=yes"
     case "$keepalive" in off|no|false|0) line="$line;keepalive=no" ;; esac
     return 0
 }
@@ -129,8 +132,26 @@ if [ -f "$RUN/pid" ]; then
 fi
 echo $$ > "$RUN/pid"
 
-grep -v '^t48ctrl_socket' "$CONFIG" > "$RUN/config"
+grep -v -e '^t48ctrl_socket' -e '^filter_registrar' "$CONFIG" > "$RUN/config"
 printf 't48ctrl_socket\t\t%s\n' "$RUN/ctrl.sock" >> "$RUN/config"
+
+# Block direct calls (issue #77), on unless the phone file says off: a call or
+# other request that does not come from the address the account's last
+# registration was answered from (its server, or the outbound proxy) is
+# refused with 403 and never rings. baresip's own check (check_origin, on by
+# default for each account); filter_registrar switches it on for these
+# transports. Peer-to-peer calls with no server need it off.
+PHONE=${T48_PHONE_SETTINGS:-$(dirname "$SETTINGS")/phone}
+block=on
+if [ -f "$PHONE" ]; then
+    v=$(sed -n 's/^block_direct=//p' "$PHONE" | tail -n 1)
+    case "$v" in off|no|false|0) block=off ;; esac
+fi
+if [ $block = on ]; then
+    printf 'filter_registrar\tudp,tcp,tls\n' >> "$RUN/config"
+else
+    echo "t48-sip: direct calls allowed" >&2
+fi
 
 # account 1 is the settings file itself, accounts 2 to 6 the files beside it
 # with that number on the end: /data/config/sip, sip2, ... sip6
