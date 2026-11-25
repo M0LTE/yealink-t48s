@@ -31,18 +31,19 @@ DL=${DL:-$T/dl}
 RE=re-4.13.0
 BARESIP=baresip-4.13.0
 G722=libg722-1.2.8
+OPUS=opus-1.6.1
 OPENSSL=openssl-3.5.9
 MBEDTLS=mbedtls-3.6.8
 
 # Modules compiled into the binary. account: the accounts file; menu: the call
-# commands (dial, accept, hangup) that t48ctrl runs; g711, libg722:
+# commands (dial, accept, hangup) that t48ctrl runs; opus, g711, libg722:
 # codecs; auresamp: 16 kHz device audio to and from 8 kHz G.711; aufile,
 # ausine: file and tone audio for tests; stdio: a console for testing by
 # hand. Ours, from sip/modules: t48audio (the call's audio, to t48-audiod)
 # and t48ctrl (JSON control for the shell on a root-only Unix socket; it
 # replaces baresip's ctrl_tcp, which any local program could reach), and
 # t48mwi (message waiting, for the lamp; in place of baresip's mwi).
-MODULES="account;menu;g711;libg722;auresamp;aufile;ausine;stdio"
+MODULES="account;menu;opus;g711;libg722;auresamp;aufile;ausine;stdio"
 APP_MODULES="t48audio;t48ctrl;t48mwi"
 
 LLVM_AR=$(command -v llvm-ar || command -v llvm-ar-21)
@@ -60,6 +61,8 @@ fetch $BARESIP.tar.gz https://github.com/baresip/baresip/archive/refs/tags/v4.13
     688dbb92844340c2dd8dab7d93aaebccb3aa433af9215bb099ca598fafc0e0a2
 fetch $G722.tar.gz https://github.com/sippy/libg722/archive/refs/tags/v1.2.8.tar.gz \
     953bf2ead9b0b0dde32fcbc022a2cf5029155405737eba203499e30b18610706
+fetch $OPUS.tar.gz https://downloads.xiph.org/releases/opus/$OPUS.tar.gz \
+    6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1
 if [ "$TLS" != 1 ]; then
     fetch $MBEDTLS.tar.bz2 https://github.com/Mbed-TLS/mbedtls/releases/download/$MBEDTLS/$MBEDTLS.tar.bz2 \
         bc54b818e87f49c0b3281dd85d24adaede0e63b4e822e3fbd49c005a38b9595b
@@ -100,6 +103,16 @@ rm -rf src/$G722 && tar -C src -xf "$DL/$G722.tar.gz"
 (cd src/$G722 && for f in g722_encode g722_decode; do $CC -Os -w -c $f.c -o $f.o; done &&
     rm -f "$P/lib/libg722.a" && $LLVM_AR rcs "$P/lib/libg722.a" g722_encode.o g722_decode.o &&
     cp g722.h g722_codec.h g722_encoder.h g722_decoder.h g722_common.h "$P/include/")
+
+# libopus: fixed point (the phone has no FPU), with its ARMv5E and ARMv6
+# assembly; no NEON (ARM11 has none), so no intrinsics and no run-time
+# detection. -O2: the codec is the busiest code in a call.
+rm -rf src/$OPUS && tar -C src -xf "$DL/$OPUS.tar.gz"
+OPUSHOST=; [ "$TARGET" = arm ] && OPUSHOST=--host=arm-linux-musleabi
+(cd src/$OPUS && CC="$CC" AR=$LLVM_AR RANLIB=$LLVM_RANLIB CFLAGS="-O2 -Wno-unused-command-line-argument" \
+    ./configure $OPUSHOST --prefix="$P" --enable-fixed-point \
+    --disable-rtcd --disable-intrinsics --disable-shared --disable-doc \
+    --disable-extra-programs >../opus.log && make -j"$JOBS" >>../opus.log && make install >>../opus.log)
 
 # Crypto: mbedTLS (hashes only), or OpenSSL for TLS=1
 if [ "$TLS" = 1 ]; then
@@ -143,6 +156,7 @@ cmake -S src/$BARESIP -B build-baresip $XCMAKE $COMMON $CRYPTO \
     -DSTATIC=ON -DMODULES="$MODULES" \
     -DAPP_MODULES_DIR="$HERE/modules" -DAPP_MODULES="$APP_MODULES" \
     -DLIBG722_INCLUDE_DIR="$P/include" -DLIBG722_LIBRARY="$P/lib/libg722.a" \
+    -DOPUS_INCLUDE_DIR="$P/include" -DOPUS_LIBRARY="$P/lib/libopus.a" \
     -DRE_INCLUDE_DIR="$P/include/re" -DRE_LIBRARY="$P/lib/libre.a" \
     -Dre_DIR="$P/lib/cmake/re" >build-baresip.log 2>&1
 grep MODULES_DETECTED build-baresip.log || true
@@ -155,6 +169,7 @@ mkdir -p share/licences
 cp src/$RE/LICENSE share/licences/re.LICENSE
 cp src/$BARESIP/LICENSE share/licences/baresip.LICENSE
 cp src/$G722/LICENSE share/licences/libg722.LICENSE
+cp src/$OPUS/COPYING share/licences/opus.LICENSE
 [ "$TLS" = 1 ] || cp src/$MBEDTLS/LICENSE share/licences/mbedtls.LICENSE
 if [ "$TLS" = 1 ]; then cp src/$OPENSSL/LICENSE.txt share/licences/openssl.LICENSE; fi
 file bin/baresip

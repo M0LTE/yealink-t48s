@@ -40,7 +40,11 @@ instance() {
         "$SIP/config/config" > $d/config.in
     # baresip skips loopback addresses unless named here
     printf 'net_interface\t\t127.0.0.1\n' >> $d/config.in
-    [ "$8" = g711 ] && sed -i '/^module\t*libg722.so/d' $d/config.in
+    # the codec under test is the first one offered
+    case "$8" in
+        g711) sed -i '/^module\t*\(opus\|libg722\).so/d' $d/config.in ;;
+        g722) sed -i '/^module\t*opus.so/d' $d/config.in ;;
+    esac
     printf 'user=%s\npassword=%s\ndomain=127.0.0.1\ntransport=%s\nregister_seconds=60\n' \
         "${1%%-*}" "$5" "$4" > $d/sip
     case "$2" in *sip-arm*) BIN="qemu-arm $2" ;; *) BIN=$2 ;; esac
@@ -61,17 +65,24 @@ call() {
     instance alice "$2" 5071 udp test-only-alice ausine,440 aufile,$W/alice-heard.wav "$3"
     instance bob "$HOST_BARESIP" 5072 tcp test-only-bob "$4" "$5" "$3"
     sleep 3
-    if python3 "$SIP/test/ctrl.py" "$6" "$7" $W; then echo "PASS $1"; else echo "FAIL $1"; FAILS=$((FAILS + 1)); fi
+    ok=0
+    python3 "$SIP/test/ctrl.py" "$6" "$7" $W && ok=1
+    # and the call used the codec under test
+    case "$3" in opus) enc=opus ;; g722) enc=G722 ;; g711) enc=PCMU ;; esac
+    grep -q "Set audio encoder: $enc " $W/alice/log || { echo "  alice did not encode with $enc"; ok=0; }
+    if [ $ok = 1 ]; then echo "PASS $1"; else echo "FAIL $1"; FAILS=$((FAILS + 1)); fi
     grep -h "codec\|audio: .*encode\|t48audio" $W/alice/log $W/bob/log | grep -iv debug | sort -u | sed 's/^/  log: /' | head -8
     stop
     mv $W/alice/log $W/$1-alice.log; mv $W/bob/log $W/$1-bob.log
 }
 
+call opus "$HOST_BARESIP" opus ausine,1000 aufile,$W/bob-heard.wav 440 1000
 call g711 "$HOST_BARESIP" g711 ausine,1000 aufile,$W/bob-heard.wav 440 1000
 call g722 "$HOST_BARESIP" g722 ausine,1000 aufile,$W/bob-heard.wav 440 1000
 call t48audio-null "$HOST_BARESIP" g722 t48audio,call t48audio,call none silence
 if command -v qemu-arm >/dev/null && [ -x "$ARM_BARESIP" ]; then
     call arm-under-qemu "$ARM_BARESIP" g722 ausine,1000 aufile,$W/bob-heard.wav 440 1000
+    call opus-arm-under-qemu "$ARM_BARESIP" opus ausine,1000 aufile,$W/bob-heard.wav 440 1000
 fi
 
 echo "== wrong password is refused"

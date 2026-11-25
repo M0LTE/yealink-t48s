@@ -55,7 +55,11 @@ side() {
         "$SIP/config/config" > $d/config.in
     # baresip skips loopback addresses unless named here
     printf 'net_interface\t\t127.0.0.1\nt48audio_socket\t\t%s\n' $d/audio/call.sock >> $d/config.in
-    [ "$codecs" = g711 ] && sed -i '/^module\t*libg722.so/d' $d/config.in
+    # the codec under test is the first one offered
+    case "$codecs" in
+        g711) sed -i '/^module\t*\(opus\|libg722\).so/d' $d/config.in ;;
+        g722) sed -i '/^module\t*opus.so/d' $d/config.in ;;
+    esac
     printf 'user=%s\npassword=%s\ndomain=127.0.0.1\ntransport=%s\nregister_seconds=60\n' \
         "$who" "$password" "$transport" > $d/sip
     printf '#!/bin/sh\nexec %s "$@"\n' "$BARESIP_BIN" > $d/baresip
@@ -91,12 +95,14 @@ run() {
     done
 }
 
+run "opus call, handset both ends" call opus 0 --mic $W/bob-mic.wav
 run "g722 call, handset both ends" call g722 0 --mic $W/bob-mic.wav
 run "g711 call, handset both ends" call g711 0 --mic $W/bob-mic.wav
 run "echo: bob on the handset route in an echoing room" echo-handset g722 0 --room 60,50
 run "echo: bob on the speakerphone in the same room" echo-speaker g722 0 --room 60,50
 if command -v qemu-arm >/dev/null && [ -x "$ARM_BARESIP" ] && [ -x "$AUDIOD/build-arm/t48-audiod" ]; then
     run "g722 call, alice is the ARM binaries under qemu" call-slow g722 1 --mic $W/bob-mic.wav
+    run "opus call, alice is the ARM binaries under qemu" call-slow opus 1 --mic $W/bob-mic.wav
 else
     echo "== (ARM call skipped: needs qemu-arm, the ARM baresip and audiod/build-arm)"
 fi

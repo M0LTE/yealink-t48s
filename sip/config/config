@@ -46,9 +46,27 @@ rtp_tos			184
 rtp_ports		10000-10999
 rtp_timeout		60
 
-# Codecs, in order of preference: G.722 (wideband), then G.711
+# Codecs, in order of preference: Opus, G.722 (both wideband), then G.711
+module			opus.so
 module			libg722.so
 module			g711.so
+
+# Opus: wideband mono at the audio service's 16 kHz, so no resampling.
+# Complexity 3 costs about a fifth of the processor to encode (docs/sip.md).
+# In-band FEC rebuilds a lost packet from the next one, for lossy links such
+# as Wi-Fi: each side codes it only when the other asks (useinbandfec), and
+# opus_packet_loss switches it on. No DTX: it takes any steady sound (a held
+# note, a tone) for background noise and sends comfort noise instead, and
+# baresip still sends a packet every 20 ms, so it saves little.
+opus_samplerate		16000
+opus_stereo		no
+opus_sprop_stereo	no
+opus_bitrate		32000
+opus_application	voip
+opus_complexity		3
+opus_inbandfec		yes
+opus_packet_loss	10
+opus_dtx		no
 
 # Resampling between the 16 kHz device and 8 kHz G.711
 module			auresamp.so

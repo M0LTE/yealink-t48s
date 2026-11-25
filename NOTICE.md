@@ -41,10 +41,11 @@ They are downloaded and built by CI, not kept here. Versions are pinned in `buil
 | ca-certificates (Mozilla's list) | the system image | MPL-2.0 |
 | baresip and re (libre) | the system image | BSD-3-Clause |
 | libg722 | the system image | BSD-2-Clause and public domain |
+| libopus (Xiph.Org, Skype, Jean-Marc Valin and others) | the system image | BSD-3-Clause |
 | GCC, binutils and the other host tools | the app SDK (`t48s-sdk.tar.gz`) | GPL-3.0-or-later, GPL-2.0-or-later and others: the host manifest lists each |
 | Buildroot, which builds all of the above | not shipped | GPL-2.0-or-later |
 
-The licence texts of baresip, re, libg722 and Mbed TLS are also on the phone, in `/usr/share/t48/sip/licences`.
+The licence texts of baresip, re, libg722, libopus and Mbed TLS are also on the phone, in `/usr/share/t48/sip/licences`.
 
 ## Source for the binaries
 
