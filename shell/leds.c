@@ -30,6 +30,7 @@
 #define SLOW_MS "1000"    /* and the rate it shows voicemail at */
 #define STEP_MS 20        /* a pattern's fades are stepped this often */
 #define SWITCH_MS 50      /* an on-or-off lamp lent to an app is changed no faster than this */
+#define MESSAGE_MS 250    /* the message lamp: each change is 7 ms of bit-banging the Holtek chip */
 
 static const char *const names[LAMP_COUNT] = {"message", "speaker", "headset", "mute"};
 static const char *const leds[LAMP_COUNT] = {"t48s:red:message", "t48s:green:speaker", "t48s:green:headset", "t48s:red:mute"};
@@ -76,7 +77,8 @@ static void leds_apply(enum led which, enum led_mode mode)
 {
     const char *led = device(which);
     if (mode == LAMP_BLINK || mode == LAMP_SLOW) {
-        /* the kernel's "timer" trigger does the blinking */
+        /* the kernel's "timer" trigger does the blinking, at the brightness the lamp has now */
+        led_write(led, "brightness", "255");
         if (led_write(led, "trigger", "timer")) return;
         led_write(led, "delay_on", mode == LAMP_SLOW ? SLOW_MS : BLINK_MS);
         led_write(led, "delay_off", mode == LAMP_SLOW ? SLOW_MS : BLINK_MS);
@@ -153,11 +155,11 @@ static void show(struct lamp *l, long long now)
     if (l->fd < 0 || v == l->out) return;
     if (l->max < 255) {
         if (now < l->quiet) return;   /* leds_tick() comes back for it */
-        l->quiet = now + SWITCH_MS;
+        l->quiet = now + (l == &lamp[LAMP_MESSAGE] ? MESSAGE_MS : SWITCH_MS);
     }
     int n = snprintf(num, sizeof num, "%d", v);
-    if (pwrite(l->fd, num, (size_t)n, 0) < 0) return;
-    l->out = v;
+    (void)!pwrite(l->fd, num, (size_t)n, 0);
+    l->out = v;   /* even when it failed: trying again every pass would spin */
 }
 
 /* where a pattern has its lamp, t ms after it began; *done when it has ended */
