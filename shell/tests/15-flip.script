@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Flipping (API level 3): the test app flips, goes back to DAMAGE, and keeps its
+# picture through a call and through Home. Then an app that speaks level 2 by
+# hand: it must be sent exactly what level 2 sent.
+run mkdir -p simdata/installed && cp -r extra/fliptest extra/level2 simdata/installed/
+key ok
+expect launcher
+# Clock, Crasher, Level two, Screen test, Get apps
+key right
+key right
+key right
+key ok
+waitframe 3000
+expect app
+expectstate appid fliptest
+expectstate flip on
+# the top line is black with white text, the bar is white on black
+expectpixel 2 2 000000
+wait 1300
+run grep -q "fliptest: Flip: " sim.log
+shot shots/flip-bar.png
+key 2
+wait 300
+expectstate flip on
+shot shots/flip-full.png
+key 3
+wait 300
+expectstate flip on
+shot shots/flip-doubled.png
+# by DAMAGE again
+key 4
+waitstate flip off 2000
+wait 200
+expectpixel 2 2 000000
+shot shots/flip-copy.png
+key 1
+waitstate flip on 2000
+# a call takes the screen and gives it back
+hook off
+expect call
+hook on
+expect app
+expectstate flip on
+waitframe 2000
+expectpixel 2 2 000000
+# Home, and back to it
+key x 1000
+expect launcher
+expectstate app stopped
+key ok
+expect app
+expectstate flip on
+waitframe 2000
+key x
+waitscreen launcher 2000
+expectstate app none
+
+# ---- an app written for level 2 ----
+key left
+key ok
+waitframe 3000
+expectstate appid level2
+expectpixel 400 240 202020
+key 5
+waitpixel 400 240 00FF00 2000
+touch 100 100
+waitpixel 400 240 0000FF 2000
+key up
+key soft1
+wait 200
+expect app
+expectstate app running
+key x 1000
+expect launcher
+quit

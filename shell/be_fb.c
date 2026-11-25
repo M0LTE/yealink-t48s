@@ -16,12 +16,21 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 #include "shell.h"
 
 /* The kernel's event layout. Not musl's struct input_event: on 32-bit ARM that
  * one has a 64-bit time and is 24 bytes, the kernel's is 16. */
 struct kev { unsigned long sec, usec; unsigned short type, code; int value; };
+
+/* the kernel's page flipping (kernel6/drivers/t48s_flip.c) */
+struct flip_info { uint32_t width, height, stride, count, size, period_ns; };
+struct flip_event { int32_t buffer; uint32_t frame; uint64_t time_ns; };
+#define T48FLIP_INFO _IOR('T', 0x48, struct flip_info)
+#define T48FLIP_SHOW _IOW('T', 0x49, int32_t)
+#define T48FLIP_CLEAR _IO('T', 0x4a)
+#define EVIOCSCLOCKID_ _IOW('E', 0xa0, int)
 
 #define KDSETMODE 0x4B3A
 #define FBIOGET_VSCREENINFO 0x4600
@@ -46,6 +55,11 @@ static unsigned fb_stride;
 static int scaled, pw, ph, pbpp, pline, turned;
 static long cal[7] = {14798, 13, -4134128, 53, 10207, -5441552, 65536};  /* factory values, from U-Boot */
 static int raw_x, raw_y, touching, was_touching, last_x, last_y;
+/* the flip device, what it offers, and what the screen is showing: a flip buffer, or -1 for the frame we draw in */
+static int flip_fd = -1, flip_showing = -1;
+static const char *flip_dev = "/dev/t48flip";
+static struct flip_info flip;
+static int timed;   /* the input devices stamp events with CLOCK_MONOTONIC */
 
 static int key_code(int code)
 {
@@ -128,6 +142,22 @@ static int fb_init(void)
     fb_stride = f.line_length / 4;
     fb = mmap(0, (size_t)f.line_length * (scaled ? (size_t)ph : SH), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (fb == MAP_FAILED) { perror("mapping the framebuffer"); return -1; }
+    /* The kernel's spare frames, for apps that flip. Not when the picture is fitted
+     * to another screen: an app's buffer could not be shown as it is. T48_FLIP_DEV
+     * names another device, or none ("") to try the copying path on the phone. */
+    const char *fdev = getenv("T48_FLIP_DEV");
+    if (fdev) flip_dev = fdev;
+    if (!scaled && (flip_fd = open(flip_dev, O_RDWR | O_NONBLOCK | O_CLOEXEC)) >= 0) {
+        int32_t home = -1;
+        if (ioctl(flip_fd, T48FLIP_INFO, &flip) < 0 || flip.width != SW || flip.height != SH || flip.stride != SW * 4 || flip.count < 2) {
+            close(flip_fd);
+            flip_fd = -1;
+        } else {
+            ioctl(flip_fd, T48FLIP_SHOW, &home);   /* whatever a shell before us left showing */
+            logmsg("flipping: %u buffers, refresh every %u.%03u ms", flip.count, flip.period_ns / 1000000, flip.period_ns / 1000 % 1000);
+        }
+    }
+    if (flip_fd < 0) logmsg("flipping: by copying");
     /* keep the text console from drawing over us */
     int tty = open("/dev/tty0", O_RDWR);
     if (tty >= 0) { ioctl(tty, KDSETMODE, 1); close(tty); }
@@ -145,6 +175,9 @@ static int fb_init(void)
         else if (strstr(name, "touch") || strstr(name, "tsc")) which = DEV_TOUCH;
         if (which < 0 || dev[which] >= 0) { close(d); continue; }
         if (ioctl(d, EVIOCGRAB, 1) < 0) logmsg("%s (%s): could not be grabbed, something else has it", path, name);
+        int mono = CLOCK_MONOTONIC;
+        if (which == DEV_KEYS) timed = ioctl(d, EVIOCSCLOCKID_, &mono) == 0;
+        else ioctl(d, EVIOCSCLOCKID_, &mono);
         dev[which] = d;
         logmsg("%s: %s", path, name);
     }
@@ -218,7 +251,32 @@ static int fb_fds(struct pollfd *p, int max)
     int n = 0;
     for (int i = 0; i < NDEV && n < max; i++)
         if (dev[i] >= 0) { p[n].fd = dev[i]; p[n].events = POLLIN; p[n++].revents = 0; }
+    if (flip_fd >= 0 && n < max) { p[n].fd = flip_fd; p[n].events = POLLIN; p[n++].revents = 0; }
     return n;
+}
+
+/* The app gets an open of its own. Ours it must never hold: flags such as
+ * O_NONBLOCK belong to the open, and an app that cleared them on a shared one
+ * would have the shell wait in read() for ever. */
+static int fb_flip_info(int *fd, int *count, size_t *size, unsigned *period_us)
+{
+    if (flip_fd < 0 || (*fd = open(flip_dev, O_RDWR | O_CLOEXEC)) < 0) return -1;
+    *count = (int)flip.count;
+    *size = flip.size;
+    *period_us = flip.period_ns / 1000;
+    return 0;
+}
+
+static void fb_flip_show(int n)
+{
+    int32_t b = n;
+    if (flip_fd < 0 || (n < 0 && flip_showing < 0)) return;
+    if (ioctl(flip_fd, T48FLIP_SHOW, &b) == 0) flip_showing = n;
+}
+
+static void fb_flip_clear(void)
+{
+    if (flip_fd >= 0) ioctl(flip_fd, T48FLIP_CLEAR);
 }
 
 static void touch_event(const struct kev *ev)
@@ -247,7 +305,15 @@ static void fb_handle(const struct pollfd *p, int n)
     for (int i = 0; i < n; i++) {
         struct kev ev;
         if (!(p[i].revents & POLLIN)) continue;
+        if (p[i].fd == flip_fd) {
+            /* one read for one POLLIN: the driver keeps only the latest, and this must never wait */
+            struct flip_event fe;
+            if (read(flip_fd, &fe, sizeof fe) == sizeof fe && fe.buffer >= 0)
+                shell_flipped(fe.buffer, fe.frame, (long long)(fe.time_ns / 1000));
+            continue;
+        }
         while (read(p[i].fd, &ev, sizeof ev) == sizeof ev) {
+            shell_input_us = timed ? (long long)ev.sec * 1000000 + (long long)ev.usec : t48_now_us();
             if (p[i].fd == dev[DEV_TOUCH]) {
                 touch_event(&ev);
             } else if (ev.type == EV_KEY && ev.value != 2) {  /* 2 is auto-repeat */
@@ -272,4 +338,5 @@ static void fb_fini(void)
     if (tty >= 0) { ioctl(tty, KDSETMODE, 0); close(tty); }
 }
 
-const struct backend be_fb = {"phone", fb_init, fb_flush, fb_fds, fb_handle, fb_timeout, fb_tick, fb_fini};
+const struct backend be_fb = {"phone", fb_init, fb_flush, fb_fds, fb_handle, fb_timeout, fb_tick, fb_fini,
+                              fb_flip_info, fb_flip_show, fb_flip_clear};

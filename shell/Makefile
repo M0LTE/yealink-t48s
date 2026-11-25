@@ -43,6 +43,14 @@ $(O)/apps: $(LIB) tests/crasher.c tests/crasher.json
 	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@/crasher/crasher tests/crasher.c $(LIB)
 	cp tests/crasher.json $@/crasher/manifest.json
 
+# two more for tests/15-flip.script, which installs them itself so the other tests' launcher stays as it was:
+# the flipping test, and an app that speaks the protocol as level 2 did
+$(O)/extra: $(LIB) tests/level2.c tests/level2.json
+	rm -rf $@ && mkdir -p $@/level2
+	cp -r ../libt48/$(O)/examples/fliptest $@/fliptest
+	$(CC) $(CFLAGS) -o $@/level2/level2 tests/level2.c
+	cp tests/level2.json $@/level2/manifest.json
+
 # feeds on disk for the app manager's tests
 $(O)/feeds: $(O)/apps tests/mkfeeds.sh ../sdk/t48-pack
 	sh tests/mkfeeds.sh $(O)
@@ -50,7 +58,7 @@ $(O)/feeds: $(O)/apps tests/mkfeeds.sh ../sdk/t48-pack
 # apps installed by a test go in simdata/installed, settings in simdata/config
 SIM = ./t48-sim --apps simdata/installed:apps --data simdata/appdata --config simdata/config --state simdata/state --access simdata/access --notice simdata/notice --apply ../tests/access/apply.sh --update ../tests/update/update.sh
 
-check: all $(O)/apps $(O)/feeds
+check: all $(O)/apps $(O)/extra $(O)/feeds
 	@mkdir -p $(O)/shots
 	cd $(O) && for t in ../tests/*.script; do echo "== $$t"; rm -rf simdata; \
 		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(SIM) --script $$t 2>sim.log || { cat sim.log; exit 1; }; cat sim.log; \

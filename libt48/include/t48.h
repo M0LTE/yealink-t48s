@@ -14,6 +14,8 @@
  *     t48_event ev;
  *     while (t48_poll(&ev, -1) >= 0)
  *         if (ev.type == T48_EV_QUIT) break;
+ *
+ * A game draws whole pictures and flips them instead: see t48_flip() below.
  */
 #ifndef T48_H
 #define T48_H
@@ -42,6 +44,8 @@ void t48_rect(t48_surface *s, int x, int y, int w, int h, uint32_t c);
 void t48_round_fill(t48_surface *s, int x, int y, int w, int h, int r, uint32_t c);
 /* copy sw x sh pixels (rows sstride pixels apart) to x, y */
 void t48_blit(t48_surface *s, int x, int y, const uint32_t *src, int sw, int sh, int sstride);
+/* the same with every pixel drawn as n x n (n 1 to 4): a small picture made to fill the screen */
+void t48_blit_scaled(t48_surface *s, int x, int y, const uint32_t *src, int sw, int sh, int sstride, int n);
 /* mix colour c over d; a is 0 to 255 */
 uint32_t t48_mix(uint32_t d, uint32_t c, unsigned a);
 /* scale a colour towards black by num/den */
@@ -235,6 +239,7 @@ enum {
     T48_EV_TIMER,      /* id: the timer that fired */
     T48_EV_FD,         /* id: a watched descriptor is readable */
     T48_EV_THEME,      /* the owner changed the look (t48_theme_now): draw everything again */
+    T48_EV_FLIPPED,    /* a t48_flip() is on the screen. frame: the screen's refreshes, counted; time_us: when */
 };
 
 typedef struct t48_event {
@@ -242,6 +247,8 @@ typedef struct t48_event {
     int key, state;
     int x, y;
     int id;
+    long long time_us;   /* KEY, TOUCH, FLIPPED: when, on the clock of t48_now_us(); 0 from a shell older than level 3 */
+    unsigned frame;      /* FLIPPED */
 } t48_event;
 
 /* Connect to the shell that started us and map the screen. 0, or -1 (not
@@ -268,5 +275,34 @@ void t48_paused(void);
 int t48_fd(void);
 /* Milliseconds from a clock that never jumps. */
 long long t48_now_ms(void);
+long long t48_now_us(void);   /* the same clock in microseconds: the one events are timed on */
+
+/* ---------- flipping: whole pictures, shown without tearing ---------- */
+
+/* For games and anything else that draws the whole screen many times a
+ * second. The shell lends pictures of the screen ("flip buffers"); draw all
+ * of one, call t48_flip(), and it goes on the screen whole at the next
+ * refresh. On the phone the screen is pointed at the buffer: no copy.
+ *
+ *     t48_surface *s = t48_flip_start();
+ *     if (!s) ...                          the shell is older than level 3: use t48_screen() and t48_damage()
+ *     for (;;) {
+ *         while (t48_poll(&ev, 0) > 0) ... keys, touches, PAUSE, QUIT
+ *         draw all of s
+ *         s = t48_flip();                  waits if the last one is not on the screen yet
+ *     }
+ *
+ * t48_flip() keeps time with the screen, so the loop above runs at the
+ * refresh rate or a whole fraction of it. The surface it returns holds an
+ * older picture, not the last: draw everything, or keep track. Each flip also
+ * comes back as T48_EV_FLIPPED. After T48_EV_PAUSE stop flipping and wait in
+ * t48_poll() for T48_EV_RESUME; the shell puts the last picture back itself. */
+t48_surface *t48_flip_start(void);    /* the first buffer to draw into; NULL: this shell cannot flip */
+t48_surface *t48_flip(void);          /* show what was drawn; the buffer to draw next */
+void t48_flip_wait(void);             /* until the last t48_flip() is on the screen */
+/* Back to t48_screen() and t48_damage(): the next t48_damage() takes the screen,
+ * and the next t48_flip() takes it back. */
+void t48_flip_stop(void);
+int t48_flip_period_us(void);         /* one refresh of the screen, in microseconds (14746 on the T48S); 0: cannot flip */
 
 #endif

@@ -101,6 +101,28 @@ void t48_blit(t48_surface *s, int x, int y, const uint32_t *src, int sw, int sh,
         memcpy(s->px + (cy + j) * s->stride + cx, src + (cy - y + j) * sstride + (cx - x), (size_t)cw * 4);
 }
 
+/* Each source row is made wide once, in a small buffer that stays in the
+ * processor's cache, then copied to its n rows of the surface: the surface is
+ * only ever written, and in order. */
+void t48_blit_scaled(t48_surface *s, int x, int y, const uint32_t *src, int sw, int sh, int sstride, int n)
+{
+    uint32_t row[1024];
+    if (n < 1 || n > 4 || x < 0 || y < 0) return;
+    if (n == 1) { t48_blit(s, x, y, src, sw, sh, sstride); return; }
+    if (sw > (s->w - x) / n) sw = (s->w - x) / n;
+    if (sh > (s->h - y) / n) sh = (s->h - y) / n;
+    if (sw > (int)(sizeof row / sizeof row[0]) / n) sw = (int)(sizeof row / sizeof row[0]) / n;
+    if (sw <= 0 || sh <= 0) return;
+    for (int j = 0; j < sh; j++) {
+        const uint32_t *in = src + j * sstride;
+        uint32_t *out = row;
+        if (n == 2) for (int i = 0; i < sw; i++) { uint32_t v = in[i]; out[0] = v; out[1] = v; out += 2; }
+        else for (int i = 0; i < sw; i++) { uint32_t v = in[i]; for (int k = 0; k < n; k++) *out++ = v; }
+        uint32_t *d = s->px + (y + j * n) * s->stride + x;
+        for (int k = 0; k < n; k++, d += s->stride) memcpy(d, row, (size_t)sw * n * 4);
+    }
+}
+
 int t48_text(t48_surface *s, int x, int y, const t48_font *f, uint32_t c, const char *str)
 {
     for (; *str; str++) {

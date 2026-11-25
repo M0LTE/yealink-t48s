@@ -195,6 +195,7 @@ static void step(long long now)
 
 static void sim_tick(long long now)
 {
+    shell_input_us = t48_now_us();   /* a script's keys and touches happen as their line is run */
     if (waiting) {
         const char *v = waiting == W_STATE ? shell_state(wait_key) : NULL;
         int done = waiting == W_FRAME ? shell_app_frames() != frame_mark :
@@ -222,4 +223,4 @@ static void sim_tick(long long now)
 
 static void sim_fini(void) {}
 
-const struct backend be_sim = {"simulator", sim_init, sim_flush, sim_fds, sim_handle, sim_timeout, sim_tick, sim_fini};
+const struct backend be_sim = {"simulator", sim_init, sim_flush, sim_fds, sim_handle, sim_timeout, sim_tick, sim_fini, NULL, NULL, NULL};

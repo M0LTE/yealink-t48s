@@ -1,6 +1,6 @@
 # The app protocol
 
-API level 2. This is the contract between the shell (`t48-shell`) and an app. `libt48` wraps it for C programs, but an app in any language can speak it directly. The C definitions are in [`libt48/include/t48_proto.h`](../libt48/include/t48_proto.h). The design reasons are in [architecture.md](architecture.md#screen-and-input).
+API level 3. This is the contract between the shell (`t48-shell`) and an app. `libt48` wraps it for C programs, but an app in any language can speak it directly. The C definitions are in [`libt48/include/t48_proto.h`](../libt48/include/t48_proto.h). The design reasons are in [architecture.md](architecture.md#screen-and-input).
 
 ## What an app is given
 
@@ -13,6 +13,7 @@ The shell starts the app's program from inside the app's folder, as an unprivile
 | `T48_APP_ID` | the id from the manifest |
 | `T48_APP_DATA` | a folder the app may write to (also `HOME`) |
 | `T48_FONTS_FD` | level 2: number of an open file holding the shell's fonts (5 today), to map read-only. See [The theme](#the-theme) |
+| `T48_FLIP_FD` | level 3: number of an open file holding the flip buffers (6 today). See [Flipping](#flipping) |
 
 The app has no access to the framebuffer or the input devices and does not need any.
 
@@ -38,12 +39,14 @@ Shell to app:
 | 1 | HELLO | `u16 api, u16 width, u16 height, u16 format (0 = XRGB8888), u32 stride, u32 size`. Always first. |
 | 2 | SETTING | `key=value` text, no terminator. One per setting in the manifest, before START. |
 | 3 | START | none. Map the buffer, answer READY, draw. |
-| 4 | KEY | `u16 code, u8 state (1 pressed, 0 released), u8 0` |
-| 5 | TOUCH | `u8 state (0 up, 1 down, 2 move), u8 0, i16 x, i16 y` in screen pixels |
+| 4 | KEY | `u16 code, u8 state (1 pressed, 0 released), u8 0`. To a level 3 app: `u16 code, u8 state, u8 0 x 5, u64 time` |
+| 5 | TOUCH | `u8 state (0 up, 1 down, 2 move), u8 0, i16 x, i16 y` in screen pixels. To a level 3 app: the same, then `u16 0, u64 time` |
 | 6 | PAUSE | none. The app is off the screen. |
 | 7 | RESUME | none. The app is in front again: redraw everything. |
 | 8 | QUIT | none. Exit within one second. |
 | 9 | THEME | level 2: the look, as below. Before START, and again whenever the owner changes it. |
+| 10 | FLIPINFO | level 3: `u16 count, u16 0, u32 size, u32 period`. Before START. See [Flipping](#flipping) |
+| 11 | FLIPPED | level 3: `u16 buffer, u16 0, u32 frame, u64 time`. The answer to FLIP |
 
 App to shell:
 
@@ -53,8 +56,35 @@ App to shell:
 | 0x82 | DAMAGE | `u16 x, u16 y, u16 w, u16 h` |
 | 0x83 | PAUSED | none. Optional answer to PAUSE: "freeze me now". |
 | 0x84 | | kept for asking for an audio stream, in a later level |
+| 0x85 | FLIP | level 3: `u16 buffer, u16 0`. Show this flip buffer at the next refresh |
 
-Key codes: digits, `*` and `#` are their ASCII characters; up 0x100, down 0x101, left 0x102, right 0x103, OK 0x104, back 0x105.
+Key codes: digits, `*` and `#` are their ASCII characters; up 0x100, down 0x101, left 0x102, right 0x103, OK 0x104, back 0x105. Level 3: the four soft keys of a phone that has them, left to right, 0x110 to 0x113.
+
+Every `time` is in microseconds on `CLOCK_MONOTONIC`, the clock the app's own `clock_gettime` reads. The shell sends the level 3 forms of KEY and TOUCH, and the soft keys, only to an app that answered READY with 3 or more.
+
+## Flipping
+
+Level 3, for games and anything else that draws the whole screen many times a second. `T48_FLIP_FD` holds `count` pictures of the screen, one after another, `size` bytes each, laid out as HELLO says. Map it shared and writable. Draw a whole picture into one buffer and send FLIP: the shell puts it on the screen at the next refresh, all at once, so nothing tears. FLIPPED comes back when it is there.
+
+- On the T48S the screen is pointed at the buffer itself. Nothing is copied, and the buffers are ordinary cached memory, quick to read back.
+- Do not draw in a buffer between its FLIP and the FLIPPED of the next one: it is on the screen, or about to be. With three buffers there is always one free, so the next picture can be started at once.
+- One FLIP at a time. A FLIP sent before the last one's FLIPPED replaces it; both are answered.
+- `frame` counts the screen's refreshes. A step of more than one between two FLIPPEDs is a refresh the app missed. `period` in FLIPINFO is one refresh in microseconds: 14746 on the T48S (67.8 a second), 16667 in the simulator. The rate an app can hold is that, or a half or a third of it.
+- A buffer holds what was last drawn in it, two or three pictures ago, not the last picture.
+- DAMAGE goes back to the shared buffer: the shell shows all of it and stops flipping. FLIP starts again.
+- After PAUSE a FLIP is answered at once and not shown. When the app is back in front the shell shows its last flipped picture itself.
+- `count` 0, or no FLIPINFO at all (a level 2 shell): draw in the shared buffer and send DAMAGE.
+
+The screen is 800 x 480 at 32 bits and nothing smaller is on offer: the LCD controller cannot stretch a picture. A game that draws 400 x 240 doubles each pixel into the flip buffer itself (`t48_blit_scaled`). Why there is no 16-bit mode is in [architecture.md](architecture.md#flipping).
+
+What it costs on the T48S, measured with `libt48/examples/fliptest`. Memory moves at about 160 MB a second, so filling the screen once is 10 ms of the 14.7 ms a refresh lasts:
+
+| | |
+|---|---|
+| a bar redrawn, flipped | 67.8 a second, none missed |
+| every pixel redrawn, flipped | 67.8 a second, none missed, 10.7 ms of each frame spent drawing |
+| 400 x 240 made and doubled, flipped | 67.8 a second, none missed, 9.6 ms |
+| every pixel redrawn where the shell must copy each flip | 43 a second, refreshes missed |
 
 ## The theme
 
@@ -99,12 +129,12 @@ then for each family:
 
 The faces are, in order: 12 px fixed width, 15 px, 19 px, 19 px bold, 15 px fixed width, 26 px bold, 40 px bold, 104 px bold (digits, colon, dot, minus and space only). `glyphs` is the offset of 95 records, for ASCII 32 to 126: `i16 adv, w, h, xoff, yoff, u16 0, u32 off`. A glyph is `w` x `h` bytes of coverage (0 to 255), row by row, at `coverage + off`; draw it `xoff`, `yoff` from the pen and the top of the line, then move the pen `adv`.
 
-An app written for level 1 skips THEME and never looks at the font file: it keeps its own colours and B612. An app built with a level 2 libt48 runs on a level 1 shell as Switchboard. So `"api": 1` in the manifest is still right for an app that only follows the theme; ask for 2 only if the app cannot do without it.
+An app written for level 1 skips THEME and never looks at the font file: it keeps its own colours and B612. An app built with a level 2 libt48 runs on a level 1 shell as Switchboard. So `"api": 1` in the manifest is still right for an app that only follows the theme; ask for 2 only if the app cannot do without it. The same goes for level 3: an app that flips when it can and draws by DAMAGE when it cannot (`t48_flip_start()` gives NULL) may still say 1 or 2.
 
 ## Life of an app
 
 1. The shell sends HELLO, the settings, THEME, START. The app answers READY and sends its first DAMAGE. An app that has not answered within 5 seconds is killed.
-2. While in front it gets KEY and TOUCH. Apps get digits, `*`, `#`, arrows, OK and back. Back is a short press on X, sent when X is released. A long press on X is Home and is never sent. The phone keys (hook, Speakerphone, Headset, Mute, Volume, Hold, Transfer, Redial, Message) are never sent.
+2. While in front it gets KEY and TOUCH, each press and each release, as the kernel reports them (it reads the keys every 20 ms and the touchscreen every 10 ms). Apps get digits, `*`, `#`, arrows, OK and back, and at level 3 the soft keys. Back is a short press on X, sent when X is released. **A long press on X is Home.** It is never sent, the shell acts on it whatever the app is doing, flipping or not, and it is the one way out that an app cannot take away. The phone keys (hook, Speakerphone, Headset, Mute, Volume, Hold, Transfer, Redial, Message) are never sent.
 3. PAUSE arrives when the owner goes Home or a call takes the screen. The app should stop drawing, close network connections and forget any keys it thinks are held. One second later (or at once if it sends PAUSED) it is frozen with SIGSTOP. RESUME follows a SIGCONT; the shell repaints the whole screen from the buffer at that moment, so an app whose picture is still right has nothing to send.
 4. QUIT means go. An app still there after one second is killed. An app may also just exit when it is finished: exit status 0 returns to the launcher quietly, anything else (or a crash) shows the owner a message.
 5. An app that stops reading its socket for so long that the shell cannot queue more events is killed.

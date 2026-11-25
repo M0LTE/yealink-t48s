@@ -31,6 +31,15 @@ struct backend {
     int (*timeout)(long long now);                /* ms until tick() is wanted, -1: never */
     void (*tick)(long long now);
     void (*fini)(void);
+    /* A screen that can show an app's flip buffers itself, with no copy (NULL: it
+     * cannot). flip_info: 0 and a descriptor opened for this one app (the caller
+     * closes it), how many buffers, the bytes from one to the next and the refresh
+     * period; -1: not this screen.
+     * flip_show: buffer n at the next refresh, then shell_flipped(); -1: the
+     * shell's own picture again. flip_clear: all buffers to black. */
+    int (*flip_info)(int *fd, int *count, size_t *size, unsigned *period_us);
+    void (*flip_show)(int n);
+    void (*flip_clear)(void);
 };
 extern const struct backend be_fb, be_sim;
 
@@ -54,10 +63,15 @@ struct options {
 };
 extern struct options opt;
 
-/* input, from a backend */
+/* input, from a backend. It sets shell_input_us first: when it happened,
+ * microseconds of CLOCK_MONOTONIC. */
+extern long long shell_input_us;
+void shell_flipped(int n, unsigned frame, long long time_us);   /* flip_show(n) is on the screen */
 void shell_key(int code, int down);
 void shell_touch(int state, int x, int y);
 void shell_hook(int off_hook);
+
+const struct backend *shell_backend(void);
 
 /* for the simulator's scripts */
 void shell_stop(int status);
@@ -329,6 +343,9 @@ void app_key(int code, int down);
 void app_touch(int state, int x, int y);
 void app_theme(void);                      /* tell it the look, which has changed */
 int app_fd(void);                          /* -1 if none */
+int app_flip(void);                        /* the flip buffer the app last asked for, -1: it draws by DAMAGE */
+void app_flip_show(void);                  /* put that buffer on the screen (again) */
+void app_flipped(int n, unsigned frame, long long time_us);   /* from the screen: buffer n is showing */
 void app_readable(void);
 int app_timeout(long long now);
 void app_tick(long long now);
@@ -337,6 +354,8 @@ const uint32_t *app_pixels(void);
 
 /* from app.c back to the shell */
 void shell_app_damage(int x, int y, int w, int h);
+int shell_app_flip(void);                  /* the app has flipped: 1 if it is in front and the buffer should be shown */
+void shell_screen_flush(const uint32_t *src);   /* a whole picture to the screen: a flip, on a screen that copies */
 /* the app has gone; why is NULL if that was expected, otherwise words for the owner */
 void shell_app_gone(const char *name, const char *why);
 
