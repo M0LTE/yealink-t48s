@@ -26,14 +26,15 @@
 #include <time.h>
 #include <unistd.h>
 #include "shell.h"
+#include "dialplan.h"
 
 #ifndef T48_VERSION
 #define T48_VERSION "development build"
 #endif
 
-enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_SIPADV, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL };
+enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_SIPADV, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL, P_ADVANCED };
 static const char *const page_names[] = {"root", "accounts", "sip", "sipadvanced", "network", "time", "timezone", "sound", "screen", "access", "about",
-                                         "appsettings", "appconf", "store", "storeapp", "theme", "update", "install"};
+                                         "appsettings", "appconf", "store", "storeapp", "theme", "update", "install", "advanced"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
 enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16, F_HOST = 32, F_PROXY = 64 };
@@ -780,6 +781,17 @@ static void build_accounts(void)
         r->choices = keep;
         if (!strstr(keep, r->value)) snprintf(r->value, sizeof r->value, "%s", v);
     }
+    add_menu("Advanced", P_ADVANCED, "");
+}
+
+/* what is set for all the accounts and seldom changed */
+static void build_advanced(void)
+{
+    snprintf(title, sizeof title, "Advanced");
+    /* the digit map that says when a number is complete (docs/phone.md#dial-plan); emptied, the default again */
+    add_stored(R_TEXT, "Dial plan", "phone", "dialplan", DP_DEFAULT, 0);
+    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%s999 and 112 always dial at once",
+             cfg_str("phone", "dialplan", "")[0] ? "Empty for the default. " : "");
 }
 
 static void build_sip(const char *arg)
@@ -1262,6 +1274,7 @@ static void rebuild(void)
     case P_THEME: build_theme(); break;
     case P_UPDATE: build_update(); break;
     case P_INSTALL: build_install(); break;
+    case P_ADVANCED: build_advanced(); break;
     }
     for (int i = 0; keep[0] && i < nrows; i++)
         if (rows[i].kind == R_ACTION && !strcmp(rows[i].label, keep)) stack[depth].sel = i;
@@ -1619,6 +1632,16 @@ static void kbd_done(void)
     }
     if (((kbd_row.flags & F_HOST) && !sip_host_ok(text, 0)) || ((kbd_row.flags & F_PROXY) && !sip_host_ok(text, 1))) {
         message("Not a host", "Use host or host:port, IPv6 in [ ]");
+        return;
+    }
+    if (!strcmp(kbd_row.file, "phone") && !strcmp(kbd_row.key, "dialplan") && text[0] && dp_check(text, NULL) < 0) {
+        message("Not a dial plan", "Use the form 07xxxxxxxxx|x.T");
+        return;
+    }
+    /* the default as it stands is not stored, so a better one in a later release reaches this phone */
+    if (!strcmp(kbd_row.file, "phone") && !strcmp(kbd_row.key, "dialplan") && !strcmp(text, DP_DEFAULT)) {
+        store_value(&kbd_row, NULL);
+        rebuild();
         return;
     }
     if (!strcmp(kbd_row.file, "feed") && !strcmp(kbd_row.key, "url") && strncmp(text, "https://", 8) &&

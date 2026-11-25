@@ -33,7 +33,7 @@ Open that address in a browser. A browser the phone has not seen gets one page o
 | Page | What it does |
 |---|---|
 | Overview | where things stand, a tile for each page |
-| Accounts | all six SIP accounts: every field the phone's screen has. The default account. Remove |
+| Accounts | all six SIP accounts: every field the phone's screen has. The default account. Remove. Advanced: the dial plan ([phone.md](phone.md#dial-plan)) |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server |
 | Date and time | the time zone, from the phone's list, or a TZ string for a place the list lacks |
 | Sound and screen | ringer, handset, speaker and headset levels; brightness, and when the screen dims and goes off; the theme, which the page wears too ([design](design/README.md)) |
