@@ -322,27 +322,26 @@ Run on 2026-11-24 for the loudspeaker's limit (issue #57), on development builds
 
 Loudness and the levels that freeze the phone are in [The loudspeaker's limit](#the-loudspeakers-limit).
 
-Run on 2026-11-25, at night, for an app's sound (issue #63). **Nothing was audible:** the service ran with `--silent`, and the mixer read back with the amplifier and all four outputs off each time it was looked at while sound was flowing. The phone's own shell and audio service were stopped and this tree's ARM builds run in their place from `/tmp`, with `libt48/examples/tones` as the app, keys and the hook pressed through the kernel's test hooks, and `--record` keeping what the service sent to the codec.
+Run on 2026-11-25, at night, for an app's sound (issue #63). **Nothing was audible:** the service ran with `--silent`, and the mixer read back with the amplifier and all four outputs off each time it was looked at while sound was flowing (first with the hardware running on digital silence, before any sound was made). The phone's own shell and audio service were stopped and this tree's ARM builds run in their place from `/tmp`, with `libt48/examples/tones` as the app, keys and the hook pressed through the kernel's test hooks, and `--record` keeping what the service sent to the codec. Three runs.
 
 | Test | Result |
 |---|---|
-| The four notes, twice, at Apps volume 10 | sent to the codec at 208 to 210 (a peak of 12000 at volume 10 should be 208) |
-| Volume up twice, then a steady 600 Hz tone for 6 s | Apps volume 12 at the service, ringer untouched; sent at 332 (should be 330), without a gap |
+| The four notes, twice, at Apps volume 12 | sent to the codec at 660 to 662 (a peak of 24000 at volume 12 should be 661) |
+| Volume up twice | Apps volume 14 at the service, ringer untouched; a tone then sent at 1047 to 1056 (should be 1047) |
+| A steady 600 Hz tone at volume 12 for 7.5 s | 660.7 in every tenth of a second, no gap |
+| The ringer asked for during the tone, for 2 s | the tone gone within 0.25 s, the ringer's two notes in its place at the ringer's level, the tone back when ringing stopped; never above 1211 on the way (the limit is 1800) |
 | Handset lifted during the tone | the app paused in the same moment, the service on the handset route with dial tone; handset down: the app back in front |
 | Home during a tone | paused, nothing more taken; the hardware idle 2 s later |
-| The whole run | 173120 samples in 544 frames, no hardware underrun, none dropped, no reset of the ring; the ring ran dry three times, each the end of a sound |
-| Delay | 40 ms waiting in the ring on average (the app keeps up to 640 samples there); the playback buffer held 640 samples after each of 1099 writes. 65 ms from write to loudspeaker |
+| The longest run | 197280 samples in 619 frames, no hardware underrun, none dropped, no reset of the ring; the ring ran dry three times, each the end of a sound |
+| Delay | 40 ms waiting in the ring on average (the app keeps up to 640 samples there), in all three runs; the playback buffer held 640 samples after each of 1175 writes. 65 ms from write to loudspeaker |
+| Processor, during the steady tone | the service 1%, the app and the shell under 1% each (`top`) |
 | Afterwards | the phone's own services started again, registered, idle, amplifier and outputs off |
 
-Not done: hearing it. That is the morning's test: start Tones from the launcher (it must be installed, or run with `t48-shell --app tones`), and listen for four rising notes; OK repeats them, 1 beeps, 2 holds a tone, the volume keys change the level.
-
-Found and fixed on the way: switching a microphone on makes a thump (14000 counts, gone in 0.4 s) that went to the far end, so the first half second after a route change is now sent as silence; the service left the amplifier and microphone on when idle; and it needed real-time priority (above).
-
-`t48-audiod --record FILE.wav` is a test aid: while a call stream is open it writes a 3-channel WAV (the microphone as sent to baresip, the far end as received, the loudspeaker as played), 120 s at most. It is how the echo call above was measured, and it is what to use for tuning the speakerphone.
+Not done: hearing it. The steps are in [What needs the phone, and Tom](#what-needs-the-phone-and-tom).
 
 ## What needs the phone, and Tom
 
-1. **A listen.** Everything above was measured with microphones. How the loudspeaker and earpiece sound, and whether the levels are right, needs an ear. An app's sound has not been heard at all yet; whether volume 15 on the limit is loud enough for a game is the first thing to find out.
+1. **A listen.** Everything above was measured with microphones. How the loudspeaker and earpiece sound, and whether the levels are right, needs an ear. An app's sound has not been heard at all yet: open Tones (`libt48/examples/tones`, in `/data/apps/tones` on the bench phone) for four rising notes; OK repeats them, 1 beeps, 2 holds a tone until pressed again, the volume keys change the level. Whether volume 15, on the limit, is loud enough for a game is the first thing to find out.
 2. **Sidetone level** on the handset (`Codec B Sidetone Volume` in the handset route; -18 dB now).
 3. **Speakerphone tuning by ear:** microphone gain, then `coupling`, then whether 36 dB and 15 dB feel right.
 4. **The headset**, with one plugged in.

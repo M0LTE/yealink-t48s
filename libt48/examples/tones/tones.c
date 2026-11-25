@@ -18,14 +18,15 @@
 #define RATE 16000
 #define CHUNK 160           /* 10 ms at a time, whenever there is room */
 
-/* One note: a sine made by a two-multiply recurrence, with 8 ms fades so it
- * does not click. No floating point once it has started. */
+/* One note: a sine read out of a table by a counter that wraps once a cycle,
+ * with 8 ms fades so it does not click. No floating point once the table is
+ * made, and the pitch is exact however long it plays. */
 #define FADE (RATE * 8 / 1000)
+#define PEAK 24000          /* 3 dB under full scale */
+static int16_t sine[1024];
 static struct {
     int pos, total;         /* samples played, and its whole length */
-    int looped;             /* the steady tone, past its first second: no fade in */
-    int32_t y1, y2, k;      /* the last two samples, and 2 cos(w), 1 << 14 */
-    int32_t first;          /* what y2 starts at */
+    uint32_t phase, step;   /* a cycle is 2^32 */
 } note;
 
 static const int tune[] = {523, 659, 784, 1047};   /* C E G C */
@@ -63,12 +64,10 @@ static int sounding(void) { return note.pos < note.total; }
 
 static void start_note(int hz, int ms)
 {
-    double w = 2 * M_PI * hz / RATE;
     note.total = RATE * ms / 1000;
-    note.pos = note.looped = 0;
-    note.k = (int32_t)lrint(2 * cos(w) * 16384);
-    note.y1 = 0;
-    note.y2 = note.first = (int32_t)lrint(-sin(w) * 24000);   /* a peak of 24000: 3 dB under full scale */
+    note.pos = 0;
+    note.phase = 0;
+    note.step = (uint32_t)(((uint64_t)hz << 32) / RATE);
 }
 
 static void stop_note(void)
@@ -82,19 +81,12 @@ static int make(int16_t *out, int n)
     for (; i < n; i++, note.pos++) {
         if (note.pos >= note.total) {
             if (!steady) break;
-            /* a whole number of cycles has gone by: start the sum again where it began, so it cannot drift */
-            note.pos = 0;
-            note.looped = 1;
-            note.y1 = 0;
-            note.y2 = note.first;
+            note.pos = FADE;   /* round again, past the fade in */
         }
-        int32_t y = ((note.k * note.y1) >> 14) - note.y2;
         int left = note.total - note.pos;
-        int g = !note.looped && note.pos < FADE ? note.pos : !steady && left < FADE ? left : FADE;
-        note.y2 = note.y1;
-        note.y1 = y;
-        y = y * g / FADE;
-        out[i] = (int16_t)(y > 30000 ? 30000 : y < -30000 ? -30000 : y);
+        int g = note.pos < FADE ? note.pos : !steady && left < FADE ? left : FADE;
+        out[i] = (int16_t)(sine[note.phase >> 22] * g / FADE);
+        note.phase += note.step;
     }
     return i;
 }
@@ -120,20 +112,24 @@ static void say(const char *what)
             t48_sound_dry(), wait_n ? wait_sum_us / wait_n / 1000 : 0, wait_max_us / 1000);
 }
 
+static const char *state_text(void)
+{
+    return steady ? "Steady tone" : sounding() || tune_at >= 0 ? "Playing" : "Silent";
+}
+
+static const char *shown;   /* the state on the screen */
+
 static void draw(void)
 {
     t48_surface *s = t48_screen();
     const t48_theme *t = t48_theme_now();
-    char line[96];
     t48_fill(s, 0, 0, s->w, s->h, t->bg);
     t48_text(s, 40, 40, &t48_font_head, t->text, "Tones");
     if (!have_sound) {
         t48_text(s, 40, 110, &t48_font_normal, t->text, "No sound");
     } else {
         t48_text(s, 40, 110, &t48_font_normal, t->text, "OK: four notes     1: beep     2: steady tone     X: close");
-        snprintf(line, sizeof line, "%s, latency %d ms", steady ? "Steady tone" : sounding() || tune_at >= 0 ? "Playing" : "Silent",
-                 t48_sound_latency_us() / 1000);
-        t48_text(s, 40, 160, &t48_font_normal, t->dim, line);
+        t48_text(s, 40, 160, &t48_font_normal, t->dim, shown = state_text());
     }
     t48_damage_all();
 }
@@ -144,6 +140,7 @@ int main(void)
     int paused = 0;
 
     if (t48_app_init() < 0) return 1;
+    for (int i = 0; i < 1024; i++) sine[i] = (int16_t)lrint(PEAK * sin(2 * M_PI * i / 1024));
     have_sound = t48_sound_open() == 0;
     if (!have_sound) fprintf(stderr, "tones: no sound from this shell\n");
     t48_sound_buffer(640);   /* 40 ms waiting at most */
@@ -151,7 +148,7 @@ int main(void)
     start_note(tune[0], 180);
     feed();
     draw();
-    t48_timer(0, 5, 1);
+    t48_timer(0, 10, 1);
     t48_timer(1, 250, 1);
     for (;;) {
         if (t48_poll(&ev, -1) < 0) break;
@@ -173,7 +170,7 @@ int main(void)
             else if (busy && !t48_sound_queued()) { busy = 0; say("played"); }
         }
         if (ev.type == T48_EV_TIMER && ev.id == 1 && !paused) {
-            draw();
+            if (have_sound && shown != state_text()) draw();   /* not every time: drawing the screen is the costly part */
             if ((sounding() || tune_at >= 0) && t48_now_ms() - last_log >= 1000) { last_log = t48_now_ms(); say("playing"); }
         }
     }

@@ -45,6 +45,9 @@ check(at == sorted(at), "the notes came in order")
 # the steady tone at volume 14: 24000 * 1430 / 32768 = 1047
 a, i = loudest(600, 8000)
 check(1000 < a < 1070, "steady 600 Hz at %.0f after two presses of volume up (want 1047)" % a)
+# and it is one unbroken tone: the same level in every tenth of that half second
+lv = [amp(x[k:k + 1600], 600) for k in range(i, i + 8000, 1600)]
+check(min(lv) > 0.99 * max(lv), "the steady tone is steady (%.0f to %.0f)" % (min(lv), max(lv)))
 # the dial tone when the handset was lifted, and none of the app's tone under it
 a350, j = loudest(350, 8000)
 check(a350 > 300, "dial tone when the handset was lifted (350 Hz at %.0f)" % a350)
