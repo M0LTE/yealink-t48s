@@ -95,13 +95,17 @@ static struct {
 	uint32_t pos;         /* samples into q[0]'s tone and gap */
 } dtmf;                   /* under cs.lock */
 
+/* one sine cycle in 1024 steps, made once: the phone has no FPU, so a
+ * tone is a table lookup a sample, not a sin() */
+static int16_t sine[1024];
+
 
 /* the two frequencies of a key, or false if it is not one */
-static bool dtmf_freqs(char key, double *lo, double *hi)
+static bool dtmf_freqs(char key, uint32_t *lo, uint32_t *hi)
 {
 	static const char keys[] = "123A456B789C*0#D";
-	static const double row[] = { 697, 770, 852, 941 };
-	static const double col[] = { 1209, 1336, 1477, 1633 };
+	static const uint32_t row[] = { 697, 770, 852, 941 };
+	static const uint32_t col[] = { 1209, 1336, 1477, 1633 };
 	const char *p = key ? strchr(keys, key) : NULL;
 
 	if (!p)
@@ -116,7 +120,7 @@ static bool dtmf_freqs(char key, double *lo, double *hi)
  * in place of the microphone while its tone lasts. */
 static void dtmf_frame(int16_t *frame)
 {
-	double lo, hi;
+	uint32_t lo, hi;
 	size_t k;
 
 	if (!dtmf.n)
@@ -124,14 +128,13 @@ static void dtmf_frame(int16_t *frame)
 	if (dtmf_freqs(dtmf.q[0], &lo, &hi)) {
 		for (k = 0; k < T48A_FRAME; k++) {
 			uint32_t t = dtmf.pos + (uint32_t)k;
-			double v;
 
 			if (t >= DTMF_ON)
 				break;
-			/* high group 2 dB over the low, about -9 dBFS together */
-			v = 7000 * sin(2 * M_PI * lo * t / T48A_SRATE) +
-			    8800 * sin(2 * M_PI * hi * t / T48A_SRATE);
-			frame[k] = (int16_t)v;
+			/* the phase, in 1024ths of a cycle; high group 2 dB
+			 * over the low, about -9 dBFS together */
+			frame[k] = (int16_t)((7000 * sine[(lo * t * 1024 / T48A_SRATE) & 1023] +
+					      8800 * sine[(hi * t * 1024 / T48A_SRATE) & 1023]) >> 15);
 		}
 	}
 	dtmf.pos += T48A_FRAME;
@@ -585,7 +588,7 @@ static int cmd_inband(struct re_printf *pf, void *arg)
 {
 	const struct cmd_arg *carg = arg;
 	const char *p;
-	double lo, hi;
+	uint32_t lo, hi;
 	(void)pf;
 
 	if (!carg->prm || !*carg->prm)
@@ -615,6 +618,9 @@ static int module_init(void)
 
 	if (mtx_init(&cs.lock, mtx_plain) != thrd_success)
 		return ENOMEM;
+
+	for (size_t i = 0; i < RE_ARRAY_SIZE(sine); i++)
+		sine[i] = (int16_t)(32767 * sin(2 * M_PI * (double)i / RE_ARRAY_SIZE(sine)));
 
 	str_ncpy(cs.path, T48A_SOCKET, sizeof(cs.path));
 	(void)conf_get_str(conf_cur(), "t48audio_socket", cs.path,
