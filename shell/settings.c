@@ -31,8 +31,8 @@
 #define T48_VERSION "development build"
 #endif
 
-enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL };
-static const char *const page_names[] = {"root", "accounts", "sip", "network", "time", "timezone", "sound", "screen", "access", "about",
+enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_SIPADV, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL };
+static const char *const page_names[] = {"root", "accounts", "sip", "sipadvanced", "network", "time", "timezone", "sound", "screen", "access", "about",
                                          "appsettings", "appconf", "store", "storeapp", "theme", "update", "install"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
@@ -799,6 +799,7 @@ static void build_sip(const char *arg)
     add_stored(R_TEXT, "Label", f, "label", "", 0);
     add_stored(R_TEXT, "Voicemail", f, "voicemail", "", F_DIGITS);
     add_stored(R_TOGGLE, "Enabled", f, "enabled", "on", 0);
+    snprintf(add_menu("Advanced", P_SIPADV, "")->arg, sizeof rows[0].arg, "%d", n);
     snprintf(acc, sizeof acc, "reg.%d", n);
     const char *reg = phone_state(acc);
     add_info("Status", !strcmp(phone_state("sip"), "up") ? (!strcmp(reg, "ok") ? "Registered" : !strcmp(reg, "fail") ? "Not registered" :
@@ -806,6 +807,15 @@ static void build_sip(const char *arg)
     if (cfg_str(f, "user", "")[0] || cfg_str(f, "domain", "")[0])
         snprintf(add_action("Remove account", A_ACCOUNT_REMOVE, "")->def, sizeof rows[0].def, "%s", f);
     rows[nrows - 1].flags |= rows[nrows - 1].kind == R_ACTION ? F_DANGER : 0;
+}
+
+/* the account's settings that are seldom changed (issue #77, docs/sip.md#interoperability) */
+static void build_sipadv(const char *arg)
+{
+    const char *f = sip_file(atoi(arg) < 1 ? 1 : atoi(arg));
+    snprintf(title, sizeof title, "Advanced");
+    add_stored(R_CHOICE, "Session timer", f, "session_timer", "1800", 0)->choices = "off|90|600|1800|3600";
+    add_stored(R_TOGGLE, "100rel", f, "100rel", "off", 0);
 }
 
 static void build_net(void)
@@ -1237,6 +1247,7 @@ static void rebuild(void)
     case P_ROOT: build_root(); break;
     case P_ACCOUNTS: build_accounts(); break;
     case P_SIP: build_sip(stack[depth].arg); break;
+    case P_SIPADV: build_sipadv(stack[depth].arg); break;
     case P_NET: build_net(); break;
     case P_TIME: build_time(); break;
     case P_TZ: build_tz(); break;
@@ -1835,7 +1846,8 @@ static void two_lines_centred(int cx, int y, int w, const t48_font *f, uint32_t 
 static const char *choice_text(const char *v)
 {
     static const char *const map[][2] = {{"dhcp", "DHCP"}, {"static", "Static"}, {"udp", "UDP"}, {"tcp", "TCP"}, {"tls", "TLS"},
-                                             {"stable", "Stable"}, {"testing", "Testing"}};
+                                             {"stable", "Stable"}, {"testing", "Testing"}, {"off", "Off"},
+                                             {"90", "90 s"}, {"600", "10 min"}, {"1800", "30 min"}, {"3600", "1 h"}};
     for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
         if (!strcmp(v, map[i][0])) return map[i][1];
     return v;

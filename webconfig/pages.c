@@ -279,6 +279,26 @@ void page_overview(struct req *r)
 
 /* ---------- phone accounts ---------- */
 
+/* An account's Advanced part (issue #77, docs/sip.md#interoperability): session timer and 100rel.
+ * Open when either is not the default. */
+static const char *const session_timers[][2] = {{"off", "Off"}, {"90", "90 s"}, {"600", "10 min"}, {"1800", "30 min"}, {"3600", "1 h"}};
+#define NTIMERS ((int)(sizeof session_timers / sizeof session_timers[0]))
+
+static void account_advanced(const char *f)
+{
+    const char *st = val(f, "session_timer", "1800");
+    int rel = !strcmp(val(f, "100rel", "off"), "on"), known = 0;
+    H("<details class='sub'%r><summary>Advanced</summary><div class='fields'>", strcmp(st, "1800") || rel ? " open" : "");
+    H("<label class='field'><span>Session timer</span><select name='session_timer'>");
+    for (int i = 0; i < NTIMERS; i++) {
+        known |= !strcmp(st, session_timers[i][0]);
+        H("<option value='%s'%r>%s</option>", session_timers[i][0], !strcmp(st, session_timers[i][0]) ? " selected" : "", session_timers[i][1]);
+    }
+    if (!known) H("<option value='%s' selected>%s s</option>", st, st);   /* set by hand in the file: kept */
+    H("</select></label></div><label class='check'><input type='checkbox' name='100rel' value='on'%r> 100rel</label></details>",
+      rel ? " checked" : "");
+}
+
 static void page_accounts(struct req *r)
 {
     int used = 0, def = atoi(val("phone", "default_account", "1"));
@@ -317,9 +337,10 @@ static void page_accounts(struct req *r)
         H("</select></label>");
         field("Label", "label", val(f, "label", ""), "placeholder='Optional'", "Name on the phone's screens");
         field("Voicemail", "voicemail", val(f, "voicemail", ""), "inputmode='tel' placeholder='Optional'", "Number the Message key calls");
-        H("</div><label class='check'><input type='checkbox' name='enabled' value='on'%r> Enabled</label>"
-          "<div class='actions'><button class='primary' type='submit'>Save</button></div></form>",
+        H("</div><label class='check'><input type='checkbox' name='enabled' value='on'%r> Enabled</label>",
           strcmp(val(f, "enabled", "on"), "off") ? " checked" : "");
+        account_advanced(f);
+        H("<div class='actions'><button class='primary' type='submit'>Save</button></div></form>");
         if (has) {
             form_begin(r, "/accounts/remove", "class='danger'");
             H("<input type='hidden' name='n' value='%d'>", n);
@@ -351,7 +372,14 @@ static void post_account_save(struct req *r)
         return;
     }
     if (strcmp(tr, "udp") && strcmp(tr, "tcp") && strcmp(tr, "tls")) tr = "udp";
+    /* the Advanced part: the defaults are not written; an interval set by hand in the file comes back as it was */
+    const char *st = form(r, "session_timer");
+    int st_ok = !strcmp(st, val(f, "session_timer", "1800"));
+    for (int i = 0; i < NTIMERS; i++) st_ok |= !strcmp(st, session_timers[i][0]);
+    if (!st_ok || !strcmp(st, "1800")) st = st_ok ? "" : NULL;
     for (int i = 0; i < 7 && ok; i++) ok = set(f, keys[i], v[i]) == 0;
+    if (ok && st) ok = set(f, "session_timer", st) == 0;
+    if (ok) ok = set(f, "100rel", !strcmp(form(r, "100rel"), "on") ? "on" : NULL) == 0;
     if (ok) ok = cfg_set(f, "transport", tr) == 0 && cfg_set(f, "enabled", !strcmp(form(r, "enabled"), "on") ? "on" : "off") == 0;
     if (ok && pw[0]) ok = cfg_set(f, "password", pw) == 0;
     memset(pw, 0, sizeof pw);

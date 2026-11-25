@@ -14,7 +14,7 @@ Press **Down** on the idle screen, or touch **Settings**. Everything here can al
 
 | Page | What it sets | Takes effect |
 |---|---|---|
-| Accounts | up to six accounts ([phone.md](phone.md#several-accounts)), and which is the default for calls. For each: User, Password, Server host (`host:port` for a port), Outbound proxy, Auth user, Display name, Transport, Label (a short name for this phone's screens), Voicemail, Enabled, and Remove account | on leaving an account's page: baresip is restarted if it is running. The usual account changes at once |
+| Accounts | up to six accounts ([phone.md](phone.md#several-accounts)), and which is the default for calls. For each: User, Password, Server host (`host:port` for a port), Outbound proxy, Auth user, Display name, Transport, Label (a short name for this phone's screens), Voicemail, Enabled, Advanced (Session timer: Off, 90 s to 1 h, 30 min by default; 100rel: off by default; [sip.md](sip.md#interoperability)), and Remove account | on leaving an account's page: baresip is restarted if it is running. The usual account changes at once |
 | Do not disturb | on or off, the same as Right on the idle screen ([phone.md](phone.md#do-not-disturb)) | at once |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server | on leaving the page. If the address is a different one, baresip is started again, as it listens on the address it started with |
 | Date and time | time zone, from a list | at once, in the shell and in apps started afterwards |

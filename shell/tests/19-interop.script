@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# An account's Advanced page: session timer and 100rel (issue #77, docs/sip.md#interoperability).
+wait 200
+expect idle
+touch 700 420
+expect settings
+key ok
+expectstate settings.page accounts
+key ok
+expectstate settings.page sip
+# Advanced is after Enabled
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Advanced
+key ok
+expectstate settings.page sipadvanced
+# the defaults, with nothing in the file
+expectstate settings.row Session_timer
+expectstate settings.value 1800
+shot shots/settings-account-interop.png
+# OK and Right step through the intervals, Left goes back
+key ok
+expectstate settings.value 3600
+expectstate cfg.sip.session_timer 3600
+key right
+expectstate settings.value off
+expectstate cfg.sip.session_timer off
+key left
+key left
+expectstate settings.value 1800
+expectstate cfg.sip.session_timer 1800
+key down
+expectstate settings.row 100rel
+expectstate settings.value off
+key ok
+expectstate cfg.sip.100rel on
+expectstate settings.value on
+shot shots/settings-account-interop-changed.png
+key x
+expectstate settings.page sip

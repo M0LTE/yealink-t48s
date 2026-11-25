@@ -460,6 +460,36 @@ class Paired(unittest.TestCase):
         self.assertNotIn("hunter2", log)
         self.assertNotIn("pbx.example.org", log)
 
+    def test_11_account_interop(self):
+        # an account's Advanced part: session timer and 100rel (issue #77)
+        b, p = self.b, self.p
+        base = {"n": "3", "user": "4004", "domain": "pbx.example.org", "transport": "udp", "enabled": "on"}
+        self.ok("/accounts/save", dict(base, session_timer="1800"), "/accounts")
+        self.assertIsNone(p.get("sip3", "session_timer"))          # the defaults are not written
+        self.assertIsNone(p.get("sip3", "100rel"))
+        page = b.get("/accounts").body
+        self.assertIn("<span>Session timer</span>", page)
+        self.assertIn("<option value='1800' selected>30 min</option>", page)
+        self.assertIn("<details class='sub'><summary>Advanced</summary>", page)   # closed while all is usual
+        self.ok("/accounts/save", dict(base, session_timer="off", **{"100rel": "on"}), "/accounts")
+        self.assertEqual(p.get("sip3", "session_timer"), "off")
+        self.assertEqual(p.get("sip3", "100rel"), "on")
+        page = b.get("/accounts").body
+        self.assertIn("<option value='off' selected>Off</option>", page)
+        self.assertIn("name='100rel' value='on' checked", page)
+        self.assertIn("<details class='sub' open><summary>Advanced</summary>", page)
+        self.ok("/accounts/save", dict(base, session_timer="90"), "/accounts")
+        self.assertEqual(p.get("sip3", "session_timer"), "90")
+        self.assertIsNone(p.get("sip3", "100rel"))
+        # a value not on the list is refused and the stored one kept; one set by hand in the file is shown and kept
+        self.ok("/accounts/save", dict(base, session_timer="5"), "/accounts")
+        self.assertEqual(p.get("sip3", "session_timer"), "90")
+        p.set("sip3", "session_timer", "1200")
+        self.assertIn("<option value='1200' selected>1200 s</option>", b.get("/accounts").body)
+        self.ok("/accounts/save", dict(base, session_timer="1200"), "/accounts")
+        self.assertEqual(p.get("sip3", "session_timer"), "1200")
+        self.ok("/accounts/remove", {"n": "3", "sure": "yes"}, "/accounts")
+
     def test_20_network(self):
         b, p = self.b, self.p
         before = len(p.applied_list())
