@@ -3,6 +3,7 @@ obj-$(CONFIG_GPIO_BCMRING)	+= gpio-bcmring.o
 obj-$(CONFIG_T48S_SECURE)	+= t48s_secure.o
 obj-$(CONFIG_T48S_KEYPAD)	+= t48s_keypad.o
 obj-$(CONFIG_T48S_HOLTEK)	+= t48s_holtek.o
+obj-$(CONFIG_T48S_LAMPS)		+= t48s_lamps.o
 obj-$(CONFIG_T48S_BACKLIGHT)	+= t48s_backlight.o
 obj-$(CONFIG_T48S_TOUCH)	+= t48s_touch.o
 obj-$(CONFIG_T48S_ETH)		+= t48s_eth.o
