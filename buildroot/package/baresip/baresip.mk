@@ -10,7 +10,7 @@ BARESIP_SOURCE = v$(BARESIP_VERSION).tar.gz
 BARESIP_SITE = https://github.com/baresip/baresip/archive/refs/tags
 BARESIP_LICENSE = BSD-3-Clause
 BARESIP_LICENSE_FILES = LICENSE
-BARESIP_DEPENDENCIES = libre libg722 mbedtls
+BARESIP_DEPENDENCIES = libre libg722 opus mbedtls
 
 BARESIP_SIP = $(BR2_EXTERNAL_T48S_PATH)/../sip
 # one list of modules, kept in sip/build.sh
@@ -24,6 +24,8 @@ BARESIP_CONF_OPTS = \
 	-DAPP_MODULES="$(BARESIP_APP_MODULES)" \
 	-DLIBG722_INCLUDE_DIR=$(STAGING_DIR)/usr/include \
 	-DLIBG722_LIBRARY=$(STAGING_DIR)/usr/lib/libg722.a \
+	-DOPUS_INCLUDE_DIR=$(STAGING_DIR)/usr/include \
+	-DOPUS_LIBRARY=$(STAGING_DIR)/usr/lib/libopus.a \
 	-DRE_INCLUDE_DIR=$(STAGING_DIR)/usr/include/re \
 	-DRE_LIBRARY=$(STAGING_DIR)/usr/lib/libre.a \
 	-Dre_DIR=$(STAGING_DIR)/usr/lib/cmake/re \
@@ -41,6 +43,7 @@ define BARESIP_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0644 $(@D)/LICENSE $(TARGET_DIR)/usr/share/t48/sip/licences/baresip.LICENSE
 	$(INSTALL) -D -m 0644 $(LIBRE_DIR)/LICENSE $(TARGET_DIR)/usr/share/t48/sip/licences/re.LICENSE
 	$(INSTALL) -D -m 0644 $(LIBG722_DIR)/LICENSE $(TARGET_DIR)/usr/share/t48/sip/licences/libg722.LICENSE
+	$(INSTALL) -D -m 0644 $(OPUS_DIR)/COPYING $(TARGET_DIR)/usr/share/t48/sip/licences/opus.LICENSE
 	$(INSTALL) -D -m 0644 $(MBEDTLS_DIR)/LICENSE $(TARGET_DIR)/usr/share/t48/sip/licences/mbedtls.LICENSE
 endef
 
