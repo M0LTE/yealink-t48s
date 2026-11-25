@@ -278,6 +278,7 @@ int cfg_set(const char *file, const char *key, const char *value);         /* NU
 char *cfg_load_text(const char *file);                                     /* the whole file, malloc'd, or NULL */
 int cfg_save_text(const char *file, const char *text);                     /* the whole file, atomically */
 int cfg_secret(const char *key);                                           /* a password: never shown */
+int sip_host_ok(const char *h, int scheme);   /* host, host:port, [IPv6]:port or empty; scheme: a sip: or sips: in front allowed */
 int config_main(int argc, char **argv);                                    /* the t48-config command */
 
 /* ---------- the app manager (pkg.c): the t48-app command ---------- */

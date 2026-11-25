@@ -63,8 +63,9 @@ key 0
 key 4
 key ok
 run grep -qx password=test-only-1004 phone-config/sip2
-# domain 127.0.0.1
+# server host 127.0.0.1
 key down
+expectstate settings.row Server_host
 key ok
 key hash
 key hash
@@ -81,6 +82,7 @@ expectstate kbd.text 127.0.0.1
 key ok
 # a name for it on this phone
 key down
+expectstate settings.row Outbound_proxy
 key down
 key down
 key down

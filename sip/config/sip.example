@@ -2,6 +2,8 @@
 # The phone's SIP account, as /data/config/sip (read by t48-sip at start).
 # More accounts, up to six, are files of the same kind beside it: sip2 to sip6.
 # key=value, one per line. Only user and domain are required.
+# domain is the server host: host, or host:port for a port other than the
+# usual (without one the server is found by DNS SRV records).
 # Values may not contain ; < > " or spaces (display_name may hold spaces).
 
 user=1001
@@ -10,9 +12,11 @@ domain=sip.example.com
 # auth_user=1001
 # display_name=Front desk
 # transport=udp
-# outbound_proxy=sip:proxy.example.com
+# outbound_proxy=proxy.example.com     host, host:port or a sip: URI
 # register_seconds=600
 # enabled=off             keep the account but do not use it
 # label=Work              what the phone calls this account on its screen
 # voicemail=1571          the number the Message key calls
 # mwi=off                 do not ask the server about waiting messages
+# keepalive=off           no NAT keepalives (OPTIONS to the server every 23 to 29 s,
+#                         96 to 120 s over TCP and TLS)

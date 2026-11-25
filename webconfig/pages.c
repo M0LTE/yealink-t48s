@@ -306,9 +306,9 @@ static void page_accounts(struct req *r)
         form_begin(r, "/accounts/save", NULL);
         H("<input type='hidden' name='n' value='%d'><div class='fields'>", n);
         field("User", "user", val(f, "user", ""), "autocomplete='off' autocapitalize='none' spellcheck='false'", NULL);
-        field("Domain", "domain", val(f, "domain", ""), "autocomplete='off' autocapitalize='none' spellcheck='false'", NULL);
+        field("Server host", "domain", val(f, "domain", ""), "autocomplete='off' autocapitalize='none' spellcheck='false' placeholder='host or host:port'", NULL);
         H("<label class='field'><span>Password</span><input type='password' name='password' value='' maxlength='200' autocomplete='new-password' placeholder='%r'></label>", pw ? "Set. Empty keeps it" : "Not set");
-        field("Proxy", "outbound_proxy", val(f, "outbound_proxy", ""), "autocapitalize='none' spellcheck='false' placeholder='Optional'", NULL);
+        field("Outbound proxy", "outbound_proxy", val(f, "outbound_proxy", ""), "autocapitalize='none' spellcheck='false' placeholder='Optional'", NULL);
         field("Auth user", "auth_user", val(f, "auth_user", ""), "autocomplete='off' autocapitalize='none' spellcheck='false' placeholder='Optional'", NULL);
         field("Display name", "display_name", val(f, "display_name", ""), "placeholder='Optional'", NULL);
         H("<label class='field'><span>Transport</span><select name='transport'>");
@@ -345,6 +345,11 @@ static void post_account_save(struct req *r)
     snprintf(pw, sizeof pw, "%s", form(r, "password"));
     if (strlen(form(r, "password")) > 200 || strpbrk(pw, "\r\n")) ok = 0;
     if (!ok) { flash(r, 1, "Account %d not saved: a value is too long.", n); redirect(r, where); return; }
+    if (!sip_host_ok(v[1], 0) || !sip_host_ok(v[2], 1)) {
+        flash(r, 1, "Account %d not saved: %s must be host or host:port, IPv6 in brackets.", n, sip_host_ok(v[1], 0) ? "outbound proxy" : "server host");
+        redirect(r, where);
+        return;
+    }
     if (strcmp(tr, "udp") && strcmp(tr, "tcp") && strcmp(tr, "tls")) tr = "udp";
     for (int i = 0; i < 7 && ok; i++) ok = set(f, keys[i], v[i]) == 0;
     if (ok) ok = cfg_set(f, "transport", tr) == 0 && cfg_set(f, "enabled", !strcmp(form(r, "enabled"), "on") ? "on" : "off") == 0;

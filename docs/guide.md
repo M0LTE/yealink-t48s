@@ -67,7 +67,7 @@ If the power fails during Install: start from the stick again and choose Install
 | Down | Settings |
 | X, or any key above, held 5 s | key test ([shell.md](shell.md#the-key-test)) |
 
-- **Accounts.** Settings, Accounts: up to six SIP accounts. User, Password and Domain are enough for most. Calls go out from the default account; Left and Right in the dialler pick another. [phone.md](phone.md).
+- **Accounts.** Settings, Accounts: up to six SIP accounts. User, Password and Server host are enough for most; `host:port` gives a port. Calls go out from the default account; Left and Right in the dialler pick another. [phone.md](phone.md).
 - **Calls.** Lift the handset or press Speaker. Hold, mute, transfer, a second call, voicemail on the Message key. On Speaker one side is heard at a time. The headset socket is untried.
 - **Contacts and calls.** Left for contacts, Up for the call list. A name shows wherever its number does.
 - **Do not disturb.** Right on the idle screen, or Settings, Do not disturb. DND shows in the header, after the network address. Callers are told the phone is not available, nothing rings, and each call is listed as missed.

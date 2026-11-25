@@ -133,6 +133,24 @@ key 6
 expectstate kbd.text sip.lan
 key ok
 expectstate cfg.sip.domain sip.lan
+# a bad port is refused, nothing stored: 1 seven times is :, 0 0 is 0
+key ok
+key 1
+key 1
+key 1
+key 1
+key 1
+key 1
+key 1
+wait 1000
+key 0
+key 0
+expectstate kbd.text sip.lan:0
+key ok
+expectstate overlay message
+expectstate overlay.title Not_a_host
+key ok
+expectstate cfg.sip.domain sip.lan
 # transport is a choice: OK steps through
 key down
 key down
