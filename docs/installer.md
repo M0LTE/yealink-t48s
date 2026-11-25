@@ -46,7 +46,7 @@ t48s-backup/                                  made on the phone
 
 `t48-install` takes the first FAT partition of a USB disk that holds `T48S.rom` and mounts it on `/run/t48-stick`.
 
-The phone mounts every stick read-only for apps (`t48-usbmount`, on `/run/media`). The installer takes over only a stick holding `T48S.rom`: `t48-usbmount hold` unmounts it and leaves it alone until it is taken out, so the read-write mount can be made. Other sticks are not touched.
+The phone mounts every stick read-only for apps (`t48-usbmount`, on `/run/media`). The installer takes over only a stick holding `T48S.rom`: `t48-usbmount hold` unmounts it and leaves it alone until it is taken out, so the read-write mount can be made. If an app still has a file open on it after 5 seconds, it is left mounted and the stick counts as not there until the next look. Other sticks are not touched. The look at the sticks takes `t48-usbmount`'s lock, so the two never try a stick at once; if the lock is not free within 5 seconds, `status` says `stick=no` rather than keep the Settings screen waiting.
 
 ## USB
 

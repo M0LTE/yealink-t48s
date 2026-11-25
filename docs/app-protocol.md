@@ -18,7 +18,7 @@ The shell starts the app's program from inside the app's folder, as an unprivile
 
 The app has no access to the framebuffer, the input devices or the sound hardware and does not need any.
 
-**USB sticks.** Each FAT or exFAT stick in the socket is at `/run/media/NAME`, read-only: NAME is the volume label (spaces as `_`), or the device (`sda1`) when it has none or another stick has that label. It appears within a second of going in and goes when it is taken out, so list `/run/media` again when you need it rather than once at start. No permission is needed.
+**USB sticks.** Each FAT or exFAT stick in the socket is at `/run/media/NAME`, read-only: NAME is the volume label with anything but `A-Za-z0-9._-` made `_`, leading `._-` and trailing `_` dropped; or the device (`sda1`) when that leaves nothing or another stick has that label. It appears within a second of going in and goes when it is taken out, so list `/run/media` again when you need it rather than once at start. No permission is needed.
 
 ## The screen
 

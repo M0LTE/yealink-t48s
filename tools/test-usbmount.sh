@@ -5,7 +5,8 @@
 # mountpoint are stand-ins that keep a mounts file. What it shows: the names and
 # options, partitions and a whole disk, a stick that is not FAT, one mounted by
 # hand, taking a stick out (busy or not, and an event that comes before sysfs
-# lets go), and the installer's hold and free.
+# lets go), and the installer's hold and free, with an app holding a file
+# open and with the lock taken.
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 T=$(mktemp -d)
@@ -113,4 +114,19 @@ $U hold sde1 >/dev/null; pull sde; $U sync >/dev/null
 [ ! -e "$T/run/hold-sde1" ] && pass "a hold ends when the stick is taken out" || fail "hold left"
 stick sde vfat "NO NAME" 1; $U sync >/dev/null
 [ -n "$(mounted sde1)" ] && pass "the next stick in is mounted" || fail "after hold"
+
+stick sdg vfat "$(printf 'TWO\nLINES')" 1; $U sync >/dev/null
+[ "$(mounted sdg1)" = "$T/media/sdg1" ] && pass "a label holding a newline gives the device name" || fail "newline label: $(mounted sdg1)"
+: > "$T/busy/sdg1"
+if $U hold sdg1 2>/dev/null; then fail "held while an app had it open"; fi
+[ -n "$(mounted sdg1)" ] && [ ! -e "$T/run/hold-sdg1" ] && pass "hold gives up after 5 seconds while an app has it open, and leaves it mounted" || fail "busy hold"
+rm "$T/busy/sdg1"
+
+flock "$T/run/lock" sleep 9 & L=$!
+sleep 1
+s=$(date +%s)
+if $U hold sde1 2>/dev/null; then fail "held without the lock"; fi
+[ $(($(date +%s) - s)) -le 6 ] && [ -n "$(mounted sde1)" ] && pass "hold gives up after 5 seconds when the lock is not free" || fail "lock wait"
+T48_USBLOCKED=1 $U hold sde1 >/dev/null && [ -z "$(mounted sde1)" ] && pass "the installer, holding the lock, can hold" || fail "hold under the caller's lock"
+wait $L
 echo "all usbmount tests passed"

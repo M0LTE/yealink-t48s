@@ -37,6 +37,7 @@ WORK=${T48_WORK:-/tmp/t48install}
 MNT=${T48_MNT:-/run/t48-stick}
 DEV=${T48_DEV:-/dev}
 SYSBLOCK=${T48_SYSBLOCK:-/sys/block}
+USBRUN=${T48_USBRUN:-/run/t48-usbmount}
 NEED_KB=160000           # room a backup needs on the stick
 # number:name:bytes of data, as the kernel lists them; together the whole chip
 PARTS="0:ubl:131072 1:uboot:1048576 2:env:1048576 3:userenv:1048576 4:logo:1048576
@@ -72,14 +73,23 @@ stick() {
     S=$MNT
     if grep -q " $MNT vfat rw" "$PROC/mounts" 2>/dev/null && [ -f "$MNT/T48S.rom" ]; then return 0; fi
     mkdir -p "$MNT"
+    # the look at the sticks under t48-usbmount's lock, so it does not mount one
+    # while we try it; 5 seconds at most, since the Settings screen waits for status
+    usblock || return 1
+    probe; r=$?
+    exec 8>&-
+    return $r
+}
+probe() {
     for d in "$DEV"/sd?1 "$DEV"/sd?; do
         [ -b "$d" ] || continue
         # mounted read-only for apps (t48-usbmount): taken over only if it is ours,
-        # so another stick is not pulled from under an app every few seconds
+        # so another stick is not pulled from under an app every few seconds. Not
+        # while an app has it open
         a=$(awk -v d="$d" -v m="$MNT" '$1 == d && $2 != m { print $2; exit }' "$PROC/mounts")
         if [ -n "$a" ]; then
             [ -f "$a/T48S.rom" ] || continue
-            usbmount hold "${d##*/}"
+            usbmount hold "${d##*/}" || continue
         fi
         umount "$MNT" 2>/dev/null
         if mount -t vfat -o rw,noatime,flush "$d" "$MNT" 2>/dev/null; then
@@ -92,7 +102,16 @@ stick() {
     return 1
 }
 # the apps' read-only mounts (t48-usbmount); not there in a rehearsal on a PC
-usbmount() { command -v t48-usbmount >/dev/null 2>&1 && t48-usbmount "$@" >/dev/null; return 0; }
+usbmount() { command -v t48-usbmount >/dev/null 2>&1 || return 0; T48_USBLOCKED=1 t48-usbmount "$@" >/dev/null 2>&1; }
+usblock() {
+    command -v t48-usbmount >/dev/null 2>&1 || return 0
+    mkdir -p "$USBRUN" && exec 8> "$USBRUN/lock" || return 1
+    i=0
+    until flock -n 8; do
+        i=$((i + 1)); [ $i -lt 5 ] || { exec 8>&-; return 1; }
+        sleep 1
+    done
+}
 free_kb() { df -k "$S" | tail -n 1 | awk '{print $4}'; }
 B() { echo "$S/t48s-backup"; }
 
