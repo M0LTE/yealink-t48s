@@ -282,7 +282,8 @@ int cfg_secret(const char *key);                                           /* a 
 /* an account's custom ringtone (issue #77): 16 kHz mono s16le samples, kept
  * under the shell's state folder, by the account's file name (sip, sip2) */
 void ringtone_path(const char *acct_file, char *out, size_t n);
-int ringtone_code(const char *name);                                       /* "chime" -> T48AC_RINGTONE_CHIME; standard if unknown */
+int ringtone_code(const char *name);
+int forward_to_self(const char *target, const char *user, const char *domain);   /* 1: a forwarding target that is the account itself */                                       /* "chime" -> T48AC_RINGTONE_CHIME; standard if unknown */
 int sip_host_ok(const char *h, int scheme);   /* host, host:port, [IPv6]:port or empty; scheme: a sip: or sips: in front allowed */
 int config_main(int argc, char **argv);                                    /* the t48-config command */
 

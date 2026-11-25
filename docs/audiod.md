@@ -90,10 +90,10 @@ For the shell to adopt: [`audiod/include/t48_audio_ctl.h`](../audiod/include/t48
 | VOLUME | `u8 which` (1 handset, 2 speaker, 3 headset, 4 ringer, 5 apps), `u8 level` 0 to 15 | 0 is silent. Handset, speaker and headset: 3 dB a step, 15 is full level. Ringer and apps: 2 dB a step, 15 is the [loudspeaker's limit](#the-loudspeakers-limit) |
 | MUTE | `u8 on` | microphone only; cleared by ROUTE none |
 | TONE | `u8`: 0 off, 1 dial, 2 ringback, 3 busy, 4 error, 5 call waiting | plays until replaced or stopped |
-| RING | `u8 on`, then optional `u8 ringtone` (0 standard, 1 long, 2 chime, 3 pulse, 4 custom); with custom, the sound's file as a descriptor beside the message | an incoming call is alerting. [Ringtones](#ringtones) |
+| RING | `u8 on`, then optional `u8 ringtone` (0 standard, 1 long, 2 chime, 3 pulse, 4 custom) and `u8 file` (1: the custom sound's file comes as a descriptor beside this message) | an incoming call is alerting. [Ringtones](#ringtones) |
 | KEY | `u8 character` | DTMF sound for `0-9 * #`, a click for anything else; for the owner's ear only, baresip sends the real DTMF |
 | GET | none | answered with STATE |
-| APP | `u8`: 0 gone, 1 off the screen, 2 in front; with a new app, its ring as a descriptor beside the message | [An app's sound](#an-apps-sound) |
+| APP | `u8`: 0 gone, 1 off the screen, 2 in front; then optional `u8 ring`: 1 when a new app's ring comes as a descriptor beside this message. A ring that fails the checks is refused before the one playing is let go | [An app's sound](#an-apps-sound) |
 
 The service sends STATE (route, mute, tone, ring, the ringtone, whether baresip's call stream is up, the volumes, what the hardware can do, where the app is and whether its sound is playing) in answer to HELLO and GET and whenever any of it changes, and ERROR for a message it refuses.
 

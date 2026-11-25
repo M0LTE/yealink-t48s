@@ -58,7 +58,7 @@ static int32_t frame_at(const unsigned char *d, unsigned ch, unsigned bytes, int
 int wav_to_ringtone(const unsigned char *in, size_t len, int16_t **out, size_t *n, int *cut, const char **why)
 {
     const unsigned char *fmt = NULL, *data = NULL;
-    size_t dlen = 0;
+    size_t dlen = 0, fmt_size = 0;
     *out = NULL;
     *n = 0;
     *cut = 0;
@@ -67,7 +67,7 @@ int wav_to_ringtone(const unsigned char *in, size_t len, int16_t **out, size_t *
         uint32_t size = u32(in + at + 4);
         const unsigned char *body = in + at + 8;
         size_t room = len - at - 8;
-        if (!memcmp(in + at, "fmt ", 4) && size >= 16 && size <= room) fmt = body;
+        if (!memcmp(in + at, "fmt ", 4) && size >= 16 && size <= room) { fmt = body; fmt_size = size; }
         if (!memcmp(in + at, "data", 4)) { data = body; dlen = size < room ? size : room; break; }
         if (size > room) break;
         at += 8 + size + (size & 1);
@@ -75,7 +75,8 @@ int wav_to_ringtone(const unsigned char *in, size_t len, int16_t **out, size_t *
     if (!fmt || !data) { *why = "not a WAV file"; return -1; }
     unsigned tag = u16(fmt), ch = u16(fmt + 2), bits = u16(fmt + 14);
     uint32_t rate = u32(fmt + 4);
-    if (tag == 0xfffe && u32(fmt + 0) && u16(fmt + 16) >= 22) tag = u16(fmt + 24);   /* WAVE_FORMAT_EXTENSIBLE: its subformat */
+    /* WAVE_FORMAT_EXTENSIBLE: its subformat, when the chunk is long enough to hold it */
+    if (tag == 0xfffe) tag = fmt_size >= 40 && u16(fmt + 16) >= 22 ? u16(fmt + 24) : 0;
     int is_float = tag == 3 && bits == 32;
     if (!(tag == 1 && (bits == 8 || bits == 16 || bits == 24 || bits == 32)) && !is_float) { *why = "WAV must be PCM or 32-bit float"; return -1; }
     if (ch < 1 || ch > 8 || rate < 8000 || rate > 192000) { *why = "WAV must be 8 to 192 kHz, 1 to 8 channels"; return -1; }

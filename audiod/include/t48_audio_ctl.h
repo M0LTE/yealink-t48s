@@ -90,15 +90,18 @@ enum t48ac_type {
 	T48AC_TONE   = 5,	/* u8 tone */
 	T48AC_RING   = 6,	/* u8 on: an incoming call is alerting. Then,
 				 * optional, u8 t48ac_ringtone (STANDARD if
-				 * absent); with CUSTOM, the sound's file as
-				 * a descriptor beside the message */
+				 * absent) and u8 file: 1 when the custom
+				 * sound's file comes as a descriptor beside
+				 * this message */
 	T48AC_KEY    = 7,	/* u8 key: '0'-'9', '*', '#' give the DTMF sound,
 				 * anything else a click. Feedback for the owner
 				 * only; baresip sends the real DTMF. */
 	T48AC_GET    = 8,	/* none. Answered with STATE. */
-	T48AC_APP    = 9,	/* u8 t48ac_app. A descriptor sent with it
-				 * (SCM_RIGHTS) is the ring of a new app and
-				 * replaces any other. */
+	T48AC_APP    = 9,	/* u8 t48ac_app, then optional u8 ring: 1
+				 * when a descriptor comes with this message
+				 * (SCM_RIGHTS). That is the ring of a new
+				 * app, and replaces any other once it has
+				 * been checked. */
 
 	/* service to shell */
 	T48AC_STATE  = 0x81,	/* struct t48ac_state; sent in answer to HELLO

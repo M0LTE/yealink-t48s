@@ -42,6 +42,7 @@ enum reg { REG_NONE, REG_TRYING, REG_OK, REG_FAIL };
 #define HIST_ROWS (SMALL ? SROWS : 6)
 
 #define MAX_ACCTS 6
+#define MAX_REDIRECTS 3        /* a call out forwarded more often than this is given up: a loop */
 #define FWD_AFTER_DEF 20       /* seconds a call rings before No answer forwarding, unless the account says */
 
 /* one call, as baresip has it */
@@ -53,6 +54,7 @@ struct call {
     int held, remote_held;
     long long t_established;
     long long fwd_at;          /* ringing: when No answer forwarding sends it on, 0 never */
+    int redirects;             /* out: how many times the far end has forwarded it (3xx) */
     char dtmf[24];             /* tones sent in this call, as typed */
 };
 
@@ -74,6 +76,7 @@ static struct {
     int dial_acct;             /* the account the next call goes out from */
     int dnd;                   /* do not disturb */
     int ringtone;              /* T48AC_RINGTONE_* of the call ringing now */
+    int drop_next_out;         /* baresip is about to follow a forward we gave up on: hang that call up */
     char ring_file[300];       /* and its custom sound */
     int muted;
     int keypad;                /* in a call: the tone keypad is showing */
@@ -235,7 +238,8 @@ static void load_accounts(void)
             if (strcmp(cfg_str(f, key, "off"), "on")) continue;
             snprintf(key, sizeof key, "forward_%s_to", kinds[k]);
             cfg_get(f, key, to[k], 64);
-            if (strpbrk(to[k], " <>\",;")) to[k][0] = 0;   /* not a number or an address: off */
+            /* not a number or an address, or the account itself (a loop): off */
+            if (strpbrk(to[k], " <>\",;") || forward_to_self(to[k], a->user, a->domain)) to[k][0] = 0;
         }
         a->fwd_after = atoi(cfg_str(f, "forward_noanswer_after", "20"));
         if (a->fwd_after < 1 || a->fwd_after > 300) a->fwd_after = FWD_AFTER_DEF;
@@ -532,6 +536,7 @@ static void start_dialler(int route)
 static void dial_out(const char *number, int acct)
 {
     if (acct < 0 || acct >= MAX_ACCTS || !A[acct].on) acct = def_acct;
+    P.drop_next_out = 0;    /* a call of our own from here on, not a forward given up */
     P.c.outgoing = 1;
     P.c.acct = acct;
     set_peer(&P.c, number, NULL);
@@ -641,7 +646,8 @@ static void call_closed(const char *why)
         return;
     }
     /* an outgoing call that never connected */
-    if (code == 486 || code == 600) finish("Busy", NULL, T48AC_TONE_BUSY);
+    if (P.c.redirects > MAX_REDIRECTS) finish("Call failed", "Forwarded too often", T48AC_TONE_ERROR);
+    else if (code == 486 || code == 600) finish("Busy", NULL, T48AC_TONE_BUSY);
     else if (code == 404 || code == 604) finish("Not found", why, T48AC_TONE_ERROR);
     else if (code == 408 || code == 480) finish("No answer", why, T48AC_TONE_BUSY);
     else if (code == 603) finish("Declined", NULL, T48AC_TONE_BUSY);
@@ -896,9 +902,26 @@ void phone_sip_event(const char *type, const char *j, const char *e)
     /* the far end forwarded our call (3xx): baresip calls the new place
      * itself, and that call takes this one's place */
     if (ours && out && !strcmp(type, "REDIRECT") && P.st == PH_OUTGOING) {
-        logmsg("phone: call forwarded by the far end");
+        const char *to = strchr(param, ',');   /* "302,sip:1002@example.com" */
+        char who[96];
+        if (++P.c.redirects > MAX_REDIRECTS) {
+            /* round in a loop: the call that closes with it says so, and the next one is not made */
+            logmsg("phone: forwarded %d times, given up", P.c.redirects - 1);
+            P.drop_next_out = 1;
+            return;
+        }
+        uri_user(to ? to + 1 : "", who, sizeof who);
+        logmsg("phone: call forwarded by the far end to %s", who);
         P.c.id[0] = 0;
+        if (who[0]) set_peer(&P.c, who, NULL);
+        snprintf(P.note, sizeof P.note, "Forwarded");
         changed();
+        return;
+    }
+    /* the call baresip makes for a forward we gave up on */
+    if (!ours && out && P.drop_next_out && strcmp(type, "CLOSED")) {
+        P.drop_next_out = 0;
+        sipc_cmd("hangup", id);
         return;
     }
     /* our own outgoing call gets its id */

@@ -169,7 +169,7 @@ class App:
         self.wr = self.n = 0
 
     def tell(self, what, with_ring=False):
-        msg = struct.pack("<HHB", 9, 1, what)   # APP
+        msg = struct.pack("<HHBB", 9, 2, what, 1 if with_ring else 0)   # APP, and whether a ring comes with it
         if with_ring:
             socket.send_fds(self.s, [msg], [self.fd])
         else:
@@ -228,6 +228,12 @@ def app_tests():
     rate = (rd1 - rd0) / (t1 - t0)
     check(15000 < rate < 17000, "taken at %.0f samples a second (want 16000)" % rate)
     check(a.dry == 0, "never ran dry while it was fed")
+    # a bad ring from another client is refused before anything is let go
+    bad = App(d, sealed=False)
+    bad.tell(2, with_ring=True)
+    time.sleep(0.1)
+    check("app=front" in d.ctl() and a.field(1) == 1, "a bad ring does not drop the app that is playing")
+    bad.close()
     # calls win: the phone rings, the app goes on writing
     d.ctl("ring", "1")
     time.sleep(0.1)
@@ -295,8 +301,16 @@ def ringtone_tests():
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(os.path.join(d.dir, "ctl.sock"))
     s.sendall(struct.pack("<HHH", 1, 2, 1))   # HELLO
+    # a descriptor with a message that does not say it carries one is not taken
     fd = os.open(f, os.O_RDONLY)
-    socket.send_fds(s, [struct.pack("<HHBB", 6, 2, 1, 4)], [fd])   # RING on, custom
+    socket.send_fds(s, [struct.pack("<HHBBB", 6, 3, 1, 4, 0)], [fd])
+    os.close(fd)
+    time.sleep(0.2)
+    check("ringtone=standard" in d.ctl(), "a file not claimed by its message is not used")
+    s.sendall(struct.pack("<HHBBB", 6, 3, 0, 0, 0))
+    time.sleep(0.2)
+    fd = os.open(f, os.O_RDONLY)
+    socket.send_fds(s, [struct.pack("<HHBBB", 6, 3, 1, 4, 1)], [fd])   # RING on, custom, with its file
     os.close(fd)
     time.sleep(0.2)
     check("ringtone=custom" in d.ctl(), "a custom sound sent with RING is taken")

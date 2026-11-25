@@ -375,7 +375,8 @@ static void ctl_read(int i)
 			engine_set_tone(&eng, p[0]);
 			break;
 		case T48AC_RING:
-			if (len >= 2 && p[1] == T48AC_RINGTONE_CUSTOM && ctl[i].passed >= 0) {
+			/* a descriptor is taken only by the message that says it carries one */
+			if (len >= 3 && p[2] && p[1] == T48AC_RINGTONE_CUSTOM && ctl[i].passed >= 0) {
 				int fd = ctl[i].passed;
 
 				ctl[i].passed = -1;
@@ -398,16 +399,20 @@ static void ctl_read(int i)
 					app_drop("the app has gone");
 				break;
 			}
-			if (ctl[i].passed >= 0) {
+			if (len >= 2 && p[1]) {
+				/* a new app's ring: checked before the one playing is let go */
+				struct appsnd fresh;
 				int fd = ctl[i].passed;
 
 				ctl[i].passed = -1;
-				app_drop("replaced by a new app");
-				if (appsnd_open(&app, fd) < 0) {
+				memset(&fresh, 0, sizeof(fresh));
+				if (fd < 0 || appsnd_open(&fresh, fd) < 0) {
 					say("app sound: the ring is not a sealed memfd of %d bytes: refused", T48AC_APP_BYTES);
 					ctl_error(i, type, T48AC_ERR_RING);
 					break;
 				}
+				app_drop("replaced by a new app");
+				app = fresh;
 				app_owner = i;
 				say("app sound open");
 			}

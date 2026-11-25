@@ -110,6 +110,8 @@ account() {
     # a 3xx answer to a call we make is followed (call forwarding at the far end)
     line="$line;regint=$regint;answermode=manual;mwi=$mwi;sip_autoredirect=yes"
     case "$keepalive" in off|no|false|0) line="$line;keepalive=no" ;; esac
+    # no registration, no server address to hold its calls to (Block direct calls)
+    [ "$regint" != 0 ] || line="$line;check_origin=no"
     return 0
 }
 
@@ -135,22 +137,22 @@ echo $$ > "$RUN/pid"
 grep -v -e '^t48ctrl_socket' -e '^filter_registrar' "$CONFIG" > "$RUN/config"
 printf 't48ctrl_socket\t\t%s\n' "$RUN/ctrl.sock" >> "$RUN/config"
 
-# Block direct calls (issue #77), on unless the phone file says off: a call or
+# Block direct calls (issue #77), off unless the phone file says on: a call or
 # other request that does not come from the address the account's last
 # registration was answered from (its server, or the outbound proxy) is
 # refused with 403 and never rings. baresip's own check (check_origin, on by
 # default for each account); filter_registrar switches it on for these
-# transports. Peer-to-peer calls with no server need it off.
+# transports. An account that does not register has no such address, so it
+# opts out (check_origin=no, in account above).
 PHONE=${T48_PHONE_SETTINGS:-$(dirname "$SETTINGS")/phone}
-block=on
+block=off
 if [ -f "$PHONE" ]; then
     v=$(sed -n 's/^block_direct=//p' "$PHONE" | tail -n 1)
-    case "$v" in off|no|false|0) block=off ;; esac
+    case "$v" in on|yes|true|1) block=on ;; esac
 fi
 if [ $block = on ]; then
     printf 'filter_registrar\tudp,tcp,tls\n' >> "$RUN/config"
-else
-    echo "t48-sip: direct calls allowed" >&2
+    echo "t48-sip: direct calls blocked" >&2
 fi
 
 # account 1 is the settings file itself, accounts 2 to 6 the files beside it

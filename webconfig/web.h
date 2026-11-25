@@ -21,6 +21,8 @@ extern struct web_options wopt;
 
 #define MAX_FIELDS 96
 #define MAX_BODY (512 * 1024)
+#define MAX_RINGTONE_BODY (2 * 1024 * 1024)   /* /accounts/ringtone: ten seconds of 44.1 kHz stereo WAV */
+#define DRAIN_BODY (16 * 1024 * 1024)         /* a ringtone bigger than that is read and dropped, to say so on the page */
 
 struct session {
     char token[65];       /* the cookie; "" for a free slot */
@@ -40,6 +42,7 @@ struct req {
     struct { const char *name, *value; size_t len; } f[MAX_FIELDS];   /* len: of value, which may hold zero bytes (a file) */
     int nf;
     struct session *s;    /* NULL: not paired */
+    int too_big;          /* a ringtone over its limit: read, dropped, and said so */
 };
 
 /* ---------- wav.c ---------- */

@@ -475,12 +475,13 @@ class Paired(unittest.TestCase):
         b, p = self.b, self.p
         acct = {"n": "3", "user": "4004", "domain": "pbx.example.org", "transport": "udp", "enabled": "on"}
         page = b.get("/accounts").body
-        self.assertIn("name='block_direct' value='on' checked", page)
-        self.ok("/accounts/block", {}, "/accounts")
-        self.assertEqual(p.get("phone", "block_direct"), "off")
-        self.assertIn("sip", p.applied_list())
+        self.assertIn("name='block_direct' value='on'>", page)          # off until turned on
         self.ok("/accounts/block", {"block_direct": "on"}, "/accounts")
         self.assertEqual(p.get("phone", "block_direct"), "on")
+        self.assertIn("sip", p.applied_list())
+        self.assertIn("name='block_direct' value='on' checked", b.get("/accounts").body)
+        self.ok("/accounts/block", {}, "/accounts")
+        self.assertEqual(p.get("phone", "block_direct"), "off")
         # a ringtone, and forwarding
         self.ok("/accounts/save", dict(acct, ringtone="chime", fwd="1", forward_always="on", forward_always_to="07700900123",
                                        forward_busy_to="2002", forward_noanswer="on", forward_noanswer_to="sip:desk@example.org",
@@ -506,6 +507,12 @@ class Paired(unittest.TestCase):
         text = self.bad("/accounts/save", dict(acct, fwd="1", forward_always_to="0770 090"), "/accounts")
         self.assertIn("not a number or an address", text)
         self.assertEqual(p.get("sip3", "forward_always_to"), "07700900123")
+        # to the account itself: a loop
+        for me in ("4004", "sip:4004@pbx.example.org", "4004@PBX.example.org"):
+            text = self.bad("/accounts/save", dict(acct, fwd="1", forward_busy="on", forward_busy_to=me), "/accounts")
+            self.assertIn("Busy forwarding is to this account", text)
+        self.assertEqual(p.get("sip3", "forward_busy_to"), "2002")
+        self.ok("/accounts/save", dict(acct, fwd="1", forward_busy_to="40041"), "/accounts")
         self.ok("/accounts/save", dict(acct, fwd="1"), "/accounts")
         self.assertEqual(p.get("sip3", "forward_always"), "off")
 
@@ -559,15 +566,30 @@ class Paired(unittest.TestCase):
         r = b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "long.wav", wav(16000, 1, 2, 14))
         self.assertEqual(b.flash("/accounts"), (False, "Ringtone saved, cut to 10 s."))
         self.assertEqual(len(stored()), 160000)
-        # refusals: not a WAV, silence, too big
+        # WAVE_FORMAT_EXTENSIBLE: its subformat counts, but only from a fmt chunk long enough to hold it
+        def extensible(fmt_size):
+            pcm = struct.pack("<8000h", *[int(8000 * math.sin(2 * math.pi * 1000 * i / 16000)) for i in range(8000)])
+            fmt = struct.pack("<HHIIHHHHI", 0xfffe, 1, 16000, 32000, 2, 16, 22, 16, 4) + struct.pack("<H", 1) + bytes(14)
+            fmt = fmt[:fmt_size]
+            body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(pcm)) + pcm
+            return b"RIFF" + struct.pack("<I", len(body)) + body
+        b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "x.wav", extensible(40))
+        self.assertIs(b.flash("/accounts")[0], False)
+        self.assertEqual(len(stored()), 8000)
+        b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "x.wav", extensible(18))
+        self.assertEqual(b.flash("/accounts"), (True, "Ringtone not saved: WAV must be PCM or 32-bit float."))
+        # refusals: not a WAV, silence, an unknown format
         for content, why in ((b"ID3 not a wav at all", "not a WAV file"), (wav(16000, 1, 2, 0.5, level=0), "the sound is silent")):
             b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "x.wav", content)
             self.assertEqual(b.flash("/accounts"), (True, "Ringtone not saved: %s." % why))
+        self.assertEqual(len(stored()), 8000)
+        # ten seconds of CD-quality stereo fits; over 2 MB is refused with a message on the page
+        b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "cd.wav", wav(44100, 2, 2, 10, hz=440))
+        self.assertEqual(b.flash("/accounts"), (False, "Ringtone saved."))
         self.assertEqual(len(stored()), 160000)
-        try:   # refused before it is all sent: a 413, or the connection closed under the sender
-            self.assertEqual(b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "big.wav", wav(48000, 2, 2, 3)).status, 413)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        r = b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "big.wav", wav(44100, 2, 2, 12))
+        self.assertEqual(r.status, 303)
+        self.assertEqual(b.flash("/accounts"), (True, "Ringtone not saved: the file is over 2 MB."))
         # removed: back to Standard
         self.ok("/accounts/ringtone-remove", {"n": "3"}, "/accounts")
         self.assertFalse(os.path.exists(os.path.join(p.state, "ringtones", "sip3.s16")))

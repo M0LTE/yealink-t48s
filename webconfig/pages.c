@@ -320,7 +320,7 @@ static void account_sound(struct req *r, int n)
 {
     form_begin(r, "/accounts/ringtone", "enctype='multipart/form-data' class='sub'");
     H("<input type='hidden' name='n' value='%d'><label class='field'><span>Custom ringtone</span>"
-      "<input type='file' name='sound' accept='.wav,audio/wav,audio/x-wav' required><small>WAV, up to 500 KB, 10 s at most</small></label>"
+      "<input type='file' name='sound' accept='.wav,audio/wav,audio/x-wav' required><small>WAV, up to 2 MB, 10 s at most</small></label>"
       "<button type='submit'>Upload</button></form>", n);
     if (custom_ringtone(n)) {
         form_begin(r, "/accounts/ringtone-remove", "class='inline'");
@@ -348,7 +348,7 @@ static void page_accounts(struct req *r)
     H("<label class='check'><input type='checkbox' name='block_direct' value='on'%r> Block direct calls</label>"
       "<button type='submit'>Save</button></form>"
       "<p class='dim'>Only calls through an account's server or outbound proxy ring.</p></div>",
-      strcmp(val("phone", "block_direct", "on"), "off") ? " checked" : "");
+      !strcmp(val("phone", "block_direct", "off"), "on") ? " checked" : "");
     for (int n = 1; n <= MAX_ACCTS; n++) {
         const char *f = sip_file(n);
         int has = val(f, "user", "")[0] || val(f, "domain", "")[0];
@@ -415,6 +415,7 @@ static void post_account_save(struct req *r)
         char key[48];
         snprintf(key, sizeof key, "forward_%s_to", fwd_kinds[k][0]);
         const char *why = !line(r, key, fwd_to[k], sizeof fwd_to[k]) || strpbrk(fwd_to[k], " <>\",;") ? "forwarding to %s is not a number or an address" :
+                          forward_to_self(fwd_to[k], v[0], v[1]) ? "%s forwarding is to this account" :
                           (snprintf(key, sizeof key, "forward_%s", fwd_kinds[k][0]), !strcmp(form(r, key), "on") && !fwd_to[k][0]) ? "%s forwarding needs a number" : NULL;
         if (why) {
             char text[120];

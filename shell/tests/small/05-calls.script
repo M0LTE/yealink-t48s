@@ -16,13 +16,13 @@ key down
 key down
 key down
 expectstate settings.row Block_direct_calls
-expectstate soft1 Turn_off
+expectstate soft1 Turn_on
+key soft1
+expectstate cfg.phone.block_direct on
 wait 200
 shot shots/t46s-settings-accounts-block.png
 key soft1
 expectstate cfg.phone.block_direct off
-key soft1
-expectstate cfg.phone.block_direct on
 key up
 key up
 key up

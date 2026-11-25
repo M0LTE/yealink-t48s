@@ -782,7 +782,7 @@ static void build_accounts(void)
         if (!strstr(keep, r->value)) snprintf(r->value, sizeof r->value, "%s", v);
     }
     /* issue #77: calls only from the accounts' servers; baresip reads it at start */
-    add_stored(R_TOGGLE, "Block direct calls", "phone", "block_direct", "on", 0);
+    add_stored(R_TOGGLE, "Block direct calls", "phone", "block_direct", "off", 0);
 }
 
 /* what an account's forwarding comes to, for its row: Off, or the first kind that is on */
@@ -1382,6 +1382,12 @@ static void mark_dirty(const char *file)
 
 static void store_value(const struct row *r, const char *value)
 {
+    /* a call forwarded to the account itself would come straight back */
+    if (value && !strncmp(r->file, "sip", 3) && !strncmp(r->key, "forward_", 8) && strstr(r->key, "_to") &&
+        forward_to_self(value, cfg_str(r->file, "user", ""), cfg_str(r->file, "domain", ""))) {
+        message("Not saved", "That is this account");
+        return;
+    }
     if (cfg_set(r->file, r->key, value) < 0) {
         message("Not saved", errno == EINVAL ? "Invalid characters" : strerror(errno));
         return;

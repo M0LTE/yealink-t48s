@@ -55,7 +55,7 @@ void audioc_tone(int tone) { send1(T48AC_TONE, tone); }
  * standard tone. */
 void audioc_ring(int on, int ringtone, const char *custom)
 {
-    unsigned char m[6] = {T48AC_RING, 0, 2, 0, (unsigned char)on, (unsigned char)ringtone};
+    unsigned char m[7] = {T48AC_RING, 0, 3, 0, (unsigned char)on, (unsigned char)ringtone, 0};
     union { struct cmsghdr h; char space[CMSG_SPACE(sizeof(int))]; } cm;
     struct iovec iov = {m, sizeof m};
     struct msghdr mh = {.msg_iov = &iov, .msg_iovlen = 1};
@@ -67,6 +67,7 @@ void audioc_ring(int on, int ringtone, const char *custom)
         if (file < 0) m[5] = T48AC_RINGTONE_STANDARD;
     }
     if (file >= 0) {
+        m[6] = 1;            /* says the descriptor is this message's */
         memset(&cm, 0, sizeof cm);
         mh.msg_control = &cm;
         mh.msg_controllen = sizeof cm;
@@ -83,7 +84,7 @@ void audioc_key(int ch) { send1(T48AC_KEY, ch); }
  * travels as a descriptor beside the message. */
 void audioc_app(int what, int ring_fd)
 {
-    unsigned char m[5] = {T48AC_APP, 0, 1, 0, (unsigned char)what};
+    unsigned char m[6] = {T48AC_APP, 0, 2, 0, (unsigned char)what, (unsigned char)(ring_fd >= 0)};
     union { struct cmsghdr h; char space[CMSG_SPACE(sizeof(int))]; } cm;
     struct iovec iov = {m, sizeof m};
     struct msghdr mh = {.msg_iov = &iov, .msg_iovlen = 1};

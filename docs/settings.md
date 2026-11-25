@@ -46,7 +46,7 @@ Plain text in `/data/config`, one file per subject, `key=value` a line, `#` for 
 | `sip` | account 1: `user`, `password`, `domain`, `outbound_proxy`, `auth_user`, `display_name`, `transport` (udp, tcp, tls), `register_seconds`: the file `t48-sip` has always read ([sip.md](sip.md#running-it)). Also `enabled` (on or off), `label` (the name on this phone's screens), `voicemail` (the number the Message key calls), `mwi` (off: do not ask the server about waiting messages) |
 | `sip2` to `sip6` | accounts 2 to 6, the same keys |
 | | in each account file, for the shell (#77): `ringtone` (standard, long, chime, pulse, custom), `forward_always`, `forward_busy`, `forward_noanswer` (on or off), `forward_always_to`, `forward_busy_to`, `forward_noanswer_to` (a number or a SIP address), `forward_noanswer_after` (seconds, 20) |
-| `phone` | `default_account`: 1 to 6, the account calls go out from unless another is chosen. `dnd`: on or off. `block_direct`: on (when missing) or off, read by `t48-sip` when baresip starts |
+| `phone` | `default_account`: 1 to 6, the account calls go out from unless another is chosen. `dnd`: on or off. `block_direct`: on, or off (when missing), read by `t48-sip` when baresip starts |
 | `network` | `mode` (dhcp or static), `address`, `netmask`, `gateway`, `dns` |
 | `system` | `timezone`: a name from the list (`Europe/London`), or any POSIX TZ string (`XYZ-3`) for a zone the list lacks |
 | `audio` | `ringer`, `handset`, `speaker`, `headset`: 0 to 15 |
