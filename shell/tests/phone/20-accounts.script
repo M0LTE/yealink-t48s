@@ -87,7 +87,7 @@ key down
 key down
 key down
 key down
-expectstate settings.row Label
+expectstate settings.row Account_name
 key ok
 key 9
 key 6
@@ -213,6 +213,7 @@ key up
 key up
 expectstate settings.row Account_2
 key ok
+key down
 key down
 key down
 key down

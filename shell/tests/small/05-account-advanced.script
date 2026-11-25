@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# A small screen, issue #77: many accounts on the home screen's one line, the account name, and the
+# Advanced and Codecs pages worked from the soft keys (Up and Down move a codec in the order).
+run for n in 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do ./t48-config --config simdata/config set sip$n user 10$n && ./t48-config --config simdata/config set sip$n domain pbx.example.org || exit 1; done
+wait 2500
+expect idle
+waitstate accounts 16 3000
+wait 300
+shot shots/t46s-idle-sixteen-accounts.png
+key soft4
+expect settings
+key soft1
+expectstate settings.page accounts
+# all sixteen, and the default: the list scrolls
+expectstate settings.rows 17
+key up
+expectstate settings.row Account_1
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Account_16
+key down
+expectstate settings.row Default_account
+shot shots/t46s-settings-accounts-sixteen.png
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+expectstate settings.row Account_1
+key soft1
+expectstate settings.page sip
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Account_name
+expectstate soft1 Edit
+key down
+key down
+key down
+expectstate settings.row Advanced
+expectstate soft1 Open
+key soft1
+expectstate settings.page sipadvanced
+expectstate settings.row Registration_expiry
+expectstate settings.value 3600
+shot shots/t46s-settings-account-advanced.png
+key down
+expectstate settings.row DTMF
+expectstate soft1 Change
+key soft1
+expectstate cfg.sip.dtmf inband
+key down
+expectstate settings.row Codecs
+key soft1
+expectstate settings.page codecs
+expectstate settings.row Opus
+expectstate soft1 Turn_off
+expectstate soft2 Up
+expectstate soft3 Down
+key soft3
+expectstate cfg.sip.codecs g722,opus,pcmu,pcma
+expectstate settings.row Opus
+key soft2
+expectstate cfg.sip.codecs opus,g722,pcmu,pcma
+key down
+key down
+key down
+expectstate settings.row PCMA
+key soft1
+expectstate cfg.sip.codecs opus,g722,pcmu,-pcma
+key soft2
+expectstate cfg.sip.codecs opus,g722,-pcma,pcmu
+shot shots/t46s-settings-codecs.png
+key soft4
+expectstate settings.page sipadvanced
+key down
+expectstate settings.row NAT_keepalive
+expectstate soft1 Turn_off
+key soft1
+expectstate cfg.sip.keepalive off
+shot shots/t46s-settings-account-advanced-changed.png
+key soft4
+key soft4
+key soft4
+key soft4
+expect idle
+quit

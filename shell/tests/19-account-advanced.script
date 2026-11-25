@@ -1,0 +1,165 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Accounts, issue #77: up to 16, listed as those that are set and one to add; the account name; the
+# Advanced page (registration expiry, DTMF, codecs, NAT keepalive) and the Codecs page's order.
+run ./t48-config --config simdata/config set sip user 1001
+run ./t48-config --config simdata/config set sip domain pbx.example.org
+run ./t48-config --config simdata/config set sip label Office
+run for n in 3 4 5 6 7 8 16; do ./t48-config --config simdata/config set sip$n user 10$n && ./t48-config --config simdata/config set sip$n domain pbx.example.org || exit 1; done
+wait 300
+expect idle
+waitstate accounts 8 3000
+wait 300
+# eight accounts on: five tiles, and one for the rest
+shot shots/idle-eight-accounts.png
+touch 700 420
+expect settings
+expectstate settings.row Accounts
+expectstate settings.value 1001@pbx.example.org_+7
+key ok
+expectstate settings.page accounts
+# accounts 1 and 3 to 8 and 16, account 2 to add, and the default
+expectstate settings.rows 10
+expectstate settings.value Office:_1001@pbx.example.org
+key down
+expectstate settings.row Account_2
+expectstate settings.value Not_set
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Account_16
+expectstate settings.value 1016@pbx.example.org
+shot shots/settings-accounts-sixteen.png
+key down
+expectstate settings.row Default_account
+key ok
+expectstate cfg.phone.default_account 3
+# the Default account choice reaches account 16
+key left
+key left
+expectstate cfg.phone.default_account 16
+key ok
+expectstate cfg.phone.default_account 1
+# ---- account 1: its name, then Advanced ----
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+expectstate settings.row Account_1
+key ok
+expectstate settings.page sip
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Account_name
+expectstate settings.value Office
+key down
+key down
+key down
+expectstate settings.row Advanced
+key ok
+expectstate settings.page sipadvanced
+expectstate settings.row Registration_expiry
+expectstate settings.value 3600
+expectstate cfg.sip.register_seconds (unset)
+shot shots/settings-account-advanced.png
+# the expiry: digits, 60 to 86400; emptied, it is not set again
+key ok
+expectstate kbd.text 3600
+key 0
+key ok
+expectstate cfg.sip.register_seconds 36000
+key ok
+key 0
+expectstate kbd.text 360000
+key ok
+expectstate overlay message
+expectstate overlay.title Out_of_range
+key ok
+expectstate cfg.sip.register_seconds 36000
+key ok
+key x
+key x
+key x
+key x
+key x
+expectstate kbd.text -
+key ok
+expectstate cfg.sip.register_seconds (unset)
+expectstate settings.value 3600
+# DTMF: RFC 2833, in-band, SIP INFO
+key down
+expectstate settings.row DTMF
+expectstate settings.value rfc2833
+key ok
+expectstate cfg.sip.dtmf inband
+key ok
+expectstate cfg.sip.dtmf info
+key left
+expectstate cfg.sip.dtmf inband
+# codecs: all four on, Opus first
+key down
+expectstate settings.row Codecs
+expectstate settings.value Opus,_G.722,_PCMU,_PCMA
+key ok
+expectstate settings.page codecs
+expectstate settings.rows 4
+expectstate settings.row Opus
+expectstate settings.value on
+shot shots/settings-codecs.png
+# OK turns one off; a touch on v moves it down the order
+key ok
+expectstate cfg.sip.codecs -opus,g722,pcmu,pcma
+touch 610 81
+expectstate cfg.sip.codecs g722,-opus,pcmu,pcma
+expectstate settings.row Opus
+expectstate settings.value off
+# ^ on the last row moves PCMA up, past PCMU
+touch 538 261
+expectstate cfg.sip.codecs g722,-opus,pcma,pcmu
+expectstate settings.row PCMA
+# a touch on the row's switch turns it on and off
+touch 720 81
+expectstate cfg.sip.codecs -g722,-opus,pcma,pcmu
+touch 720 201
+touch 720 261
+expectstate cfg.sip.codecs -g722,-opus,-pcma,pcmu
+# the last one on stays on
+touch 720 261
+expectstate overlay message
+expectstate overlay.title Not_turned_off
+key ok
+expectstate cfg.sip.codecs -g722,-opus,-pcma,pcmu
+touch 720 81
+shot shots/settings-codecs-changed.png
+key x
+expectstate settings.page sipadvanced
+expectstate settings.value G.722,_PCMU
+# NAT keepalive: on unless turned off
+key down
+expectstate settings.row NAT_keepalive
+expectstate settings.value on
+key ok
+expectstate cfg.sip.keepalive off
+shot shots/settings-account-advanced-changed.png
+key ok
+expectstate cfg.sip.keepalive on
+key x
+expectstate settings.page sip
+key x
+key x
+key x
+expect idle
+quit
