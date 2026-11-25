@@ -40,8 +40,8 @@ hook off
 key 9
 key 9
 key 9
-expectstate phone outgoing
-expectstate peer 999
+waitstate phone ended 3000
+expectstate last o:999
 hook on
 waitstate phone idle 5000
 # # is Call: 1003 goes at once, without the #
