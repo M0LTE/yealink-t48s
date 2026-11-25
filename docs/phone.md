@@ -7,6 +7,7 @@ Issues [#26](https://github.com/M0LTE/yealink-t48s/issues/26), [#27](https://git
 - The shell now behaves like a desk phone. Lift the handset for dial tone, or just start typing a number. Calls ring, can be answered with the handset, Speakerphone or Headset, and can be muted, held, transferred and ended the usual ways.
 - A call takes the screen from whatever is showing, including an app, and gives it back afterwards.
 - **New (2026-11-23, #27):** a contact list kept on the phone, with names shown wherever a number is; do not disturb; a second call (call waiting, hold one and talk to the other, swap); asking someone first before a transfer; the lamp at the top right as the ringing, voicemail and missed-call lamp; the Message key calls voicemail.
+- **New (2026-11-25, #77):** up to 16 accounts; per account an Account name, and under Advanced registration expiry, DTMF mode (RFC 2833, SIP INFO, in-band), codecs and their order, NAT keepalive ([sip.md](sip.md#running-it)).
 - **New (2026-11-23, #36):** up to six SIP accounts, each with its own registration, and a choice of which one a call goes out from. See [Several accounts](#several-accounts).
 - **Tested in the simulator against the real services**: baresip with our modules, `t48-audiod` on its silent backend and a throwaway SIP server, with two more baresips as the people at the other end. Eighteen scripted scenarios pass, and pass again with the phone's own ARM builds of the shell, baresip and the audio service running under qemu. The new parts (#27, #36) have not run on the phone yet.
 - Apps can no longer reach call control: baresip's TCP control port is gone, replaced by our own module on a socket only root can open ([sip.md](sip.md#control-interface)).
@@ -91,13 +92,13 @@ For each account the phone asks the server to tell it about waiting voicemail (S
 
 ## Several accounts
 
-Up to six, set in Settings, Accounts ([settings.md](settings.md)). Account 1 is `/data/config/sip`, as it always was, so a phone that already has an account needs nothing done; accounts 2 to 6 are `sip2` to `sip6` beside it.
+Up to 16, the stock firmware's number of lines, set in Settings, Accounts ([settings.md](settings.md)). Account 1 is `/data/config/sip`, as it always was, so a phone that already has an account needs nothing done; accounts 2 to 16 are `sip2` to `sip16` beside it. The Accounts page lists those that are set and the first free one.
 
 - **All of them ring.** The incoming call screen says which account was called.
 - **Calls go out from the default account** unless another is chosen: Left and Right in the dialler step through the accounts, as does a touch on the "From" line. A touch on an account's line on the idle screen opens the dialler already set to it.
-- **Which is the default** is set on the Accounts page. The status bar shows that one; with more than one account the idle screen has a line for each with its own dot.
+- **Which is the default** is set on the Accounts page. The status bar shows that one; with more than one account the idle screen has a line for each with its own dot. Over six, the sixth line is the rest: how many, and the dot of the worst of them; a touch on it opens the dialler. The small screen's one line becomes dots alone when the names do not fit.
 - **The history keeps the account** of each call, and Redial and the history call back from the same one.
-- An account can be switched off without forgetting it ("Enabled"), given a short name for the phone's own screens, and removed.
+- An account can be switched off without forgetting it ("Enabled"), given an **Account name** for the phone's own screens (the idle screen, the dialler's From, the call list, and later the line keys; `label` in the file), and removed. Display name is different: it is what the far end is told.
 
 The dot beside an account is green when registered, amber while trying, red when the server refused or baresip is not running. The shell reads the same files `t48-sip` does ([sip.md](sip.md#running-it), example in [`sip/config/sip.example`](../sip/config/sip.example)), and only for what it shows; the passwords are baresip's business. No account is in the repository; the tests use made-up ones on a server that exists for a minute.
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # The phone's SIP account, as /data/config/sip (read by t48-sip at start).
-# More accounts, up to six, are files of the same kind beside it: sip2 to sip6.
+# More accounts, up to 16, are files of the same kind beside it: sip2 to sip16.
 # key=value, one per line. Only user and domain are required.
 # domain is the server host: host, or host:port for a port other than the
 # usual (without one the server is found by DNS SRV records).
@@ -13,10 +13,12 @@ domain=sip.example.com
 # display_name=Front desk
 # transport=udp
 # outbound_proxy=proxy.example.com     host, host:port or a sip: URI
-# register_seconds=600
+# register_seconds=600    registration expiry, 60 to 86400 (not set: 3600)
 # enabled=off             keep the account but do not use it
-# label=Work              what the phone calls this account on its screen
+# label=Work              the account name on this phone's screens
 # voicemail=1571          the number the Message key calls
 # mwi=off                 do not ask the server about waiting messages
 # keepalive=off           no NAT keepalives (OPTIONS to the server every 23 to 29 s,
 #                         96 to 120 s over TCP and TLS)
+# dtmf=inband             rfc2833 (not set), inband (tones in the audio) or info (SIP INFO)
+# codecs=g722,opus,-pcmu,pcma   offered in this order; - in front: off (not set: all, Opus first)
