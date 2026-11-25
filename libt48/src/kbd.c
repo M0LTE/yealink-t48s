@@ -20,6 +20,8 @@ t48_kbd_look t48_kbd_style = {
 };
 #define K (&t48_kbd_style)
 
+int t48_kbd_keys_only;
+
 /* rub out: an arrow pointing left */
 static void rubout(t48_surface *s, int cx, int cy, uint32_t c)
 {
@@ -159,6 +161,13 @@ int t48_kbd_key(t48_kbd *k, int code, int down)
     if (code == T48_KEY_LEFT) return act(k, A_LEFT);
     if (code == T48_KEY_RIGHT) return act(k, A_RIGHT);
     if (code == T48_KEY_BACK) return k->len ? act(k, A_BKSP) : T48_KBD_CANCEL;
+    if (t48_kbd_keys_only && code >= T48_KEY_SOFT1 && code <= T48_KEY_SOFT4) {
+        /* the mode, rub out, Cancel, Done: as the labels along the bottom say */
+        if (code == T48_KEY_SOFT2) return act(k, A_BKSP);
+        if (code == T48_KEY_SOFT3) return T48_KBD_CANCEL;
+        if (code == T48_KEY_SOFT4) return act(k, A_DONE);
+        code = T48_KEY_HASH;
+    }
     if (code == T48_KEY_HASH) {            /* abc, ABC, 123 */
         commit_tap(k);
         k->mode = (k->mode + 1) % 3;
@@ -206,6 +215,38 @@ int t48_kbd_tick(t48_kbd *k)
     return r;
 }
 
+/* No touch screen: no keys to touch. What each key of the keypad types, from y
+ * down to the soft keys' labels, the one being tapped lit. */
+static void draw_keypad(const t48_kbd *k, t48_surface *s, int y)
+{
+    static const char keys[] = "123456789*0#";
+    int gap = 4, m = 10, bottom = s->h - T48_UI_BAR_H - 6;
+    int cw = (s->w - 2 * m - 2 * gap) / 3, ch = (bottom - y - 3 * gap) / 4;
+    for (int i = 0; i < 12 && ch >= t48_font_bold.height; i++) {
+        int x = m + (i % 3) * (cw + gap), cy = y + (i / 3) * (ch + gap);
+        int code = keys[i] == '*' ? T48_KEY_STAR : keys[i] == '#' ? T48_KEY_HASH : keys[i];
+        int idx = keys[i] == '*' ? 10 : keys[i] - '0', hot = k->tap_until && k->tap_key == code;
+        char one[2] = {keys[i], 0}, what[24] = "";
+        if (keys[i] == '#') snprintf(what, sizeof what, "%s", mode_label[(k->mode + 1) % 3]);
+        else if (k->mode == 2) snprintf(what, sizeof what, "%s", keys[i] == '*' ? ". * + : -" : "");
+        else if (keys[i] == '0') snprintf(what, sizeof what, "space 0");
+        else {
+            /* the letters, without the digit they end in */
+            snprintf(what, sizeof what, "%s", tap_abc[idx]);
+            size_t n = strlen(what);
+            if (n && what[n - 1] == keys[i]) what[n - 1] = 0;
+            for (char *p = what; k->mode == 1 && *p; p++) if (*p >= 'a' && *p <= 'z') *p -= 32;
+        }
+        keycap(s, x, cy, cw, ch, hot ? t48_mix(K->key, K->text, 90) : K->key);
+        int lip = K->edge_kind == 2 ? 3 : 0;
+        int tx = t48_text(s, x + 10, cy + (ch - lip - t48_font_bold.height) / 2, &t48_font_bold, K->text, one);
+        t48_text_fit(s, tx + 10, cy + (ch - lip - t48_font_normal.height) / 2, x + cw - tx - 16, &t48_font_normal, K->dim, what);
+    }
+    const char *const label[4] = {mode_label[k->mode], "<x", "Cancel", "Done"};
+    static const int role[4] = {T48_UI_PLAIN, T48_UI_PLAIN, T48_UI_PLAIN, T48_UI_FIRST};
+    t48_ui_softkeys(s, label, role);
+}
+
 void t48_kbd_draw(t48_kbd *k, t48_surface *s)
 {
     struct box b[48];
@@ -216,10 +257,11 @@ void t48_kbd_draw(t48_kbd *k, t48_surface *s)
     k->w = s->w;
     k->h = s->h;
     t48_fill(s, 0, 0, s->w, s->h, K->bg);
-    t48_text_fit(s, 16, 10, s->w - 120, &t48_font_bold, K->label, k->title);
+    int tight = t48_kbd_keys_only, mx = tight ? 10 : 16, top = tight ? 4 : 10;
+    t48_text_fit(s, mx, top, s->w - 120, &t48_font_bold, K->label, k->title);
     char m[40];
     snprintf(m, sizeof m, "# %s", mode_label[k->mode]);
-    t48_text_right(s, s->w - 16, 10, &t48_font_bold, K->label, m);
+    t48_text_right(s, s->w - mx, top, &t48_font_bold, K->label, m);
 
     /* what to show: a password is stars, but for the character just typed */
     memcpy(shown, k->text, (size_t)k->len + 1);
@@ -228,7 +270,7 @@ void t48_kbd_draw(t48_kbd *k, t48_surface *s)
             if (!(i == k->cur - 1 && k->reveal_until && now < k->reveal_until)) shown[i] = '*';
 
     /* the field, scrolled so the cursor is in view */
-    int fx = 16, fy = 44, fw = s->w - 32, fh = 58, pad = 14, room = fw - 2 * pad, first = 0;
+    int fx = mx, fy = tight ? 32 : 44, fw = s->w - 2 * mx, fh = tight ? 46 : 58, pad = 14, room = fw - 2 * pad, first = 0;
     if (K->edge_kind == 1) t48_round_fill(s, fx - 1, fy - 1, fw + 2, fh + 2, K->radius + 1, K->edge);
     t48_round_fill(s, fx, fy, fw, fh, K->radius, K->field);
     for (;;) {
@@ -249,7 +291,8 @@ void t48_kbd_draw(t48_kbd *k, t48_surface *s)
         if (i == k->cur - 1 && k->tap_until) t48_fill(s, x, ty + f->height, t48_text_width(f, one), 2, K->cursor);
         x = t48_text(s, x, ty, f, K->field_text, one);
     }
-    t48_fill(s, cx, fy + 10, 2, fh - 20, K->cursor);
+    t48_fill(s, cx, fy + (tight ? 7 : 10), 2, fh - (tight ? 14 : 20), K->cursor);
+    if (tight) { draw_keypad(k, s, fy + fh + 8); return; }
 
     int n = layout(k, b);
     for (int i = 0; i < n; i++) {

@@ -6,8 +6,12 @@
  * Flipping (level 3): the app is also lent whole pictures of the screen. Where
  * the screen can show them itself (the phone: be_fb.c, /dev/t48flip) a FLIP
  * costs no copy and FLIPPED follows the screen's own refresh. Anywhere else
- * (the simulator, a screen the picture is fitted to) they are a file in
- * memory, a FLIP is one copy, and FLIPPED comes sixty times a second. */
+ * (the simulator, the T46S, a picture that is fitted to the screen) they are
+ * a file in memory, a FLIP is one copy, and FLIPPED comes sixty times a second.
+ *
+ * The app's picture is the T48S's 800x480 whatever the screen, fitted to a
+ * smaller one by the backend; an app whose manifest says "screen": "any"
+ * (level 6) gets the screen's own size. */
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -26,7 +30,6 @@
 
 #define START_MS 5000   /* an app that has not answered START by then is killed */
 #define GRACE_MS 1000   /* between PAUSE and freezing, and between QUIT and killing */
-#define BUF_BYTES (SW * SH * 4)
 #define COPY_BUFFERS 3       /* flip buffers where the screen has none of its own: as many as the phone */
 #define COPY_PERIOD_US 16667 /* and how often they are shown */
 #define FLIP_LATE_US 100000  /* a screen that has not shown a flip by then is not going to say */
@@ -36,6 +39,8 @@ static struct {
     pid_t pid;
     int sock;
     uint32_t *buf;
+    int w, h;                 /* its picture: the screen's size, or APP_W x APP_H */
+    size_t bytes;             /* and that picture's bytes */
     char id[64], name[64];
     char dir[256];            /* its folder, and which folder that was when it started */
     dev_t dir_dev;
@@ -76,6 +81,8 @@ int app_folder_changed(void)
     return stat(app.dir, &st) < 0 || st.st_dev != app.dir_dev || st.st_ino != app.dir_ino;
 }
 const uint32_t *app_pixels(void) { return app.buf; }
+int app_w(void) { return app.w; }
+int app_h(void) { return app.h; }
 
 /* An unprivileged user for each app, the same one every time: there is no
  * account database to keep, the number comes from the id. */
@@ -216,7 +223,7 @@ static void send_flipped(int n, unsigned frame, long long time_us)
 void app_flip_show(void)
 {
     if (app.state == APP_NONE || app.flip_now < 0) return;
-    if (app.flip_map) shell_screen_flush(flip_pixels(app.flip_now));
+    if (app.flip_map) shell_screen_flush(flip_pixels(app.flip_now), app.w, app.h);
     else shell_backend()->flip_show(app.flip_now);
 }
 
@@ -254,6 +261,8 @@ int app_launch(const struct manifest *m)
     unsigned flip_period = 0;
     uint32_t *flip_map = NULL;
     char path[400], data[400], conf[400];
+    int w = m->any_screen ? SW : APP_W, h = m->any_screen ? SH : APP_H;
+    size_t bytes = (size_t)w * (size_t)h * 4;
 
     if (app.state != APP_NONE) { snprintf(errbuf, sizeof errbuf, "Another app is running"); return -1; }
     snprintf(path, sizeof path, "%s/%s", m->dir, m->exec);
@@ -261,27 +270,27 @@ int app_launch(const struct manifest *m)
         snprintf(errbuf, sizeof errbuf, "Program missing: %s", m->exec);
         return -1;
     }
-    buf_fd = make_file("screen", BUF_BYTES);
+    buf_fd = make_file("screen", bytes);
     if (buf_fd < 0) { snprintf(errbuf, sizeof errbuf, "No memory for the screen"); return -1; }
     fonts_fd = make_fonts();   /* an app that gets none still has B612 */
-    uint32_t *buf = mmap(NULL, BUF_BYTES, PROT_READ, MAP_SHARED, buf_fd, 0);
+    uint32_t *buf = mmap(NULL, bytes, PROT_READ, MAP_SHARED, buf_fd, 0);
     if (buf == MAP_FAILED || socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) < 0) {
         snprintf(errbuf, sizeof errbuf, "Out of memory");
-        if (buf != MAP_FAILED) munmap(buf, BUF_BYTES);
+        if (buf != MAP_FAILED) munmap(buf, bytes);
         close(buf_fd);
         if (fonts_fd >= 0) close(fonts_fd);
         return -1;
     }
 
-    /* flip buffers: the screen's own if it has them, otherwise a file as big as three screens, which uses no
-     * memory until an app draws in it */
+    /* flip buffers: the screen's own if it has them and the picture is the screen's size, otherwise a file as
+     * big as three pictures, which uses no memory until an app draws in it */
     const struct backend *be = shell_backend();
-    if (be->flip_info && be->flip_info(&flip_fd, &flip_count, &flip_size, &flip_period) == 0) {
+    if (w == SW && h == SH && be->flip_info && be->flip_info(&flip_fd, &flip_count, &flip_size, &flip_period) == 0) {
         be->flip_clear();   /* the last app's pictures, and anything of its that is still running loses the buffers */
-    } else if ((flip_fd = make_file("flip", COPY_BUFFERS * (size_t)BUF_BYTES)) >= 0) {
-        flip_map = mmap(NULL, COPY_BUFFERS * (size_t)BUF_BYTES, PROT_READ, MAP_SHARED, flip_fd, 0);
+    } else if ((flip_fd = make_file("flip", COPY_BUFFERS * bytes)) >= 0) {
+        flip_map = mmap(NULL, COPY_BUFFERS * bytes, PROT_READ, MAP_SHARED, flip_fd, 0);
         if (flip_map == MAP_FAILED) { close(flip_fd); flip_fd = -1; flip_map = NULL; }
-        else { flip_ours = 1; flip_count = COPY_BUFFERS; flip_size = BUF_BYTES; flip_period = COPY_PERIOD_US; }
+        else { flip_ours = 1; flip_count = COPY_BUFFERS; flip_size = bytes; flip_period = COPY_PERIOD_US; }
     }
     if (flip_fd < 0) flip_count = 0;
     if (manifest_may(m, "audio-out") && (sound_fd = make_sound()) < 0) logmsg("app %s: no sound: %s", m->id, strerror(errno));
@@ -299,10 +308,10 @@ int app_launch(const struct manifest *m)
     pid_t pid = fork();
     if (pid < 0) {
         snprintf(errbuf, sizeof errbuf, "Cannot start: %s", strerror(errno));
-        munmap(buf, BUF_BYTES);
+        munmap(buf, bytes);
         close(buf_fd); close(sv[0]); close(sv[1]);
         if (fonts_fd >= 0) close(fonts_fd);
-        if (flip_ours) munmap(flip_map, COPY_BUFFERS * (size_t)BUF_BYTES);
+        if (flip_ours) munmap(flip_map, COPY_BUFFERS * bytes);
         if (flip_fd >= 0) close(flip_fd);
         if (sound_fd >= 0) close(sound_fd);
         return -1;
@@ -357,6 +366,9 @@ int app_launch(const struct manifest *m)
     app.pid = pid;
     app.sock = sv[0];
     app.buf = buf;
+    app.w = w;
+    app.h = h;
+    app.bytes = bytes;
     snprintf(app.id, sizeof app.id, "%s", m->id);
     snprintf(app.name, sizeof app.name, "%s", m->name);
     struct stat st;
@@ -364,10 +376,12 @@ int app_launch(const struct manifest *m)
     if (stat(app.dir, &st) == 0) { app.dir_dev = st.st_dev; app.dir_ino = st.st_ino; }
     else { app.dir_dev = 0; app.dir_ino = 0; }
     app.deadline = t48_now_ms() + START_MS;
-    logmsg("app %s started, pid %d%s", m->id, (int)pid, geteuid() == 0 ? " as its own user" : "");
+    logmsg("app %s started, pid %d%s, %dx%d%s", m->id, (int)pid, geteuid() == 0 ? " as its own user" : "", w, h,
+           w == SW && h == SH ? "" : " fitted to the screen");
 
-    struct t48_msg_hello h = {T48_API_LEVEL, SW, SH, T48_FORMAT_XRGB8888, SW * 4, BUF_BYTES};
-    send_msg(T48_MSG_HELLO, &h, sizeof h);
+    struct t48_msg_hello hello = {T48_API_LEVEL, (uint16_t)w, (uint16_t)h, T48_FORMAT_XRGB8888, (uint32_t)w * 4, (uint32_t)bytes,
+                                  (L.touch ? T48_HELLO_TOUCH : 0) | (L.softkeys ? T48_HELLO_SOFTKEYS : 0)};
+    send_msg(T48_MSG_HELLO, &hello, sizeof hello);
     struct t48_msg_flipinfo fi = {(uint16_t)flip_count, 0, (uint32_t)flip_size, flip_period};
     send_msg(T48_MSG_FLIPINFO, &fi, sizeof fi);
 
@@ -458,6 +472,9 @@ void app_key(int code, int down)
 void app_touch(int state, int x, int y)
 {
     if (app.state != APP_RUNNING) return;
+    /* a picture fitted to the screen is touched where the finger is on it */
+    if (app.w != SW) x = x * app.w / SW;
+    if (app.h != SH) y = y * app.h / SH;
     if (app.api >= 3) {
         struct t48_msg_touch3 t = {(uint8_t)state, 0, (int16_t)x, (int16_t)y, 0, (uint64_t)shell_input_us};
         send_msg(T48_MSG_TOUCH, &t, sizeof t);
@@ -499,7 +516,7 @@ void app_readable(void)
                 /* back from flipping to the shared buffer: all of it */
                 if (app.flip_wait >= 0) send_flipped(app.flip_wait, app.flip_frame, t48_now_us());
                 app.flip_now = -1;
-                shell_app_damage(0, 0, SW, SH);
+                shell_app_damage(0, 0, app.w, app.h);
             } else if (app.state == APP_RUNNING) {
                 shell_app_damage(r.x, r.y, r.w, r.h);
             } else {
@@ -559,7 +576,7 @@ void app_tick(long long now)
         int n = app.flip_wait;
         if (app.flip_map) {
             /* a screen that copies: this is its refresh */
-            shell_screen_flush(flip_pixels(n));
+            shell_screen_flush(flip_pixels(n), app.w, app.h);
             app.flip_frame = (unsigned)(app.flip_due / app.flip_period);
             send_flipped(n, app.flip_frame, app.flip_due);
         } else {
@@ -605,8 +622,8 @@ void app_reaped(pid_t pid, int status)
     leds_app_release(~0u);
     snprintf(name, sizeof name, "%s", app.name);
     if (app.sock >= 0) close(app.sock);
-    munmap(app.buf, BUF_BYTES);
-    if (app.flip_map) munmap(app.flip_map, COPY_BUFFERS * (size_t)BUF_BYTES);
+    munmap(app.buf, app.bytes);
+    if (app.flip_map) munmap(app.flip_map, COPY_BUFFERS * app.bytes);
     if (app.sound_fd >= 0) {
         app.state = APP_NONE;
         sound_sync();

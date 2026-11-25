@@ -19,7 +19,7 @@
 #include "shell.h"
 
 #define MAX_CONTACTS 200
-#define ROWS 6
+#define ROWS (SMALL ? SROWS : 6)
 #define ROW_Y0 54
 #define ROW_STEP 52
 #define BTN_Y 400
@@ -227,6 +227,7 @@ void contacts_touch(int state, int x, int y)
         return;
     }
     if (state != T48_TOUCH_DOWN) return;
+    if (mode == M_CONFIRM && SMALL) return;
     if (mode == M_CONFIRM) {
         if (ui_inside(x, y, 596, BTN_Y, 188, BTN_H)) contacts_key(T48_KEY_OK, 1);
         else if (ui_inside(x, y, 416, BTN_Y, 170, BTN_H)) contacts_key(T48_KEY_BACK, 1);
@@ -234,7 +235,7 @@ void contacts_touch(int state, int x, int y)
     }
     int top = sel >= ROWS ? sel - ROWS + 1 : 0;
     for (int r = 0; r < ROWS && top + r < n; r++)
-        if (ui_inside(x, y, 16, ROW_Y0 + r * ROW_STEP, SW - 32, 46)) {
+        if (SMALL ? ui_inside(x, y, 8, SROW_Y(r), SW - 16, SROW_STEP) : ui_inside(x, y, 16, ROW_Y0 + r * ROW_STEP, SW - 32, 46)) {
             /* a touch chooses; a touch on the one already chosen puts its number in the dialler */
             if (top + r == sel) do_button(0);
             else sel = top + r;
@@ -242,7 +243,7 @@ void contacts_touch(int state, int x, int y)
             return;
         }
     if (y < HEAD_H && x < 130) { shell_show_contacts(0); return; }
-    for (int b = 0; b < 4; b++)
+    for (int b = 0; !SMALL && b < 4; b++)
         if (ui_inside(x, y, btn[b].x, BTN_Y, btn[b].w, BTN_H)) {
             do_button(b);
             if (b != 0) shell_phone_changed();
@@ -269,12 +270,20 @@ void contacts_draw(void)
     if (mode == M_NAME || mode == M_NUMBER) { t48_kbd_draw(&kbd, &ui); return; }
     ui_clear(C_BG);
     ui_header("Contacts", 1, 0);
-    if (!n) t48_text_centre(&ui, SW / 2, 200, &t48_font_head, C_DIM, "No contacts");
+    if (!n) t48_text_centre(&ui, SW / 2, SMALL ? (HEAD_H + BAR_Y - t48_font_head.height) / 2 : 200, &t48_font_head, C_DIM, "No contacts");
     int top = sel >= ROWS ? sel - ROWS + 1 : 0;
     for (int r = 0; r < ROWS && top + r < n; r++) {
         const struct contact *c = &list[top + r];
         int y = ROW_Y0 + r * ROW_STEP;
         struct row_ink ink;
+        if (SMALL) {
+            int ty = SROW_Y(r) + (SROW_H - t48_font_normal.height) / 2, nw = t48_text_width(&t48_font_normal, c->number);
+            if (nw > SW / 2) nw = SW / 2;
+            ui_row(8, SROW_Y(r), SW - 16, SROW_H, top + r == sel, &ink);
+            t48_text_fit(&ui, 18, ty, SW - 36 - nw - 14, &t48_font_bold, ink.text, c->name);
+            t48_text_fit(&ui, SW - 18 - nw, ty, nw + 2, &t48_font_normal, ink.dim, c->number);
+            continue;
+        }
         ui_row(16, y, SW - 32, 46, top + r == sel, &ink);
         t48_text_fit(&ui, 36, y + 12, 440, &t48_font_bold, ink.text, c->name);
         t48_text_right(&ui, SW - 34, y + 12, &t48_font_normal, ink.dim, c->number);
@@ -282,7 +291,18 @@ void contacts_draw(void)
     if (n > ROWS) {
         char b[24];
         snprintf(b, sizeof b, "%d/%d", sel + 1, n);
-        t48_text_right(&ui, SW - 100, (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, b);
+        t48_text_right(&ui, HEAD_NOTE_X, (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, b);
+    }
+    if (SMALL) {
+        if (mode == M_CONFIRM && sel < n) {
+            char b[120];
+            snprintf(b, sizeof b, "Delete %.40s?", list[sel].name);
+            ui_ask(b, NULL, NULL, B_STOP);
+            ui_bar(NULL, 0, NULL, 0, "Cancel", B_PLAIN, "Delete", B_STOP);
+        } else {
+            ui_bar("Dial", n ? B_GO : B_OFF, "Add", B_PLAIN, "Edit", n ? B_PLAIN : B_OFF, "Delete", n ? B_PLAIN : B_OFF);
+        }
+        return;
     }
     if (mode == M_CONFIRM && sel < n) {
         char b[120];
@@ -324,7 +344,14 @@ const char *contacts_state(const char *key)
 /* a soft key is a touch on the button above it: Dial, Add, Edit, Delete (or Cancel and the verb, when asking) */
 void contacts_soft(int b)
 {
-    if (mode == M_NAME || mode == M_NUMBER) return;   /* the keyboard has the screen */
     b &= 3;
+    if (SMALL) {
+        /* as the labels say; the keyboard's own are the mode, rub out, Cancel and Done */
+        if (mode == M_NAME || mode == M_NUMBER) contacts_key(T48_KEY_SOFT1 + b, 1);
+        else if (mode == M_CONFIRM) { if (b >= 2) contacts_key(b == 3 ? T48_KEY_OK : T48_KEY_BACK, 1); }
+        else { do_button(b); if (b != 0 || !n) shell_phone_changed(); }
+        return;
+    }
+    if (mode == M_NAME || mode == M_NUMBER) return;   /* the keyboard has the screen */
     contacts_touch(T48_TOUCH_DOWN, btn[b].x + btn[b].w / 2, BTN_Y + BTN_H / 2);
 }

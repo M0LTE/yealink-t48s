@@ -8,8 +8,26 @@
 #include <string.h>
 #include "shell.h"
 
-static uint32_t screen_px[SW * SH];
-static const t48_surface screen = {screen_px, SW, SH, SW};
+/* The screen: 800x480 at 32 bits unless told otherwise (--screen, --model). As the T46S it is 16 bits
+ * and upside down like that phone's panel, so the same packing and turning runs here as there; a
+ * picture and a pixel check see it the right way up again. */
+static uint32_t *screen_px;
+static uint16_t *panel;      /* the 16-bit, turned panel; NULL: screen_px is the screen */
+static t48_surface screen;
+
+static uint32_t from565(uint16_t p)
+{
+    unsigned r = p >> 11, g = p >> 5 & 63, b = p & 31;
+    return (r << 3 | r >> 2) << 16 | (g << 2 | g >> 4) << 8 | (b << 3 | b >> 2);
+}
+
+/* what the panel shows, as a picture */
+static void panel_read(void)
+{
+    if (!panel) return;
+    for (int y = 0; y < SH; y++)
+        for (int x = 0; x < SW; x++) screen_px[y * SW + x] = from565(panel[(SH - 1 - y) * SW + (SW - 1 - x)]);
+}
 
 static char *script;        /* the whole script */
 static char *at;            /* next line */
@@ -45,6 +63,19 @@ static int key_named(const char *name)
 static int sim_init(void)
 {
     static char one_shot[400];
+    int w = APP_W, h = APP_H, t46 = opt.model && !strcmp(opt.model, "t46s");
+    if (opt.model && !t46 && strcmp(opt.model, "t48s")) { fprintf(stderr, "t48-sim: --model is t48s or t46s\n"); return -1; }
+    if (t46) { w = 480; h = 272; }
+    if (opt.screen && (sscanf(opt.screen, "%dx%d", &w, &h) != 2 || w < 320 || h < 200 || w > APP_W || h > APP_H)) {
+        fprintf(stderr, "t48-sim: --screen is WIDTHxHEIGHT, 320x200 to %dx%d\n", APP_W, APP_H);
+        return -1;
+    }
+    screen_px = calloc((size_t)w * (size_t)h, sizeof *screen_px);
+    if (t46) panel = calloc((size_t)w * (size_t)h, sizeof *panel);
+    if (!screen_px || (t46 && !panel)) return -1;
+    screen = (t48_surface){screen_px, w, h, w};
+    L.turned = t46;
+    shell_screen_is(w, h, !(t46 || opt.no_touch), t46 || opt.no_touch);
     if (opt.shot) {
         /* an app's first picture if one was asked for, otherwise the idle screen */
         snprintf(one_shot, sizeof one_shot, "%swait 200\nshot %s\nquit\n", opt.start ? "waitframe 5000\n" : "", opt.shot);
@@ -63,14 +94,10 @@ static int sim_init(void)
     return 0;
 }
 
-static void sim_flush(const uint32_t *src, int stride, int x, int y, int w, int h)
+static void sim_flush(const uint32_t *src, int stride, int sw, int sh, int x, int y, int w, int h)
 {
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > SW) w = SW - x;
-    if (y + h > SH) h = SH - y;
-    for (int j = 0; j < h; j++)
-        memcpy(screen_px + (y + j) * SW + x, src + (y + j) * stride + x, (size_t)w * 4);
+    if (panel) fit_put(panel, SW * 2, SW, SH, 16, 1, src, stride, sw, sh, x, y, w, h);
+    else fit_put(screen_px, SW * 4, SW, SH, 32, 0, src, stride, sw, sh, x, y, w, h);
 }
 
 static int sim_fds(struct pollfd *p, int max) { (void)p; (void)max; return 0; }
@@ -88,7 +115,11 @@ static void fail(const char *what)
     failures++;
 }
 
-static uint32_t pixel(int x, int y) { return screen_px[y * SW + x] & 0xFFFFFF; }
+static uint32_t pixel(int x, int y)
+{
+    panel_read();
+    return screen_px[y * SW + x] & 0xFFFFFF;
+}
 
 /* RRGGBB, or the name of one of the theme's colours */
 static int colour_named(const char *name, uint32_t *out)
@@ -104,6 +135,12 @@ static int colour_named(const char *name, uint32_t *out)
         if (!strcmp(roles[i].name, name)) { memcpy(out, (const char *)T + roles[i].at, sizeof *out); return 1; }
     *out = (uint32_t)strtoul(name, &end, 16);
     return strlen(name) == 6 && !*end;
+}
+
+/* a colour as a 16-bit panel shows it */
+static uint32_t shown(uint32_t c)
+{
+    return panel ? from565((uint16_t)((c >> 8 & 0xF800) | (c >> 5 & 0x07E0) | (c >> 3 & 0x001F))) : c;
 }
 
 /* run one line of the script */
@@ -137,6 +174,8 @@ static void step(long long now)
         int code = c[0] ? key_named(c) : 0;
         if (c[0] && !code) { fail("no such key"); return; }
         shell_scan(atoi(a), atoi(b), code, !b[0] ? -1 : cmd[4] == 'd');
+    } else if (!strncmp(cmd, "touch", 5) && !L.touch) {
+        fail("this screen takes no touches");
     } else if (!strcmp(cmd, "touch")) {  /* a tap */
         shell_touch(T48_TOUCH_DOWN, atoi(a), atoi(b));
         shell_touch(T48_TOUCH_UP, atoi(a), atoi(b));
@@ -149,6 +188,7 @@ static void step(long long now)
     } else if (!strcmp(cmd, "hook")) {
         shell_hook(!strcmp(a, "off"));
     } else if (!strcmp(cmd, "shot")) {
+        panel_read();
         if (t48_save(&screen, a) < 0) fail("cannot write the picture");
         else logmsg("wrote %s", a);
     } else if (!strcmp(cmd, "expect")) {
@@ -178,6 +218,7 @@ static void step(long long now)
         wait_x = atoi(a);
         wait_y = atoi(b);
         if (wait_x < 0 || wait_x >= SW || wait_y < 0 || wait_y >= SH || !colour_named(c, &wait_colour)) { fail("no such pixel or colour"); return; }
+        wait_colour = shown(wait_colour);
         if (cmd[0] == 'w') {
             waiting = W_PIXEL;
             wait_until = now + (d[0] ? atoi(d) : 3000);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /*
- * The T48 app protocol, API level 5: what goes over the socket between the
+ * The T48 app protocol, API level 6: what goes over the socket between the
  * shell and an app. The written description is docs/app-protocol.md; this
  * header is the same thing for C programs.
  *
@@ -17,8 +17,10 @@
  * 3 added flipping (FLIPINFO, FLIP, FLIPPED, the flip buffers), times on KEY
  * and TOUCH, and the soft keys; an older app or shell sees none of it.
  * 4 added sound (the sound ring); nothing on the socket changed.
- * 5 added the lamps (LAMPS, LAMP_PATTERN), for an app with the "lamps" permission. */
-#define T48_API_LEVEL 5
+ * 5 added the lamps (LAMPS, LAMP_PATTERN), for an app with the "lamps" permission.
+ * 6 added screens of other sizes: HELLO's flags, and the screen's own size for an
+ * app whose manifest says "screen": "any". An older app takes the HELLO it knows. */
+#define T48_API_LEVEL 6
 
 /* The shell starts the app with these in its environment. */
 #define T48_ENV_SOCKET "T48_SOCKET_FD"   /* number of the socket file descriptor */
@@ -66,7 +68,11 @@ struct t48_msg_hello {
     uint16_t format;    /* T48_FORMAT_* */
     uint32_t stride;    /* bytes from one row to the next */
     uint32_t size;      /* bytes to map from the buffer descriptor */
+    uint32_t flags;     /* level 6: T48_HELLO_*; a shell older than that sends the message without it */
 };
+#define T48_HELLO_V1_SIZE 16   /* the message before level 6 */
+#define T48_HELLO_TOUCH 1      /* the screen takes touches */
+#define T48_HELLO_SOFTKEYS 2   /* there are four soft keys under the screen (T48_KEY_SOFT1 to 4) */
 
 struct t48_msg_ready {
     uint16_t api;       /* the API level the app was written for */

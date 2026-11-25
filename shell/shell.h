@@ -8,8 +8,34 @@
 #include "t48.h"
 #include "t48_audio_ctl.h"
 
-#define SW 800
-#define SH 480
+/* The screen, as the backend found it: 800x480 on the T48S, 480x272 on the
+ * T46S. The shell draws its own screens at this size; below 800x480 they are
+ * laid out for a small screen (docs/shell.md). */
+extern int screen_w, screen_h;
+#define SW screen_w
+#define SH screen_h
+/* The picture an app gets unless its manifest says "screen": "any": the T48S's,
+ * which the backend fits to a smaller screen. */
+#define APP_W 800
+#define APP_H 480
+
+struct layout {
+    int small;      /* a screen smaller than the T48S's: the small layout, with the soft keys' labels along the bottom */
+    int touch;      /* the screen takes touches */
+    int softkeys;   /* there are four soft keys under it */
+    int turned;     /* simulator: the panel is 16 bits and mounted upside down, as the T46S's is */
+};
+extern struct layout L;
+#define SMALL (L.small)
+#define BAR_H T48_UI_BAR_H                   /* the soft keys' labels */
+#define BAR_Y (SH - BAR_H)
+#define LINE_W 88                            /* small screens: kept clear at each side of the idle screen for the line keys' labels */
+void shell_screen_is(int w, int h, int touch, int softkeys);   /* from a backend's init */
+/* small screens: a list's rows, from under the header to the soft keys' labels */
+#define SROW_STEP 35
+#define SROW_H 32
+#define SROW_Y(r) (HEAD_H + 3 + (r) * SROW_STEP)
+#define SROWS ((BAR_Y - HEAD_H - 4) / SROW_STEP)
 
 /* Phone keys, which never go to apps. App keys use the protocol's T48_KEY_*
  * codes; the X key arrives from a backend as T48_KEY_BACK. */
@@ -24,8 +50,9 @@ enum { SK_VOLDOWN = 0x200, SK_VOLUP, SK_HEADSET, SK_MUTE, SK_MESSAGE, SK_HOLD, S
 struct backend {
     const char *name;
     int (*init)(void);
-    /* copy part of a full-screen picture (rows `stride` pixels apart) to the screen */
-    void (*flush)(const uint32_t *src, int stride, int x, int y, int w, int h);
+    /* Part x, y, w, h of a picture sw x sh (rows `stride` pixels apart) to the screen. A picture
+     * the size of the screen is copied; any other (an 800x480 app on a small screen) is fitted. */
+    void (*flush)(const uint32_t *src, int stride, int sw, int sh, int x, int y, int w, int h);
     int (*fds)(struct pollfd *p, int max);        /* descriptors to wait on */
     void (*handle)(const struct pollfd *p, int n); /* after poll: read input, call shell_key() etc. */
     int (*timeout)(long long now);                /* ms until tick() is wanted, -1: never */
@@ -60,6 +87,9 @@ struct options {
     const char *notice;  /* a file of one or two lines shown on the idle screen while it exists (t48-live), NULL: none */
     const char *web;     /* folder where the web setup page leaves its status file (docs/web.md), NULL: none */
     const char *runner;  /* simulator: a program to run apps with, such as qemu-arm for the phone's own builds */
+    const char *screen;  /* simulator: the screen's size, "480x272" */
+    const char *model;   /* simulator: "t46s" is that phone's screen and keys: 480x272, 16 bits, upside down, no touch, soft keys */
+    int no_touch;        /* simulator: a screen that takes no touches, and four soft keys under it */
 };
 extern struct options opt;
 
@@ -76,6 +106,12 @@ void shell_touch(int state, int x, int y);
 void shell_hook(int off_hook);
 
 const struct backend *shell_backend(void);
+
+/* Part x, y, w, h of a picture sw x sh onto a screen pw x ph of bpp bits (32, or 16 as RGB565), `line`
+ * bytes a row, upside down if turned. The same size: copied. Another: each screen pixel is the average
+ * of the picture's pixels under it (fit.c). */
+void fit_put(void *fb, int line, int pw, int ph, int bpp, int turned,
+             const uint32_t *src, int stride, int sw, int sh, int x, int y, int w, int h);
 
 /* for the simulator's scripts */
 void shell_stop(int status);
@@ -106,8 +142,8 @@ void logmsg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 #define C_GOOD (T->good)
 #define C_BAD (T->bad)
 
-#define HEAD_H T48_UI_HEAD_H                 /* the header */
-#define TAG_H T48_UI_TAG_H
+#define HEAD_H (t48_ui_head_h())             /* the header */
+#define TAG_H (t48_ui_tag_h())
 enum { B_PLAIN = T48_UI_PLAIN, B_FIRST = T48_UI_FIRST, B_GO = T48_UI_GO, B_STOP = T48_UI_STOP, B_LIT = T48_UI_LIT,
        B_OFF = T48_UI_OFF };                 /* what a button is for */
 #define row_ink t48_ui_ink
@@ -115,7 +151,9 @@ enum { B_PLAIN = T48_UI_PLAIN, B_FIRST = T48_UI_FIRST, B_GO = T48_UI_GO, B_STOP 
 extern t48_surface ui;                       /* the shell's own picture of the screen */
 #define ui_clear(ground) t48_ui_clear(&ui, ground)
 #define ui_ground() t48_ui_ground()
-#define ui_header(title, back, lamp) t48_ui_header(&ui, title, back, lamp)   /* lamp: 0, or B_GO, B_LIT, B_STOP */
+/* lamp: 0, or B_GO, B_LIT, B_STOP. The way back is drawn only where it can be touched. */
+#define ui_header(title, back, lamp) t48_ui_header(&ui, title, (back) && L.touch, lamp)
+#define HEAD_NOTE_X (SW - (SMALL ? 70 : 100))   /* a count in the header ends here, left of the time */
 #define ui_btn(x, y, w, h, label, role) t48_ui_btn(&ui, x, y, w, h, label, role)
 #define ui_key(x, y, w, h, label) t48_ui_key(&ui, x, y, w, h, label)
 #define ui_panel(x, y, w, h) t48_ui_panel(&ui, x, y, w, h)
@@ -146,6 +184,16 @@ unsigned char *ui_fonts_file(size_t *len);
 /* a small picture of a theme, for choosing one */
 void ui_theme_preview(const t48_theme *t, int x, int y, int w, int h, int current);
 void ui_network_status(char *out, size_t n, int *up);
+/* text over up to two lines, broken at spaces: from x, or each line centred on x */
+void ui_two_lines(int x, int y, int w, const t48_font *f, uint32_t c, const char *text);
+void ui_two_lines_centred(int cx, int y, int w, const t48_font *f, uint32_t c, const char *text);
+/* Small screens: what the four soft keys do on the screen being drawn, left to right. A label NULL or
+ * "": that key does nothing. Shown along the bottom edge after the screen is drawn; with a touch
+ * screen each is a button. */
+void ui_bar(const char *l0, int r0, const char *l1, int r1, const char *l2, int r2, const char *l3, int r3);
+/* a question in a box, for the small layout: the answers are on the soft keys */
+void ui_ask(const char *title, const char *text, const char *extra, int tone);
+#define UI_ASK_H 150                         /* that box's height when it has more than a title */
 int ui_inside(int x, int y, int bx, int by, int bw, int bh);
 
 /* ---------- the phone (phone.c): calls, the dialler, history ---------- */
@@ -162,6 +210,7 @@ void phone_draw_history(void);
 void phone_history_key(int code);
 void phone_history_touch(int x, int y);
 void phone_history_soft(int b);   /* soft key b, 0 to 3 */
+void phone_soft(int b);           /* the same on a call screen or the dialler (small screens) */
 void phone_open_history(void);
 void phone_draw_overlay(void);               /* the volume bar, over any of the shell's screens */
 void phone_account_text(char *out, size_t n, uint32_t *colour);
@@ -244,6 +293,7 @@ void settings_close(void);
 void settings_draw(void);
 void settings_key(int code, int down);
 void settings_touch(int state, int x, int y);
+void settings_soft(int b);                   /* soft key b, 0 to 3 (small screens) */
 int settings_timeout(long long now);
 void settings_tick(long long now);
 int settings_job_fd(void);                   /* the app manager's child process, -1 if none */
@@ -336,6 +386,7 @@ struct manifest {
     char exec[128];      /* program to run, relative to dir */
     char perms[96];      /* permissions, space separated */
     int api;
+    int any_screen;      /* "screen": "any": it lays itself out for whatever size HELLO says */
     char description[160];
     char *settings[MAX_SETTINGS];  /* "key=default" */
     char *setting_label[MAX_SETTINGS];
@@ -379,11 +430,13 @@ int app_timeout(long long now);
 void app_tick(long long now);
 void app_reaped(pid_t pid, int status);
 const uint32_t *app_pixels(void);
+int app_w(void);                           /* the size of its picture: the screen's, or APP_W x APP_H */
+int app_h(void);
 
 /* from app.c back to the shell */
 void shell_app_damage(int x, int y, int w, int h);
 int shell_app_flip(void);                  /* the app has flipped: 1 if it is in front and the buffer should be shown */
-void shell_screen_flush(const uint32_t *src);   /* a whole picture to the screen: a flip, on a screen that copies */
+void shell_screen_flush(const uint32_t *src, int w, int h);   /* a whole picture w x h to the screen: a flip, on a screen that copies */
 /* the app has gone; why is NULL if that was expected, otherwise words for the owner */
 void shell_app_gone(const char *name, const char *why);
 

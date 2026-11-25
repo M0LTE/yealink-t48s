@@ -89,10 +89,10 @@ static int pairing(void)
     return web.code[0] && strcmp(web.code, dismissed) && web.until > (long)time(NULL);
 }
 
-#define BOX_X 90
-#define BOX_Y 96
-#define BOX_W 620
-#define BOX_H 288
+#define BOX_X (SMALL ? 6 : 90)
+#define BOX_Y (SMALL ? HEAD_H + 6 : 96)
+#define BOX_W (SMALL ? SW - 12 : 620)
+#define BOX_H (SMALL ? 194 : 288)
 
 void watch_draw_overlay(void)
 {
@@ -101,13 +101,14 @@ void watch_draw_overlay(void)
     if (!pairing()) return;
     ui_dialog(BOX_X, BOX_Y, BOX_W, BOX_H, B_LIT);
     ui_dialog_ink(&ink);
-    t48_text_centre(&ui, SW / 2, BOX_Y + 28, &t48_font_head, ink.text, "Pairing code");
+    t48_text_centre(&ui, SW / 2, BOX_Y + (SMALL ? 10 : 28), &t48_font_head, ink.text, "Pairing code");
     /* in two groups, as it is easier to carry across the room */
     size_t n = strlen(web.code), half = (n + 1) / 2;
     snprintf(spaced, sizeof spaced, "%.*s %s", (int)half, web.code, web.code + half);
-    t48_text_centre(&ui, SW / 2, BOX_Y + 76, &t48_font_huge, ink.text, spaced);
+    t48_text_centre(&ui, SW / 2, BOX_Y + (SMALL ? 30 : 76), &t48_font_huge, ink.text, spaced);
     snprintf(from, sizeof from, "Requested by %s. X to refuse", web.from[0] ? web.from : "a browser");
-    t48_text_centre(&ui, SW / 2, BOX_Y + BOX_H - 48, &t48_font_normal, ink.dim, from);
+    if (SMALL && t48_text_width(&t48_font_normal, from) > BOX_W - 16) t48_text_fit(&ui, BOX_X + 8, BOX_Y + BOX_H - 34, BOX_W - 16, &t48_font_small, ink.dim, from);
+    else t48_text_centre(&ui, SW / 2, BOX_Y + BOX_H - (SMALL ? 36 : 48), &t48_font_normal, ink.dim, from);
 }
 
 /* the owner says no: the server throws the code away when it sees this file */

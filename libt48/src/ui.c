@@ -30,6 +30,15 @@ void t48_ui_clear(t48_surface *s, uint32_t c)
 
 uint32_t t48_ui_ground(void) { return ground; }
 
+/* a small screen: the parts in the sizes that suit it (t48.h) */
+static int small;
+void t48_ui_small(int on) { small = on; }
+int t48_ui_is_small(void) { return small; }
+int t48_ui_head_h(void) { return small ? 30 : T48_UI_HEAD_H; }
+int t48_ui_tag_h(void) { return small ? 26 : 34; }
+#define HEAD_H (t48_ui_head_h())
+#define TAG_H (t48_ui_tag_h())
+
 void t48_ui_ground_is(uint32_t c)
 {
     filled = c;
@@ -87,8 +96,8 @@ void t48_ui_lamp(t48_surface *s, int x, int y, uint32_t c)
 
 void t48_ui_header_ground(t48_surface *s)
 {
-    t48_fill(s, 0, 0, s->w, T48_UI_HEAD_H, T->head);
-    if (T->head_rule) t48_fill(s, 0, T48_UI_HEAD_H - 2, s->w, 2, T->line);
+    t48_fill(s, 0, 0, s->w, HEAD_H, T->head);
+    if (T->head_rule) t48_fill(s, 0, HEAD_H - 2, s->w, 2, T->line);
 }
 
 static void header_clock(t48_surface *s)
@@ -98,22 +107,24 @@ static void header_clock(t48_surface *s)
     struct tm tm;
     localtime_r(&t, &tm);
     strftime(hm, sizeof hm, "%H:%M", &tm);
-    t48_text_right(s, s->w - 24, (T48_UI_HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, hm);
+    t48_text_right(s, s->w - (small ? 10 : 24), (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, hm);
 }
 
 /* a screen's name, the time, and a way back if there is one (a touch left of x 130) */
 void t48_ui_header(t48_surface *s, const char *title, int back, int lamp)
 {
-    int x = 24;
+    int x = small ? 10 : 24;
+    const t48_font *f = small ? &t48_font_bold : &t48_font_head;
+    uint32_t mark = lamp == T48_UI_GO ? T->good : lamp == T48_UI_STOP ? T->bad : T->accent;
     t48_ui_header_ground(s);
     if (back) {
-        t48_ui_chevron(s, 30, T48_UI_HEAD_H / 2 - 1, 9, -1, 4, T->on_head);
-        x = 56;
+        t48_ui_chevron(s, small ? 14 : 30, HEAD_H / 2 - 1, small ? 7 : 9, -1, small ? 3 : 4, T->on_head);
+        x = small ? 30 : 56;
     } else if (lamp) {
-        t48_ui_lamp(s, 24, T48_UI_HEAD_H / 2 - 6, lamp == T48_UI_GO ? T->good : lamp == T48_UI_STOP ? T->bad : T->accent);
-        x = 48;
+        t48_ui_lamp(s, x, HEAD_H / 2 - 6, mark);
+        x = small ? 30 : 48;
     }
-    t48_text_fit(s, x, (T48_UI_HEAD_H - t48_font_head.height) / 2, s->w - x - 110, &t48_font_head, T->on_head, title);
+    t48_text_fit(s, x, (HEAD_H - f->height) / 2, s->w - x - (small ? 70 : 110), f, T->on_head, title);
     header_clock(s);
 }
 
@@ -136,18 +147,23 @@ static void role_colours(int role, uint32_t *fill, uint32_t *ink)
     }
 }
 
+/* what a button says, centred on cx, cy: words, or a mark */
+static void btn_label(t48_surface *s, int cx, int cy, const char *label, uint32_t ink)
+{
+    if (!strcmp(label, "<x")) mark_rubout(s, cx, cy, ink);
+    else if (!strcmp(label, "+")) mark_plus(s, cx, cy, 8, 4, ink);
+    else if (!strcmp(label, "-")) t48_fill(s, cx - 8, cy - 2, 16, 4, ink);
+    else if (!strcmp(label, "^") || !strcmp(label, "v")) t48_ui_chevron(s, cx, cy, 9, label[0] == '^' ? -2 : 2, 4, ink);
+    else t48_text_centre(s, cx, cy - t48_font_bold.height / 2, &t48_font_bold, ink, label);
+}
+
 /* A button. The label "<x" is the rub-out mark and "+" a plus. */
 void t48_ui_btn(t48_surface *s, int x, int y, int w, int h, const char *label, int role)
 {
     uint32_t fill, ink;
     role_colours(role, &fill, &ink);
     shape(s, x, y, w, h, T->radius, fill, role == T48_UI_PLAIN || role == T48_UI_OFF || T->edge == T48_EDGE_LIP);
-    int cy = y + (h - (T->edge == T48_EDGE_LIP ? 3 : 0)) / 2;
-    if (!strcmp(label, "<x")) mark_rubout(s, x + w / 2, cy, ink);
-    else if (!strcmp(label, "+")) mark_plus(s, x + w / 2, cy, 8, 4, ink);
-    else if (!strcmp(label, "-")) t48_fill(s, x + w / 2 - 8, cy - 2, 16, 4, ink);
-    else if (!strcmp(label, "^") || !strcmp(label, "v")) t48_ui_chevron(s, x + w / 2, cy, 9, label[0] == '^' ? -2 : 2, 4, ink);
-    else t48_text_centre(s, x + w / 2, cy - t48_font_bold.height / 2, &t48_font_bold, ink, label);
+    btn_label(s, x + w / 2, y + (h - (T->edge == T48_EDGE_LIP ? 3 : 0)) / 2, label, ink);
 }
 
 /* a key of the number pad */
@@ -193,26 +209,26 @@ void t48_ui_row(t48_surface *s, int x, int y, int w, int h, int selected, t48_ui
 int t48_ui_tag(t48_surface *s, int x, int y, const char *text, int role)
 {
     uint32_t fill, ink;
-    int w = t48_text_width(&t48_font_bold, text) + 28;
+    int w = t48_ui_tag_width(text);
     if (role == T48_UI_PLAIN || role == T48_UI_OFF) {
         fill = T->edge == T48_EDGE_LIP ? t48_mix(ground, 0x000000, 60) : T->panel;
         ink = role == T48_UI_OFF ? T->dim : T->text;
-        if (T->edge == T48_EDGE_OUTLINE) { t48_round_fill(s, x, y, w, T48_UI_TAG_H, T48_UI_TAG_H / 2, T->edge_colour); t48_round_fill(s, x + 1, y + 1, w - 2, T48_UI_TAG_H - 2, T48_UI_TAG_H / 2 - 1, fill); }
-        else t48_round_fill(s, x, y, w, T48_UI_TAG_H, T->radius < 6 ? T->radius : T48_UI_TAG_H / 2, fill);
+        if (T->edge == T48_EDGE_OUTLINE) { t48_round_fill(s, x, y, w, TAG_H, TAG_H / 2, T->edge_colour); t48_round_fill(s, x + 1, y + 1, w - 2, TAG_H - 2, TAG_H / 2 - 1, fill); }
+        else t48_round_fill(s, x, y, w, TAG_H, T->radius < 6 ? T->radius : TAG_H / 2, fill);
     } else {
         role_colours(role, &fill, &ink);
-        t48_round_fill(s, x, y, w, T48_UI_TAG_H, T->radius < 6 ? T->radius : T48_UI_TAG_H / 2, fill);
+        t48_round_fill(s, x, y, w, TAG_H, T->radius < 6 ? T->radius : TAG_H / 2, fill);
     }
-    t48_text(s, x + 14, y + (T48_UI_TAG_H - t48_font_bold.height) / 2, &t48_font_bold, ink, text);
+    t48_text(s, x + (small ? 10 : 14), y + (TAG_H - t48_font_bold.height) / 2, &t48_font_bold, ink, text);
     return x + w + 8;
 }
 
-int t48_ui_tag_width(const char *text) { return t48_text_width(&t48_font_bold, text) + 28; }
+int t48_ui_tag_width(const char *text) { return t48_text_width(&t48_font_bold, text) + (small ? 20 : 28); }
 
 /* an On/Off switch, its right edge at rx */
 void t48_ui_switch(t48_surface *s, int rx, int y, int h, int on, int selected)
 {
-    int w = 64, sh = 32, sy = y + (h - sh) / 2, x = rx - w;
+    int w = small ? 48 : 64, sh = small ? 24 : 32, sy = y + (h - sh) / 2, x = rx - w;
     if (T->radius < 6) {
         /* a lamp and a word */
         uint32_t ink = selected ? T->on_sel : on ? T->text : T->dim;
@@ -228,13 +244,13 @@ void t48_ui_switch(t48_surface *s, int rx, int y, int h, int on, int selected)
 /* a level from 0 to max, in a box w wide: minus, the bar, plus */
 void t48_ui_level(t48_surface *s, int x, int y, int w, int h, int level, int max, int disabled, int selected)
 {
-    int cell = (w - 120) / (max ? max : 1), by = y + h / 2 - 8;
+    int bw = small ? 36 : 50, in = small ? 3 : 6, cell = (w - 2 * bw - 20) / (max ? max : 1), by = y + h / 2 - 8;
     uint32_t on = disabled ? T->line : selected ? T->on_sel : T->rows == T48_ROWS_RULED ? T->text : T->accent;
     uint32_t off = selected ? t48_mix(T->sel, T->on_sel, 60) : T->edge == T48_EDGE_LIP ? t48_mix(ground, 0x000000, 90) : T->line;
-    t48_ui_btn(s, x, y + 6, 50, h - 12, "-", disabled ? T48_UI_OFF : T48_UI_PLAIN);
-    t48_ui_btn(s, x + w - 50, y + 6, 50, h - 12, "+", disabled ? T48_UI_OFF : T48_UI_PLAIN);
+    t48_ui_btn(s, x, y + in, bw, h - 2 * in, "-", disabled ? T48_UI_OFF : T48_UI_PLAIN);
+    t48_ui_btn(s, x + w - bw, y + in, bw, h - 2 * in, "+", disabled ? T48_UI_OFF : T48_UI_PLAIN);
     for (int i = 0; i < max; i++)
-        t48_round_fill(s, x + 60 + i * cell, by, cell - 3, 16, T->radius < 6 ? 0 : 3, i < level ? on : off);
+        t48_round_fill(s, x + bw + 10 + i * cell, by, cell - 3, 16, T->radius < 6 ? 0 : 3, i < level ? on : off);
 }
 
 /* ---------- a box over the screen: a question, a notice, a code ---------- */
@@ -284,18 +300,24 @@ void t48_ui_dialog_btn(t48_surface *s, int x, int y, int w, int h, const char *l
     }
 }
 
+/* notices in the small face: a small screen with more to say than a row of the usual face holds */
+static int notice_tight;
+void t48_ui_notice_tight(int on) { notice_tight = on; }
+#define NOTICE_FONT (notice_tight ? &t48_font_small : &t48_font_bold)
+
 /* a notice on the idle screen: a wide tag. Returns the x after it. */
 int t48_ui_notice(t48_surface *s, int x, int y, const char *text, int role)
 {
     uint32_t fill, ink;
     int w = t48_ui_notice_width(text);
     role_colours(role, &fill, &ink);
-    t48_round_fill(s, x, y, w, 42, T->radius < 6 ? T->radius : 21, fill);
-    t48_text_centre(s, x + w / 2, y + (42 - t48_font_bold.height) / 2, &t48_font_bold, ink, text);
-    return x + w + 12;
+    int h = small ? 30 : 42;
+    t48_round_fill(s, x, y, w, h, T->radius < 6 ? T->radius : h / 2, fill);
+    t48_text_centre(s, x + w / 2, y + (h - NOTICE_FONT->height) / 2, NOTICE_FONT, ink, text);
+    return x + w + (small ? 8 : 12);
 }
 
-int t48_ui_notice_width(const char *text) { return t48_text_width(&t48_font_bold, text) + 44; }
+int t48_ui_notice_width(const char *text) { return t48_text_width(NOTICE_FONT, text) + (small ? 24 : 44); }
 
 /* a tile of the launcher */
 void t48_ui_tile(t48_surface *s, int x, int y, int w, int h, int selected, t48_ui_ink *ink)
@@ -314,4 +336,24 @@ void t48_ui_icon(t48_surface *s, int x, int y, int n, const char *letter)
     t48_round_fill(s, x, y, n, n, T->key_radius >= 100 ? n / 2 : T->radius * 2, fill);
     if (!strcmp(letter, "+")) mark_plus(s, x + n / 2, y + n / 2, 20, 6, ink);
     else t48_text_centre(s, x + n / 2, y + (n - t48_font_big.height) / 2, &t48_font_big, ink, letter);
+}
+
+/* ---------- the soft keys ---------- */
+
+/* Each label is a tab that runs off the bottom edge, so it reads as belonging to
+ * the key under it. A key that does nothing has none. */
+void t48_ui_softkeys(t48_surface *s, const char *const label[4], const int role[4])
+{
+    int y = s->h - T48_UI_BAR_H, cw = s->w / 4;
+    for (int i = 0; i < 4; i++) {
+        uint32_t fill, ink;
+        int r = role ? role[i] : T48_UI_PLAIN, x = i * cw + 2, w = cw - 4;
+        if (!label[i] || !label[i][0]) continue;
+        role_colours(r, &fill, &ink);
+        shape(s, x, y, w, T48_UI_BAR_H + T->radius + 6, T->radius, fill, r == T48_UI_PLAIN || r == T48_UI_OFF);
+        int cy = y + T48_UI_BAR_H / 2 + 1;
+        if (t48_text_width(&t48_font_bold, label[i]) <= w - 6) btn_label(s, x + w / 2, cy, label[i], ink);
+        else if (t48_text_width(&t48_font_small, label[i]) <= w - 6) t48_text_centre(s, x + w / 2, cy - t48_font_small.height / 2, &t48_font_small, ink, label[i]);
+        else t48_text_fit(s, x + 3, cy - t48_font_small.height / 2, w - 6, &t48_font_small, ink, label[i]);
+    }
 }

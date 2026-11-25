@@ -56,10 +56,11 @@ struct row {
 };
 
 #define MAX_ROWS 96
-#define VISIBLE 7
-#define ROW_H 60
-#define LIST_Y 54
-#define LIST_X 16
+/* the list: seven rows on the T48S; on a small screen as many as fit above the soft keys' labels */
+#define VISIBLE (SMALL ? SROWS : 7)
+#define ROW_H (SMALL ? SROW_STEP : 60)
+#define LIST_Y (SMALL ? SROW_Y(0) : 54)
+#define LIST_X (SMALL ? 8 : 16)
 
 static struct row rows[MAX_ROWS];
 static int nrows;
@@ -1664,7 +1665,8 @@ void settings_key(int code, int down)
 #define OV_Y 120
 #define OV_W 580
 #define OV_H 250
-#define SCROLL_W 60
+#define SCROLL_W (SMALL ? 10 : 60)
+#define LEVEL_W (SMALL ? 190 : 340)   /* a level's bar, at the right of its row */
 #define DOOR_X 60
 #define DOOR_Y 40
 #define DOOR_W 680
@@ -1673,10 +1675,10 @@ void settings_key(int code, int down)
 static int list_w(void) { return SW - 2 * LIST_X - (nrows > VISIBLE ? SCROLL_W : 0); }
 
 /* the Theme page: a picture of each, its name under it */
-#define TH_W 240
-#define TH_H 222
-#define TH_GAP 16
-#define TH_Y 92
+#define TH_W (SMALL ? 144 : 240)
+#define TH_H (SMALL ? 150 : 222)
+#define TH_GAP (SMALL ? 12 : 16)
+#define TH_Y (SMALL ? HEAD_H + 8 : 92)
 #define TH_X(i) ((SW - t48_theme_count * TH_W - (t48_theme_count - 1) * TH_GAP) / 2 + (i) * (TH_W + TH_GAP))
 #define TH_ALL_H (TH_H + 84)   /* with the name and "Current" */
 
@@ -1691,6 +1693,7 @@ void settings_touch(int state, int x, int y)
         return;
     }
     if (state != T48_TOUCH_DOWN) return;
+    if (ov.kind != O_NONE && SMALL) return;   /* its answers are the soft keys' labels */
     if (ov.kind != O_NONE) {
         if (ov.kind == O_MSG && ui_inside(x, y, OV_X + OV_W / 2 - 80, OV_Y + OV_H - 76, 160, 56)) overlay_answer(1);
         else if (ov.kind == O_CONFIRM && ui_inside(x, y, OV_X + OV_W / 2 - 170, OV_Y + OV_H - 76, 160, 56)) overlay_answer(0);
@@ -1733,8 +1736,8 @@ void settings_touch(int state, int x, int y)
     stack[depth].sel = i;
     if (rows[i].kind == R_LEVEL) {
         /* minus at the left of the bar, plus at the right */
-        int mid = LIST_X + w - 170;
-        if (x >= LIST_X + w - 340) activate(i, x < mid ? -1 : 1);
+        int mid = LIST_X + w - LEVEL_W / 2;
+        if (x >= LIST_X + w - LEVEL_W) activate(i, x < mid ? -1 : 1);
     } else {
         activate(i, 1);
     }
@@ -1831,11 +1834,19 @@ static const char *choice_text(const char *v)
 
 static void draw_row(const struct row *r, int x, int y, int w, int selected)
 {
-    int h = ROW_H - 6, dis = r->flags & F_DISABLED;
+    int h = SMALL ? SROW_H : ROW_H - 6, dis = r->flags & F_DISABLED, pad = SMALL ? 10 : 18;
     const t48_font *f = &t48_font_normal;
     int ty = y + (h - f->height) / 2;
     struct row_ink ink;
 
+    if (r->kind == R_NOTE && SMALL) {
+        /* one line where it fits; two in the smallest face where it does not */
+        uint32_t c = (r->flags & F_DANGER) ? C_BAD : C_DIM;
+        if (selected) t48_fill(&ui, x, y + 4, 3, h - 8, C_TEXT);
+        if (t48_text_width(&t48_font_small, r->value) <= w - 2 * pad) t48_text(&ui, x + pad, y + (h - t48_font_small.height) / 2, &t48_font_small, c, r->value);
+        else ui_two_lines(x + pad, y, w - 2 * pad, &t48_font_tiny, c, r->value);
+        return;
+    }
     if (r->kind == R_NOTE) {
         /* words between rows: they are not chosen, so they are never dressed as a row */
         if (selected) t48_fill(&ui, x, y + 8, 4, h - 16, C_TEXT);
@@ -1846,16 +1857,16 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
     uint32_t text = dis ? ink.faint : ink.text;
 
     if (r->kind == R_ACTION) {
-        t48_text(&ui, x + 18, ty, &t48_font_bold, dis ? ink.faint : (r->flags & F_DANGER) && !selected ? C_BAD : ink.text, r->label);
-        if (r->value[0]) t48_text_right(&ui, x + w - 18, ty, f, ink.dim, r->value);
+        t48_text(&ui, x + pad, ty, &t48_font_bold, dis ? ink.faint : (r->flags & F_DANGER) && !selected ? C_BAD : ink.text, r->label);
+        if (r->value[0]) t48_text_right(&ui, x + w - pad, ty, f, ink.dim, r->value);
         return;
     }
-    int right = x + w - 18;
+    int right = x + w - pad;
     if (r->kind == R_MENU) { ui_chevron(right - 6, y + h / 2, 7, 1, 3, ink.dim); right -= 26; }
     if (r->kind == R_LEVEL) {
-        int bx = x + w - 340, bw = 340 - 18;
+        int bx = x + w - LEVEL_W, bw = LEVEL_W - pad;
         ui_level(bx, y, bw, h, r->level, r->level_max, dis, selected);
-        t48_text(&ui, x + 18, ty, f, text, r->label);
+        t48_text(&ui, x + pad, ty, f, text, r->label);
         if (!dis) {
             char n[8];
             snprintf(n, sizeof n, "%d", r->level);
@@ -1865,13 +1876,13 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
     }
     if (r->kind == R_TOGGLE) {
         ui_switch(right, y, h, !strcmp(r->value, "on"), selected);
-        t48_text_fit(&ui, x + 18, ty, w - 140, f, text, r->label);
+        t48_text_fit(&ui, x + pad, ty, w - 140, f, text, r->label);
         return;
     }
     /* label on the left, value on the right; the value gives way first */
-    int lw = t48_text_width(f, r->label), room = right - (x + 18);
+    int lw = t48_text_width(f, r->label), room = right - (x + pad);
     if (lw > room * 2 / 3 && r->value[0]) lw = room * 2 / 3;
-    t48_text_fit(&ui, x + 18, ty, lw + 2, f, r->kind == R_INFO && !selected ? ink.dim : text, r->label);
+    t48_text_fit(&ui, x + pad, ty, lw + 2, f, r->kind == R_INFO && !selected ? ink.dim : text, r->label);
     if (r->value[0]) {
         const char *shown = r->kind == R_CHOICE ? choice_text(r->value) : r->value;
         int vw = t48_text_width(f, shown), max = room - lw - 24;
@@ -1885,6 +1896,27 @@ static void draw_overlay(void)
 {
     struct row_ink ink;
     int danger = ov.kind == O_CONFIRM && (!ov.yes || ov.act == A_FORGET_KEYS || ov.act == A_UPD_KERNEL || ov.act == A_FW_INSTALL || ov.act == A_FW_RESTORE);
+    if (SMALL) {
+        /* the same box, smaller; its answers are the soft keys */
+        int busy = ov.kind == O_BUSY && !ov.plain, y = HEAD_H + (BAR_Y - HEAD_H - UI_ASK_H) / 2;
+        ui_ask(ov.title, busy ? " " : ov.text, busy ? " " : ov.kind == O_BUSY ? NULL : ov.extra, danger ? B_STOP : B_PLAIN);
+        if (busy) {
+            int bx = 60, bw = SW - 120, by = y + 100;
+            ui_dialog_ink(&ink);
+            t48_text_centre(&ui, SW / 2, y + 62, &t48_font_normal, ink.dim, ov.text);
+            t48_round_fill(&ui, bx, by, bw, 12, T->radius < 6 ? 0 : 6, t48_mix(ink.text, ui_ground(), 215));
+            if (ov.percent >= 0) {
+                char pc[8];
+                t48_round_fill(&ui, bx, by, bw * ov.percent / 100 > 12 ? bw * ov.percent / 100 : 12, 12, T->radius < 6 ? 0 : 6, ink.text);
+                snprintf(pc, sizeof pc, "%d%%", ov.percent);
+                t48_text_centre(&ui, SW / 2, by + 18, &t48_font_small, ink.dim, pc);
+            }
+        }
+        if (ov.kind == O_MSG) ui_bar(NULL, 0, NULL, 0, NULL, 0, "OK", B_FIRST);
+        else if (ov.kind == O_CONFIRM) ui_bar(NULL, 0, NULL, 0, ov.no ? ov.no : "Cancel", B_PLAIN, ov.yes ? ov.yes : "Remove", danger ? B_STOP : B_FIRST);
+        else ui_bar(NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+        return;
+    }
     ui_dialog(OV_X, OV_Y, OV_W, OV_H, danger ? B_STOP : B_PLAIN);
     ui_dialog_ink(&ink);
     t48_text_centre(&ui, SW / 2, OV_Y + 30, &t48_font_head, ink.text, ov.title);
@@ -1920,6 +1952,33 @@ static void draw_door(void)
     char b[200], net[80];
     int up;
     struct row_ink ink;
+    if (SMALL) {
+        /* the same words in the room there is: the command, the host key, the password, the time left */
+        int x = 8, y = HEAD_H + 4, w = SW - 16, h = BAR_Y - HEAD_H - 10;
+        ui_dialog(x, y, w, h, B_LIT);
+        ui_dialog_ink(&ink);
+        ui_network_status(net, sizeof net, &up);
+        snprintf(b, sizeof b, "ssh-copy-id root@%s", up ? net : "ADDRESS");
+        t48_text_centre(&ui, SW / 2, y + 14, &t48_font_bold, ink.text, b);
+        t48_text_centre(&ui, SW / 2, y + 44, &t48_font_small, ink.dim, "Host key must match");
+        const char *hk = acc.host_key[0] ? acc.host_key : "unknown";
+        const t48_font *kf = t48_text_width(&t48_font_small, hk) > w - 16 ? &t48_font_tiny : &t48_font_small;
+        if (t48_text_width(kf, hk) > w - 16) t48_text_fit(&ui, x + 8, y + 64, w - 16, kf, ink.text, hk);
+        else t48_text_centre(&ui, SW / 2, y + 64, kf, ink.text, hk);
+        t48_text_centre(&ui, SW / 2, y + 90, &t48_font_small, ink.dim, "Password");
+        if (door_password[0]) t48_text_centre(&ui, SW / 2, y + 106, &t48_font_big, ink.text, door_password);
+        else t48_text_centre(&ui, SW / 2, y + 120, &t48_font_small, ink.dim, "Hidden. Close and reopen for a new one");
+        if (acc.door) {
+            char left[16];
+            door_left(left, sizeof left);
+            snprintf(b, sizeof b, "Closes in %s, or when a key arrives", left);
+        } else {
+            snprintf(b, sizeof b, "Opening");
+        }
+        t48_text_centre(&ui, SW / 2, y + h - 28, &t48_font_small, ink.dim, b);
+        ui_bar(NULL, 0, NULL, 0, "Hide", B_PLAIN, "Close", B_STOP);
+        return;
+    }
     ui_dialog(DOOR_X, DOOR_Y, DOOR_W, DOOR_H, B_LIT);
     ui_dialog_ink(&ink);
     t48_text_centre(&ui, SW / 2, DOOR_Y + 22, &t48_font_head, ink.text, "Add key");
@@ -1950,9 +2009,46 @@ static void draw_themes(void)
         int x = TH_X(i), current = rows[i].value[0] != 0, selected = i == stack[depth].sel;
         if (selected) t48_round_fill(&ui, x - 6, TH_Y - 6, TH_W + 12, TH_H + 12, T->radius + 2, T->sel);
         ui_theme_preview(&t48_themes[i], x, TH_Y, TH_W, TH_H, current);
-        t48_text_centre(&ui, x + TH_W / 2, TH_Y + TH_H + 20, &t48_font_bold, C_TEXT, rows[i].label);
-        if (current) t48_text_centre(&ui, x + TH_W / 2, TH_Y + TH_H + 50, &t48_font_small, C_DIM, "Current");
+        t48_text_centre(&ui, x + TH_W / 2, TH_Y + TH_H + (SMALL ? 8 : 20), &t48_font_bold, C_TEXT, rows[i].label);
+        if (current) t48_text_centre(&ui, x + TH_W / 2, TH_Y + TH_H + (SMALL ? 32 : 50), &t48_font_small, C_DIM, "Current");
     }
+}
+
+/* Small screens: what the soft keys do to the row chosen */
+static void bar_for_row(void)
+{
+    const struct row *r = stack[depth].sel < nrows ? &rows[stack[depth].sel] : NULL;
+    const char *first = NULL;
+    if (!SMALL) return;
+    if (r && !(r->flags & F_DISABLED)) {
+        switch (r->kind) {
+        case R_MENU: first = "Open"; break;
+        case R_TEXT: first = "Edit"; break;
+        case R_CHOICE: first = "Change"; break;
+        case R_TOGGLE: first = !strcmp(r->value, "on") ? "Turn off" : "Turn on"; break;
+        case R_ACTION: first = "Select"; break;
+        case R_LEVEL: ui_bar("-", B_PLAIN, "+", B_PLAIN, NULL, 0, "Back", B_PLAIN); return;
+        default: break;
+        }
+    }
+    if (stack[depth].page == P_THEME) first = "Select";
+    ui_bar(first, B_FIRST, NULL, 0, NULL, 0, "Back", B_PLAIN);
+}
+
+void settings_soft(int b)
+{
+    if (depth < 0) return;
+    if (kbd_open) { settings_key(T48_KEY_SOFT1 + b, 1); return; }
+    if (ov.kind != O_NONE) {
+        if (ov.kind == O_MSG && b == 3) overlay_answer(1);
+        else if ((ov.kind == O_CONFIRM || ov.kind == O_DOOR) && b >= 2) overlay_answer(b == 3);
+        else return;
+        redraw_me();
+        return;
+    }
+    if (stack[depth].sel < nrows && rows[stack[depth].sel].kind == R_LEVEL && b < 2) settings_key(b ? T48_KEY_RIGHT : T48_KEY_LEFT, 1);
+    else if (b == 0) settings_key(T48_KEY_OK, 1);
+    else if (b == 3) settings_key(T48_KEY_BACK, 1);
 }
 
 void settings_draw(void)
@@ -1963,11 +2059,17 @@ void settings_draw(void)
 
     ui_clear(C_BG);
     ui_header(title, 1, 0);
+    bar_for_row();
     if (stack[depth].page == P_THEME) { draw_themes(); return; }
     int w = list_w(), top = stack[depth].top;
     for (int i = top; i < nrows && i < top + VISIBLE; i++)
         draw_row(&rows[i], LIST_X, LIST_Y + (i - top) * ROW_H, w, i == stack[depth].sel);
-    if (nrows > VISIBLE) {
+    if (nrows > VISIBLE && SMALL) {
+        /* where the rows showing are in the whole list */
+        int x = SW - LIST_X - 4, hh = VISIBLE * ROW_H - 3, th = hh * VISIBLE / nrows;
+        t48_fill(&ui, x, LIST_Y, 4, hh, C_LINE);
+        t48_fill(&ui, x, LIST_Y + (hh - th) * top / (nrows - VISIBLE), 4, th, C_DIM);
+    } else if (nrows > VISIBLE) {
         int x = SW - LIST_X - SCROLL_W + 8, hh = VISIBLE * ROW_H / 2 - 6;
         ui_btn(x, LIST_Y, SCROLL_W - 8, hh, "^", top > 0 ? B_PLAIN : B_OFF);
         ui_btn(x, LIST_Y + hh + 6, SCROLL_W - 8, hh, "v", top + VISIBLE < nrows ? B_PLAIN : B_OFF);

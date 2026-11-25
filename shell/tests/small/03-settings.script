@@ -1,0 +1,219 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# A small screen with no touch: every Settings page, worked from the arrows and the soft
+# keys. The first soft key says what OK does to the row chosen; Back is the fourth.
+run sh ../tests/access/apply.sh access
+run sh -c "mkdir -p simdata/update simdata/fw && : > simdata/live && : > simdata/fw/in"
+wait 2500
+expect idle
+key soft4
+expect settings
+expectstate settings.page root
+expectstate settings.row Accounts
+expectstate soft1 Open
+expectstate soft4 Back
+shot shots/t46s-settings.png
+# further down the list than the screen holds
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Install
+shot shots/t46s-settings-end.png
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+# Accounts, and one account: Edit opens the keyboard
+key soft1
+expectstate settings.page accounts
+shot shots/t46s-settings-accounts.png
+key soft1
+expectstate settings.page sip
+shot shots/t46s-settings-sip.png
+key down
+key down
+expectstate soft1 Edit
+key soft1
+expectstate kbd open
+shot shots/t46s-settings-keyboard.png
+key soft3
+expectstate kbd closed
+key soft4
+key soft4
+expectstate settings.page root
+# Network
+key down
+key soft1
+expectstate settings.page network
+expectstate soft1 Change
+shot shots/t46s-settings-network.png
+key soft4
+# Date and time, and the zones
+key down
+key soft1
+expectstate settings.page time
+shot shots/t46s-settings-time.png
+key soft1
+expectstate settings.page timezone
+shot shots/t46s-settings-timezone.png
+key soft4
+key soft4
+# Sound: a level is minus on soft key 1 and plus on 2
+key down
+key soft1
+expectstate settings.page sound
+expectstate soft1 -
+expectstate soft2 +
+expectstate settings.value 13
+key soft2
+expectstate settings.value 14
+key soft1
+key soft1
+expectstate settings.value 12
+shot shots/t46s-settings-sound.png
+key soft4
+# Screen, and the themes
+key down
+key soft1
+expectstate settings.page screen
+shot shots/t46s-settings-screen.png
+key down
+key soft1
+expectstate settings.page theme
+shot shots/t46s-theme-switchboard.png
+key right
+key soft1
+expectstate theme directory
+shot shots/t46s-theme-directory.png
+key soft4
+key soft4
+key soft3
+key x
+key soft1
+shot shots/t46s-launcher-directory.png
+key x
+key soft4
+key down
+key down
+key down
+key down
+key soft1
+key down
+key soft1
+key right
+key soft1
+expectstate theme twotone
+shot shots/t46s-theme-twotone.png
+key soft4
+key soft4
+key soft4
+shot shots/t46s-home-twotone.png
+key soft4
+key down
+key down
+key down
+key down
+key soft1
+shot shots/t46s-settings-screen-twotone.png
+key down
+key soft1
+key left
+key left
+key soft1
+expectstate theme switchboard
+key soft4
+key soft4
+# Access: a switch says Turn on, and asks; the answers are soft keys 3 and 4
+key down
+key soft1
+expectstate settings.page access
+expectstate soft1 Turn_on
+shot shots/t46s-access.png
+key soft1
+expectstate overlay confirm
+expectstate soft3 Cancel
+shot shots/t46s-access-confirm.png
+key soft3
+expectstate overlay none
+key soft1
+key soft4
+expectstate overlay none
+expectstate cfg.access.ssh on
+wait 1500
+expectstate soft1 Turn_off
+# the password for a first key: Hide and Close are soft keys, so nothing here needs a finger
+key down
+key down
+key down
+key down
+expectstate settings.row Add_key
+key soft1
+expectstate overlay confirm
+key soft4
+expectstate overlay door
+expectstate soft3 Hide
+expectstate soft4 Close
+wait 1500
+shot shots/t46s-access-door.png
+key soft4
+wait 1500
+expectstate overlay none
+run grep -qx door=closed simdata/access/status
+key soft4
+expectstate settings.page root
+# Apps
+key down
+key soft1
+expectstate settings.page store
+waitstate store loaded 5000
+shot shots/t46s-apps.png
+key soft4
+# App settings
+key down
+key soft1
+expectstate settings.page appsettings
+key soft1
+shot shots/t46s-app-settings.png
+key soft4
+key soft4
+# Update
+key down
+key soft1
+expectstate settings.page update
+waitstate update.state idle 3000
+shot shots/t46s-update.png
+key soft4
+# About
+key down
+key soft1
+expectstate settings.page about
+shot shots/t46s-about.png
+key soft4
+# Install, on a phone started from a stick
+key down
+expectstate settings.row Install
+key soft1
+expectstate settings.page install
+shot shots/t46s-install.png
+key soft1
+expectstate overlay busy
+wait 700
+shot shots/t46s-install-busy.png
+waitstate overlay message 5000
+shot shots/t46s-install-message.png
+key soft4
+key soft4
+key soft4
+expect idle

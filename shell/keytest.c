@@ -21,9 +21,9 @@
 #define KEY_UNKNOWN_ 240       /* what the driver sends for a place its table does not hold */
 #define MAX_SEEN 45            /* what the grid has room for; the T46S has 42 keys */
 #define GRID_COLS 9
-#define GRID_Y 164
-#define CELL_W 86
-#define CELL_H 54
+#define GRID_Y (SMALL ? 100 : 164)
+#define CELL_W (SMALL ? 52 : 86)
+#define CELL_H (SMALL ? 28 : 54)
 #define GRID_X ((SW - GRID_COLS * CELL_W) / 2)
 
 static struct { int scan, mapped; } seen[MAX_SEEN];
@@ -103,27 +103,28 @@ int keytest_tick(long long now, int *scan, int *key)
 void keytest_draw(void)
 {
     char a[64], b[40];
-    const t48_font *f = &t48_font_big;
+    const t48_font *f = SMALL ? &t48_font_head : &t48_font_big, *cf = SMALL ? &t48_font_bold : f;
+    int y0 = SMALL ? 34 : 56, y1 = SMALL ? 64 : 106;
 
     ui_clear(C_BG);
     ui_header("Key test", 0, 0);
     if (total) {
         snprintf(a, sizeof a, "%d seen", total);
-        t48_text_right(&ui, SW - 100, (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, a);
+        t48_text_right(&ui, HEAD_NOTE_X, (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, a);
     }
     if (!any) {
-        t48_text_centre(&ui, SW / 2, 82, f, C_DIM, "Press a key");
+        t48_text_centre(&ui, SW / 2, SMALL ? 48 : 82, f, C_DIM, "Press a key");
     } else {
         /* the place, then the key and which way it went */
         if (last_scan) snprintf(a, sizeof a, "Row %d  Col %d  Code %d", (last_scan - 1) / 8, (last_scan - 1) % 8, last_scan);
         else snprintf(a, sizeof a, "No code");
-        t48_text_centre(&ui, SW / 2, 56, f, C_TEXT, a);
+        t48_text_centre(&ui, SW / 2, y0, f, C_TEXT, a);
         int known = mapped(last_key, last_value);
         snprintf(a, sizeof a, "%s", known ? key_name(last_key) : "Not mapped");
         snprintf(b, sizeof b, "%s", last_value > 0 ? "  Down" : last_value ? "" : "  Up");
         int x = (SW - t48_text_width(f, a) - t48_text_width(f, b)) / 2;
-        x = t48_text(&ui, x, 106, f, known ? C_TEXT : C_BAD, a);
-        t48_text(&ui, x, 106, f, last_value > 0 ? C_GOOD : C_DIM, b);
+        x = t48_text(&ui, x, y1, f, known ? C_TEXT : C_BAD, a);
+        t48_text(&ui, x, y1, f, last_value > 0 ? C_GOOD : C_DIM, b);
     }
     for (int i = 0; i < nseen; i++) {
         int x = GRID_X + (i % GRID_COLS) * CELL_W, y = GRID_Y + (i / GRID_COLS) * CELL_H;
@@ -132,9 +133,9 @@ void keytest_draw(void)
         ui_tile(x + 2, y + 2, CELL_W - 4, CELL_H - 4, now, &ink);
         if (seen[i].scan) snprintf(a, sizeof a, "%d", seen[i].scan);
         else snprintf(a, sizeof a, "-");
-        t48_text_centre(&ui, x + CELL_W / 2, y + (CELL_H - f->height) / 2, f, seen[i].scan && !seen[i].mapped ? C_BAD : ink.text, a);
+        t48_text_centre(&ui, x + CELL_W / 2, y + (CELL_H - cf->height) / 2, cf, seen[i].scan && !seen[i].mapped ? C_BAD : ink.text, a);
     }
-    t48_text_centre(&ui, SW / 2, 448, &t48_font_normal, C_DIM, "Hold any key 3 s to leave");
+    t48_text_centre(&ui, SW / 2, SMALL ? SH - 26 : 448, &t48_font_normal, C_DIM, "Hold any key 3 s to leave");
 }
 
 const char *keytest_state(const char *key)

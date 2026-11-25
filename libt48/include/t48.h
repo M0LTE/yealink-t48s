@@ -107,8 +107,17 @@ void t48_theme_use(const t48_theme *t, const t48_font_family *fonts);
 
 /* What the shell's own screens are made of, for an app that wants to look like
  * them. Each draws on s in the current theme. */
-#define T48_UI_HEAD_H 48                      /* the header */
+#define T48_UI_HEAD_H 48                      /* the header, and a tag, on a screen the size of the T48S's */
 #define T48_UI_TAG_H 34
+/* A small screen (the T46S's 480x272): the same parts, sized for it. The type
+ * is the same size, as the two screens have the same pixels to the inch; what
+ * shrinks is the room around it. t48_app_init() turns this on for a screen
+ * smaller than 800x480. */
+void t48_ui_small(int on);
+int t48_ui_is_small(void);
+int t48_ui_head_h(void);                      /* the header's height now: 48, or 30 */
+int t48_ui_tag_h(void);                       /* 34, or 26 */
+#define T48_UI_BAR_H 28                       /* the soft keys' labels */
 enum { T48_UI_PLAIN, T48_UI_FIRST, T48_UI_GO, T48_UI_STOP, T48_UI_LIT, T48_UI_OFF };   /* what a button is for */
 typedef struct t48_ui_ink { uint32_t text, dim, faint; } t48_ui_ink;
 
@@ -141,8 +150,13 @@ void t48_ui_dialog_ink(t48_ui_ink *ink);
 void t48_ui_dialog_btn(t48_surface *s, int x, int y, int w, int h, const char *label, int role);
 int t48_ui_notice(t48_surface *s, int x, int y, const char *text, int role);      /* a wide tag; the x after it */
 int t48_ui_notice_width(const char *text);
+void t48_ui_notice_tight(int on);             /* notices in the small face, until turned off */
 void t48_ui_tile(t48_surface *s, int x, int y, int w, int h, int selected, t48_ui_ink *ink);
 void t48_ui_icon(t48_surface *s, int x, int y, int size, const char *letter);     /* a square with a letter, or "+" */
+/* What the four soft keys do, along the bottom edge of s, each label above its
+ * key: label[i] NULL or "" for a key that does nothing, role[i] as for a button
+ * (role NULL: all plain). The labels "<x", "+" and "-" are drawn as marks. */
+void t48_ui_softkeys(t48_surface *s, const char *const label[4], const int role[4]);
 
 /* ---------- images ---------- */
 
@@ -218,6 +232,11 @@ typedef struct t48_kbd_look {
 } t48_kbd_look;
 extern t48_kbd_look t48_kbd_style;
 
+/* 1: there is no touch screen. The keyboard then draws no touch keys: it shows
+ * what each key of the keypad types, and the soft keys are the mode, rub out,
+ * Cancel and Done (pass T48_KEY_SOFT1 to 4 to t48_kbd_key). t48_app_init() sets it. */
+extern int t48_kbd_keys_only;
+
 /* max is the longest text allowed (up to 199) */
 void t48_kbd_open(t48_kbd *k, const char *title, const char *text, int max, int flags);
 void t48_kbd_draw(t48_kbd *k, t48_surface *s);          /* fills the whole surface */
@@ -254,8 +273,16 @@ typedef struct t48_event {
 /* Connect to the shell that started us and map the screen. 0, or -1 (not
  * started by a shell, or the shell speaks a protocol we cannot). */
 int t48_app_init(void);
-/* The screen. Draw into it, then say what changed. */
+/* The screen. Draw into it, then say what changed. It is 800x480, the T48S's,
+ * whatever the phone: on a smaller screen the shell fits the picture to it.
+ * An app whose manifest says "screen": "any" gets the screen's own size
+ * instead (480x272 on a T46S) and must lay itself out from w and h. */
 t48_surface *t48_screen(void);
+/* What there is to press with (level 6; a shell older than that: touch, no soft
+ * keys). A phone without touch has four soft keys under the screen, which come
+ * as T48_KEY_SOFT1 to 4: say what they do along the bottom edge (t48_ui_softkeys). */
+int t48_has_touch(void);
+int t48_has_softkeys(void);
 void t48_damage(int x, int y, int w, int h);
 void t48_damage_all(void);
 /* Wait up to timeout_ms (-1: for ever) for the next event. Returns 1 with an
