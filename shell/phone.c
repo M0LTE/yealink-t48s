@@ -14,6 +14,9 @@
  * before a transfer, do not disturb, the message lamp, and names from the
  * contact list (contacts.c). Issue #36 added several accounts: which one a
  * call goes out from, which one was called, and each one's registration.
+ * Issue #77 added each account's ringtone and call forwarding: Always, Busy
+ * and No answer, each to its own number, done by answering the caller with
+ * 302 (t48ctrl's redirect) so the caller's phone or server calls on.
  * Issue #77 added the dial plan: a number that is complete by the owner's
  * digit map (dialplan.c) is called without the Call key.
  */
@@ -42,6 +45,8 @@ enum reg { REG_NONE, REG_TRYING, REG_OK, REG_FAIL };
 #define HIST_ROWS (SMALL ? SROWS : 6)
 
 #define MAX_ACCTS 6
+#define MAX_REDIRECTS 3        /* a call out forwarded more often than this is given up: a loop */
+#define FWD_AFTER_DEF 20       /* seconds a call rings before No answer forwarding, unless the account says */
 
 /* one call, as baresip has it */
 struct call {
@@ -51,6 +56,8 @@ struct call {
     int outgoing, answered, ringing, rejected;
     int held, remote_held;
     long long t_established;
+    long long fwd_at;          /* ringing: when No answer forwarding sends it on, 0 never */
+    int redirects;             /* out: how many times the far end has forwarded it (3xx) */
     char dtmf[24];             /* tones sent in this call, as typed */
 };
 
@@ -72,6 +79,9 @@ static struct {
     int dial_acct;             /* the account the next call goes out from */
     long long auto_at;         /* the dialler calls the number by itself at this time; 0: it will not */
     int dnd;                   /* do not disturb */
+    int ringtone;              /* T48AC_RINGTONE_* of the call ringing now */
+    int drop_next_out;         /* baresip is about to follow a forward we gave up on: hang that call up */
+    char ring_file[300];       /* and its custom sound */
     int muted;
     int keypad;                /* in a call: the tone keypad is showing */
     int xfer;                  /* in a call: typing a number to transfer to */
@@ -102,6 +112,9 @@ struct acct {
     enum reg reg;
     char why[64];
     int msgs;                  /* new voice messages; -1: some, the server did not say how many */
+    int ringtone;              /* T48AC_RINGTONE_* */
+    char fwd_always[64], fwd_busy[64], fwd_noanswer[64];   /* where calls go, "" if that kind is off */
+    int fwd_after;             /* seconds of ringing before No answer */
 };
 static struct acct A[MAX_ACCTS];
 static int def_acct;
@@ -114,7 +127,17 @@ static void changed(void) { shell_phone_changed(); }
 
 int phone_messages(void);
 static void set_tone(int t) { P.tone = t; audioc_tone(t); }
-static void set_ring(int on) { P.ring = on; audioc_ring(on); }
+static void set_ring(int on) { P.ring = on; audioc_ring(on, P.ringtone, P.ring_file); }
+
+/* ring with this account's ringtone */
+static void ring_for(int acct)
+{
+    char f[300] = "";
+    P.ringtone = acct >= 0 && acct < MAX_ACCTS ? A[acct].ringtone : T48AC_RINGTONE_STANDARD;
+    if (P.ringtone == T48AC_RINGTONE_CUSTOM) ringtone_path(acct == 0 ? "sip" : (snprintf(f, sizeof f, "sip%d", acct + 1), f), P.ring_file, sizeof P.ring_file);
+    else P.ring_file[0] = 0;
+    set_ring(1);
+}
 
 static void set_route(int r)
 {
@@ -210,6 +233,21 @@ static void load_accounts(void)
         cfg_get(f, "label", a->label, sizeof a->label);
         cfg_get(f, "voicemail", a->voicemail, sizeof a->voicemail);
         a->used = a->user[0] && a->domain[0];
+        a->ringtone = ringtone_code(cfg_str(f, "ringtone", "standard"));
+        /* forwarding: each kind on, and with somewhere to go */
+        static const char *const kinds[] = {"always", "busy", "noanswer"};
+        char *to[] = {a->fwd_always, a->fwd_busy, a->fwd_noanswer};
+        for (int k = 0; k < 3; k++) {
+            char key[32];
+            snprintf(key, sizeof key, "forward_%s", kinds[k]);
+            if (strcmp(cfg_str(f, key, "off"), "on")) continue;
+            snprintf(key, sizeof key, "forward_%s_to", kinds[k]);
+            cfg_get(f, key, to[k], 64);
+            /* not a number or an address, or the account itself (a loop): off */
+            if (strpbrk(to[k], " <>\",;") || forward_to_self(to[k], a->user, a->domain)) to[k][0] = 0;
+        }
+        a->fwd_after = atoi(cfg_str(f, "forward_noanswer_after", "20"));
+        if (a->fwd_after < 1 || a->fwd_after > 300) a->fwd_after = FWD_AFTER_DEF;
         v[0] = 0;
         cfg_get(f, "enabled", v, sizeof v);
         a->on = a->used && strcmp(v, "off") && strcmp(v, "no") && strcmp(v, "false") && strcmp(v, "0");
@@ -504,6 +542,7 @@ static void start_dialler(int route)
 static void dial_out(const char *number, int acct)
 {
     if (acct < 0 || acct >= MAX_ACCTS || !A[acct].on) acct = def_acct;
+    P.drop_next_out = 0;    /* a call of our own from here on, not a forward given up */
     P.c.outgoing = 1;
     P.c.acct = acct;
     set_peer(&P.c, number, NULL);
@@ -539,8 +578,39 @@ static void answer(int route)
     changed();
 }
 
+/* send a ringing call on: 302 to the target (t48ctrl's redirect) */
+static void redirect(const char *id, const char *to)
+{
+    char arg[240];
+    snprintf(arg, sizeof arg, "%s %s", id, to);
+    sipc_cmd("redirect", arg);
+    logmsg("phone: call forwarded to %s", to);
+}
+
+/* the ringing call goes on to the target, and is over here */
+static void forward_cur(const char *to)
+{
+    char where[72];
+    redirect(P.c.id, to);
+    P.c.rejected = 1;      /* listed as turned away, not missed */
+    snprintf(where, sizeof where, "To %s", to);
+    finish("Forwarded", where, T48AC_TONE_OFF);
+}
+
+static void forward_waiting(const char *to)
+{
+    redirect(P.o.id, to);
+    P.o.rejected = 1;
+    log_call(&P.o);
+    memset(&P.o, 0, sizeof P.o);
+    P.o_st = O_NONE;
+    set_ring(0);
+}
+
 static void hang_up(void)
 {
+    /* turned away while ringing: Busy forwarding takes it */
+    if (P.st == PH_INCOMING && P.c.id[0] && A[P.c.acct].fwd_busy[0]) { forward_cur(A[P.c.acct].fwd_busy); return; }
     if (P.c.id[0]) sipc_cmd("hangup", P.c.id);
     else if (P.st == PH_OUTGOING && !P.o_st) sipc_cmd("hangup", NULL);
     else if (P.st == PH_OUTGOING) return;   /* baresip has not named the new call yet: a moment */
@@ -556,9 +626,10 @@ static void incoming(const char *id, const char *peer, const char *name, int acc
     uri_user(peer, who, sizeof who);
     set_peer(&P.c, who, name);
     P.c.acct = acct;
+    P.c.fwd_at = A[acct].fwd_noanswer[0] ? t48_now_ms() + A[acct].fwd_after * 1000LL : 0;
     P.number[0] = 0;
     set_tone(T48AC_TONE_OFF);
-    set_ring(1);
+    ring_for(acct);
     set_state(PH_INCOMING);
 }
 
@@ -581,7 +652,8 @@ static void call_closed(const char *why)
         return;
     }
     /* an outgoing call that never connected */
-    if (code == 486 || code == 600) finish("Busy", NULL, T48AC_TONE_BUSY);
+    if (P.c.redirects > MAX_REDIRECTS) finish("Call failed", "Forwarded too often", T48AC_TONE_ERROR);
+    else if (code == 486 || code == 600) finish("Busy", NULL, T48AC_TONE_BUSY);
     else if (code == 404 || code == 604) finish("Not found", why, T48AC_TONE_ERROR);
     else if (code == 408 || code == 480) finish("No answer", why, T48AC_TONE_BUSY);
     else if (code == 603) finish("Declined", NULL, T48AC_TONE_BUSY);
@@ -599,8 +671,9 @@ static void call_waiting(const char *id, const char *peer, const char *name, int
     uri_user(peer, who, sizeof who);
     set_peer(&P.o, who, name);
     P.o.acct = acct;
+    P.o.fwd_at = A[acct].fwd_noanswer[0] ? t48_now_ms() + A[acct].fwd_after * 1000LL : 0;
     P.o_st = O_WAITING;
-    set_ring(1);            /* with the sound on a route, the audio service makes this a quiet beep there */
+    ring_for(acct);         /* with the sound on a route, the audio service makes this a quiet beep there */
     backlight_wake("a call waiting");
     logmsg("phone: call waiting from %s", P.o.peer);
 }
@@ -627,6 +700,7 @@ static void decline_waiting(void)
 {
     char arg[200];
     if (P.o_st != O_WAITING) return;
+    if (A[P.o.acct].fwd_busy[0]) { forward_waiting(A[P.o.acct].fwd_busy); return; }
     snprintf(arg, sizeof arg, "%s scode=486", P.o.id);
     sipc_cmd("hangup", arg);
     P.o.rejected = 1;
@@ -797,16 +871,26 @@ void phone_sip_event(const char *type, const char *j, const char *e)
     if (!strcmp(type, "INCOMING")) {
         char arg[200], who[64];
         if (ours) return;
-        if (P.dnd) {
+        uri_user(peer, who, sizeof who);
+        if (A[acct].fwd_always[0]) {
+            /* Always: it never rings here, and the list says it came */
+            redirect(id, A[acct].fwd_always);
+            history_add('i', who, contacts_name(who) ? contacts_name(who) : name, 0, acct);
+            changed();
+        } else if (P.dnd) {
             /* do not disturb: the caller is told we are not available, and we note that they tried */
             snprintf(arg, sizeof arg, "%s scode=480 reason=Unavailable", id);
             sipc_cmd("hangup", arg);
-            uri_user(peer, who, sizeof who);
             history_add('m', who, contacts_name(who) ? contacts_name(who) : name, 0, acct);
             update_lamps();
             changed();
         } else if (free_now) {
             incoming(id, peer, name, acct);
+        } else if (A[acct].fwd_busy[0] && !sync) {
+            /* Busy: the owner is on a call */
+            redirect(id, A[acct].fwd_busy);
+            history_add('i', who, contacts_name(who) ? contacts_name(who) : name, 0, acct);
+            changed();
         } else if (P.st == PH_INCALL && !P.o_st && !P.xfer && !sync) {
             call_waiting(id, peer, name, acct);
             update_lamps();
@@ -815,11 +899,35 @@ void phone_sip_event(const char *type, const char *j, const char *e)
             /* no room for it: the caller hears busy, and we note that they tried */
             snprintf(arg, sizeof arg, "%s scode=486", id);
             sipc_cmd("hangup", arg);
-            uri_user(peer, who, sizeof who);
             history_add('m', who, contacts_name(who) ? contacts_name(who) : name, 0, acct);
             update_lamps();
             changed();
         }
+        return;
+    }
+    /* the far end forwarded our call (3xx): baresip calls the new place
+     * itself, and that call takes this one's place */
+    if (ours && out && !strcmp(type, "REDIRECT") && P.st == PH_OUTGOING) {
+        const char *to = strchr(param, ',');   /* "302,sip:1002@example.com" */
+        char who[96];
+        if (++P.c.redirects > MAX_REDIRECTS) {
+            /* round in a loop: the call that closes with it says so, and the next one is not made */
+            logmsg("phone: forwarded %d times, given up", P.c.redirects - 1);
+            P.drop_next_out = 1;
+            return;
+        }
+        uri_user(to ? to + 1 : "", who, sizeof who);
+        logmsg("phone: call forwarded by the far end to %s", who);
+        P.c.id[0] = 0;
+        if (who[0]) set_peer(&P.c, who, NULL);
+        snprintf(P.note, sizeof P.note, "Forwarded");
+        changed();
+        return;
+    }
+    /* the call baresip makes for a forward we gave up on */
+    if (!ours && out && P.drop_next_out && strcmp(type, "CLOSED")) {
+        P.drop_next_out = 0;
+        sipc_cmd("hangup", id);
         return;
     }
     /* our own outgoing call gets its id */
@@ -922,7 +1030,7 @@ void phone_audio_link(int up)
             audioc_route(P.route);
             if (P.muted) audioc_mute(1);
             audioc_tone(P.tone);
-            audioc_ring(P.ring);
+            audioc_ring(P.ring, P.ringtone, P.ring_file);
         }
         P.audio_seen = 1;
         update_lamps();
@@ -1019,6 +1127,13 @@ void phone_toggle_dnd(void)
 }
 
 int phone_dnd(void) { return P.dnd; }
+
+int phone_forwarding(void)
+{
+    for (int i = 0; i < MAX_ACCTS; i++)
+        if (A[i].on && A[i].fwd_always[0]) return 1;
+    return 0;
+}
 
 int phone_messages(void)
 {
@@ -1313,6 +1428,8 @@ int phone_timeout(long long now)
     if (P.vol_until && (t < 0 || P.vol_until - now < t)) t = P.vol_until - now;
     if (!P.settled && (t < 0 || P.started + SETTLE_MS - now < t)) t = P.started + SETTLE_MS - now;
     if (P.st == PH_INCALL && (t < 0 || t > 250)) t = 250;   /* the call timer */
+    if (P.st == PH_INCOMING && P.c.fwd_at && (t < 0 || P.c.fwd_at - now < t)) t = P.c.fwd_at - now;
+    if (P.o_st == O_WAITING && P.o.fwd_at && (t < 0 || P.o.fwd_at - now < t)) t = P.o.fwd_at - now;
     if (P.auto_at) {
         /* the dialler counts down: the next whole second, or the call */
         long long left = P.auto_at - now, next = left % 1000 ? left % 1000 : 1000;
@@ -1328,6 +1445,9 @@ void phone_tick(long long now)
     static long long shown_secs = -1;
 
     if (P.st == PH_ENDED && now >= P.t_state + P.ended_ms) go_idle();
+    /* No answer forwarding */
+    if (P.st == PH_INCOMING && P.c.fwd_at && now >= P.c.fwd_at && P.c.id[0]) forward_cur(A[P.c.acct].fwd_noanswer);
+    if (P.o_st == O_WAITING && P.o.fwd_at && now >= P.o.fwd_at) { forward_waiting(A[P.o.acct].fwd_noanswer); update_lamps(); changed(); }
     if (P.vol_until && now >= P.vol_until) { P.vol_until = 0; changed(); }
     if (!P.settled && now >= P.started + SETTLE_MS) {
         P.settled = 1;
@@ -2146,6 +2266,7 @@ const char *phone_state(const char *key)
     if (!strcmp(key, "consult")) return P.consult ? "1" : "0";
     if (!strcmp(key, "parked")) return P.parked ? "1" : "0";
     if (!strcmp(key, "dnd")) return P.dnd ? "on" : "off";
+    if (!strcmp(key, "fwd")) return phone_forwarding() ? "on" : "off";
     if (!strcmp(key, "messages")) { snprintf(b, sizeof b, "%d", phone_messages()); return b; }
     /* accounts: "reg" is the usual one's, "reg.2" the second's; "acct" the one in use, 1 to 6 */
     if (!strcmp(key, "reg") || !strncmp(key, "reg.", 4)) {
@@ -2182,6 +2303,7 @@ const char *phone_state(const char *key)
         if (!strcmp(key, "mute")) v = a->mute;
         else if (!strcmp(key, "tone")) v = a->tone;
         else if (!strcmp(key, "ring")) v = a->ring;
+        else if (!strcmp(key, "ringtone")) v = a->ringtone;
         else if (!strcmp(key, "call")) v = a->call;
         else if (!strcmp(key, "app")) v = a->app;
         else if (!strcmp(key, "app.sound")) v = a->app_sound;

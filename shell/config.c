@@ -294,3 +294,38 @@ int config_main(int argc, char **argv)
         "Most changes take effect after: t48-apply FILE\n", opt.config);
     return 2;
 }
+
+/* ---------- ringtones (issue #77) ---------- */
+
+void ringtone_path(const char *acct_file, char *out, size_t n)
+{
+    snprintf(out, n, "%s/ringtones/%s.s16", opt.state, acct_file);
+}
+
+/* a forwarding target that is the account itself: its user, user@server,
+ * or sip:user@server. A call sent there would come straight back. */
+int forward_to_self(const char *target, const char *user, const char *domain)
+{
+    const char *t = target;
+    size_t ul = strlen(user), dl = strlen(domain);
+    if (!t[0] || !ul) return 0;
+    if (!strncasecmp(t, "sip:", 4)) t += 4;
+    else if (!strncasecmp(t, "sips:", 5)) t += 5;
+    if (strncmp(t, user, ul)) return 0;
+    t += ul;
+    if (!*t) return 1;
+    if (*t != '@') return 0;
+    t++;
+    /* the server as the account has it, with or without its port; parameters after it do not matter */
+    if (!dl || strncasecmp(t, domain, dl)) return 0;
+    t += dl;
+    return !*t || *t == ';' || *t == '>';
+}
+
+int ringtone_code(const char *name)
+{
+    static const char *const names[] = {"standard", "long", "chime", "pulse", "custom"};
+    for (int i = 0; i < T48AC_RINGTONE_COUNT; i++)
+        if (!strcmp(name, names[i])) return i;
+    return T48AC_RINGTONE_STANDARD;
+}

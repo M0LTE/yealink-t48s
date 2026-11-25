@@ -18,6 +18,8 @@ key down
 key down
 key down
 key down
+key down
+key down
 expectstate settings.row Advanced
 expectstate soft1 Open
 key soft1

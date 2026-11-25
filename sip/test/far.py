@@ -8,6 +8,7 @@ simulator script's `run` lines.
   far.py SOCKET waitcall STATE [SECS]    wait until it has a call in STATE (incoming, outgoing,
                                          ringing, established) or, for STATE none, no call at all
   far.py SOCKET accept                   wait for an incoming call, then answer it
+  far.py SOCKET forward TARGET           wait for an incoming call, then send it on with 302 (t48ctrl's redirect)
   far.py SOCKET log FILE                 write every event to FILE, one JSON object a line, until killed
   far.py waitlog FILE REGEX [SECS]       wait until a line of FILE matches
 """
@@ -106,6 +107,14 @@ def main():
         if not waitcall(c, "incoming", 5):
             return 1
         return 0 if c.cmd("accept")["ok"] else 1
+    if a[1] == "forward":
+        if not waitcall(c, "incoming", 5):
+            return 1
+        ids = [e["id"] for e in c.events if e.get("sync") and e.get("type") == "CALL_INCOMING"]
+        r = c.cmd("redirect", "%s %s" % (ids[-1], a[2]))
+        if not r["ok"]:
+            print(f"far.py: redirect: {r['data'].strip()}", file=sys.stderr)
+        return 0 if r["ok"] else 1
     if a[1] == "log":
         with open(a[2], "a", buffering=1) as f:
             while True:

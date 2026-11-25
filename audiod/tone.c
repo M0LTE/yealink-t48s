@@ -49,15 +49,31 @@ static const struct tone_seg seg_waiting[]  = { { 400, 0, 100, A1, 0, 0 }, { 0, 
  * ringer volume is worked out from (dsp_alert_q15). */
 static const struct tone_seg seg_ring[]     = { { 1000, 1250, 400, 16000, 25, 20 }, { 0, 0, 200, 0, 0, 0 },
 						{ 1000, 1250, 400, 16000, 25, 20 }, { 0, 0, 2000, 0, 0, 0 } };
+/* The same notes in one long ring, as much of Europe has it */
+static const struct tone_seg seg_long[]     = { { 1000, 1250, 1000, 16000, 25, 20 }, { 0, 0, 2000, 0, 0, 0 } };
+/* Two falling notes, a sixth apart, each dying away like a struck bell
+ * would not quite: a slow fade in and out on a plain sine */
+static const struct tone_seg seg_chime[]    = { { 880, 0, 450, 16000, 0, 60 }, { 0, 0, 50, 0, 0, 0 },
+						{ 659, 0, 700, 16000, 0, 120 }, { 0, 0, 2300, 0, 0, 0 } };
+/* Three short beeps and a pause */
+static const struct tone_seg seg_pulse[]    = { { 1400, 0, 120, 16000, 0, 15 }, { 0, 0, 80, 0, 0, 0 },
+						{ 1400, 0, 120, 16000, 0, 15 }, { 0, 0, 80, 0, 0, 0 },
+						{ 1400, 0, 120, 16000, 0, 15 }, { 0, 0, 2000, 0, 0, 0 } };
 static const struct tone_seg seg_click[]    = { { 2000, 0, 8, 4000, 0, 0 } };
 
-const struct tone_def tone_dial     = { "dial", seg_dial, 1, 1 };
-const struct tone_def tone_ringback = { "ringback", seg_ringback, 4, 1 };
-const struct tone_def tone_busy     = { "busy", seg_busy, 2, 1 };
-const struct tone_def tone_error    = { "error", seg_error, 1, 1 };
-const struct tone_def tone_waiting  = { "waiting", seg_waiting, 2, 1 };
-const struct tone_def tone_ring     = { "ring", seg_ring, 4, 1 };
-const struct tone_def tone_click    = { "click", seg_click, 1, 0 };
+const struct tone_def tone_dial     = { "dial", seg_dial, 1, 1, 0, 0 };
+const struct tone_def tone_ringback = { "ringback", seg_ringback, 4, 1, 0, 0 };
+const struct tone_def tone_busy     = { "busy", seg_busy, 2, 1, 0, 0 };
+const struct tone_def tone_error    = { "error", seg_error, 1, 1, 0, 0 };
+const struct tone_def tone_waiting  = { "waiting", seg_waiting, 2, 1, 0, 0 };
+const struct tone_def tone_ring     = { "ring", seg_ring, 4, 1, 0, 0 };
+const struct tone_def tone_click    = { "click", seg_click, 1, 0, 0, 0 };
+static const struct tone_def tone_long  = { "long", seg_long, 2, 1, 0, 0 };
+static const struct tone_def tone_chime = { "chime", seg_chime, 4, 1, 0, 0 };
+static const struct tone_def tone_pulse = { "pulse", seg_pulse, 6, 1, 0, 0 };
+
+const struct tone_def *const tone_ringtones[] = { &tone_ring, &tone_long, &tone_chime, &tone_pulse };
+const int tone_nringtones = 4;
 
 #define DTMF(lo, hi) { { lo, hi, 80, A2, 0, 0 } }
 static const struct tone_seg seg_dtmf[12][1] = {
@@ -68,10 +84,10 @@ static const struct tone_seg seg_dtmf[12][1] = {
 	DTMF(941, 1209), DTMF(941, 1477),			/* * # */
 };
 static const struct tone_def def_dtmf[12] = {
-	{ "0", seg_dtmf[0], 1, 0 }, { "1", seg_dtmf[1], 1, 0 }, { "2", seg_dtmf[2], 1, 0 },
-	{ "3", seg_dtmf[3], 1, 0 }, { "4", seg_dtmf[4], 1, 0 }, { "5", seg_dtmf[5], 1, 0 },
-	{ "6", seg_dtmf[6], 1, 0 }, { "7", seg_dtmf[7], 1, 0 }, { "8", seg_dtmf[8], 1, 0 },
-	{ "9", seg_dtmf[9], 1, 0 }, { "*", seg_dtmf[10], 1, 0 }, { "#", seg_dtmf[11], 1, 0 },
+	{ "0", seg_dtmf[0], 1, 0, 0, 0 }, { "1", seg_dtmf[1], 1, 0, 0, 0 }, { "2", seg_dtmf[2], 1, 0, 0, 0 },
+	{ "3", seg_dtmf[3], 1, 0, 0, 0 }, { "4", seg_dtmf[4], 1, 0, 0, 0 }, { "5", seg_dtmf[5], 1, 0, 0, 0 },
+	{ "6", seg_dtmf[6], 1, 0, 0, 0 }, { "7", seg_dtmf[7], 1, 0, 0, 0 }, { "8", seg_dtmf[8], 1, 0, 0, 0 },
+	{ "9", seg_dtmf[9], 1, 0, 0, 0 }, { "*", seg_dtmf[10], 1, 0, 0, 0 }, { "#", seg_dtmf[11], 1, 0, 0, 0 },
 };
 
 const struct tone_def *tone_for_key(int key)
@@ -103,6 +119,43 @@ static inline int32_t smooth(int32_t x)
 	return (Q15_ONE - sine_at(((uint32_t)x << 16) + 0x40000000u)) >> 1;
 }
 
+#define PCM_FADE (20 * (SRATE / 1000))
+
+/* A recorded sound: the samples, then a gap, round again; faded in at the
+ * start and out when stopped, over 20 ms */
+static int pcm_render(struct tone_gen *g, int16_t *out, int n)
+{
+	const struct tone_def *d = g->def;
+	uint32_t period = d->pcm_len + PCM_GAP_MS * (SRATE / 1000);
+	int i;
+
+	for (i = 0; i < n; i++) {
+		int32_t v = 0;
+
+		if (!g->def) {
+			out[i] = 0;
+			continue;
+		}
+		if (g->stopping) {
+			g->env -= Q15_ONE / PCM_FADE;
+			if (g->env <= 0) {
+				g->env = 0;
+				g->def = 0;
+			}
+		} else if (g->env < Q15_ONE) {
+			g->env += Q15_ONE / PCM_FADE;
+			if (g->env > Q15_ONE)
+				g->env = Q15_ONE;
+		}
+		if (g->pcm_pos < d->pcm_len)
+			v = (d->pcm[g->pcm_pos] * smooth(g->env)) >> 15;
+		out[i] = (int16_t)v;
+		if (++g->pcm_pos >= period)
+			g->pcm_pos = 0;
+	}
+	return 1;
+}
+
 static uint32_t fade_len(const struct tone_seg *s)
 {
 	return (uint32_t)(s->fade_ms ? s->fade_ms : FADE_MS) * (SRATE / 1000);
@@ -125,6 +178,10 @@ static void enter_seg(struct tone_gen *g, unsigned idx)
 void tone_start(struct tone_gen *g, const struct tone_def *def)
 {
 	memset(g, 0, sizeof(*g));
+	if (def && def->pcm && def->pcm_len) {
+		g->def = def;
+		return;
+	}
 	if (!def || !def->nseg)
 		return;
 	g->def = def;
@@ -145,6 +202,8 @@ int tone_render(struct tone_gen *g, int16_t *out, int n)
 		memset(out, 0, (size_t)n * sizeof(*out));
 		return 0;
 	}
+	if (g->def->pcm)
+		return pcm_render(g, out, n);
 	for (i = 0; i < n; i++) {
 		const struct tone_seg *s;
 		int32_t v, target;

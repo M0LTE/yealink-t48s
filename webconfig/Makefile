@@ -17,7 +17,7 @@ CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffuncti
 LIB ?= ../libt48/$(O)/libt48.a
 # the settings store, the reader of app manifests and the dial plan's checker are the shell's own files:
 # one implementation of each
-SRC = http.c pages.c $(O)/assets.c $(SHELL_DIR)/config.c $(SHELL_DIR)/manifest.c $(SHELL_DIR)/dialplan.c
+SRC = http.c pages.c wav.c $(O)/assets.c $(SHELL_DIR)/config.c $(SHELL_DIR)/manifest.c $(SHELL_DIR)/dialplan.c
 T48_VERSION ?= $(shell git describe --always --dirty 2>/dev/null)
 ifneq ($(T48_VERSION),)
 CFLAGS += -DT48_VERSION='"$(T48_VERSION)"'
@@ -40,7 +40,7 @@ $(O)/assets.c: style.css t48.js $(FONTS) mkassets.sh
 
 $(O)/t48-web: $(SRC) web.h $(SHELL_DIR)/shell.h $(SHELL_DIR)/zones.h $(LIB)
 	@mkdir -p $(O)
-	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@ $(SRC) $(LIB)
+	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@ $(SRC) $(LIB) -lm
 
 # the shell's simulator and t48-config, for the tests
 shell: FORCE

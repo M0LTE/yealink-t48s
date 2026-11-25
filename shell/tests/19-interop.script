@@ -8,7 +8,9 @@ key ok
 expectstate settings.page accounts
 key ok
 expectstate settings.page sip
-# Advanced is after Enabled
+# Advanced is after Ringtone, Call forwarding and Enabled
+key down
+key down
 key down
 key down
 key down

@@ -64,6 +64,7 @@ static int hw_running, hw_row = -1, linger, verbose;
 static int64_t hw_retry_at;
 static struct client call = { .fd = -1 };
 static struct appsnd app;
+static int16_t *custom;		/* the custom ringtone's samples (malloc) */
 static int app_told, app_owner = -1, app_heard;
 
 /* --record: a test aid for measuring and tuning on the phone. While a call
@@ -243,6 +244,35 @@ static void fill_state(struct t48ac_state *s)
 	s->vol_app = (unsigned char)eng.vol[T48AC_VOL_APP];
 	s->app = (unsigned char)app_told;
 	s->app_sound = app_heard > 0;
+	s->ringtone = (unsigned char)engine_ringtone(&eng);
+}
+
+/* A custom ringtone from a file the shell opened: raw 16 kHz mono s16le, up
+ * to ten seconds. Read once here, when the ring starts; the file is small. */
+static void custom_load(int fd)
+{
+	struct stat st;
+	int16_t *pcm;
+	ssize_t n;
+
+	if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode) || st.st_size < 2) {
+		say("ringtone: the custom sound is not a file of samples");
+		close(fd);
+		return;
+	}
+	if (st.st_size > (off_t)T48AC_CUSTOM_MAX * 2)
+		st.st_size = (off_t)T48AC_CUSTOM_MAX * 2;
+	pcm = malloc((size_t)st.st_size);
+	n = pcm ? pread(fd, pcm, (size_t)st.st_size, 0) : -1;
+	close(fd);
+	if (n < 2) {
+		free(pcm);
+		say("ringtone: the custom sound could not be read");
+		return;
+	}
+	engine_set_custom(&eng, pcm, (uint32_t)(n / 2));
+	free(custom);
+	custom = pcm;
 }
 
 /* An app's sound, as the log wants it when the app goes */
@@ -345,6 +375,15 @@ static void ctl_read(int i)
 			engine_set_tone(&eng, p[0]);
 			break;
 		case T48AC_RING:
+			/* a descriptor is taken only by the message that says it carries one */
+			if (len >= 3 && p[2] && p[1] == T48AC_RINGTONE_CUSTOM && ctl[i].passed >= 0) {
+				int fd = ctl[i].passed;
+
+				ctl[i].passed = -1;
+				custom_load(fd);
+			}
+			if (p[0])
+				engine_set_ringtone(&eng, len >= 2 ? p[1] : T48AC_RINGTONE_STANDARD);
 			engine_set_ring(&eng, p[0]);
 			break;
 		case T48AC_KEY:
@@ -360,16 +399,20 @@ static void ctl_read(int i)
 					app_drop("the app has gone");
 				break;
 			}
-			if (ctl[i].passed >= 0) {
+			if (len >= 2 && p[1]) {
+				/* a new app's ring: checked before the one playing is let go */
+				struct appsnd fresh;
 				int fd = ctl[i].passed;
 
 				ctl[i].passed = -1;
-				app_drop("replaced by a new app");
-				if (appsnd_open(&app, fd) < 0) {
+				memset(&fresh, 0, sizeof(fresh));
+				if (fd < 0 || appsnd_open(&fresh, fd) < 0) {
 					say("app sound: the ring is not a sealed memfd of %d bytes: refused", T48AC_APP_BYTES);
 					ctl_error(i, type, T48AC_ERR_RING);
 					break;
 				}
+				app_drop("replaced by a new app");
+				app = fresh;
 				app_owner = i;
 				say("app sound open");
 			}

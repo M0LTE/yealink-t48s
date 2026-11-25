@@ -140,6 +140,11 @@ void ui_header_idle(void)
         ui_lamp(nx + (SMALL ? 10 : 24), HEAD_H / 2 - 6, T->head != T->accent ? T->accent : T->on_head);
         nx = t48_text(&ui, nx + (SMALL ? 32 : 46), y, &t48_font_normal, T->on_head, "DND");
     }
+    if (phone_forwarding()) {
+        /* an account forwards every call (issue #77): the same kind of state */
+        ui_lamp(nx + (SMALL ? 10 : 24), HEAD_H / 2 - 6, T->head != T->accent ? T->accent : T->on_head);
+        nx = t48_text(&ui, nx + (SMALL ? 32 : 46), y, &t48_font_normal, T->on_head, "FWD");
+    }
     phone_account_text(acc, sizeof acc, &acc_colour);
     int w = t48_text_width(&t48_font_normal, acc);
     if (SMALL && w > SW - m - 22 - nx - 16) {

@@ -22,3 +22,12 @@ domain=sip.example.com
 #                         96 to 120 s over TCP and TLS)
 # session_timer=1800      session timer (RFC 4028) every this many seconds (90 or more); off by default
 # 100rel=off              reliable provisional responses (PRACK): off, on or required
+# ringtone=chime          standard, long, chime, pulse, or custom (the web setup page)
+# forward_always=on       call forwarding, each kind on or off with its own number
+# forward_always_to=1003
+# forward_busy=off
+# forward_busy_to=
+# forward_noanswer=off
+# forward_noanswer_to=
+# forward_noanswer_after=20
+# Block direct calls is for the whole phone: block_direct=off in /data/config/phone

@@ -90,12 +90,12 @@ For the shell to adopt: [`audiod/include/t48_audio_ctl.h`](../audiod/include/t48
 | VOLUME | `u8 which` (1 handset, 2 speaker, 3 headset, 4 ringer, 5 apps), `u8 level` 0 to 15 | 0 is silent. Handset, speaker and headset: 3 dB a step, 15 is full level. Ringer and apps: 2 dB a step, 15 is the [loudspeaker's limit](#the-loudspeakers-limit) |
 | MUTE | `u8 on` | microphone only; cleared by ROUTE none |
 | TONE | `u8`: 0 off, 1 dial, 2 ringback, 3 busy, 4 error, 5 call waiting | plays until replaced or stopped |
-| RING | `u8 on` | an incoming call is alerting |
+| RING | `u8 on`, then optional `u8 ringtone` (0 standard, 1 long, 2 chime, 3 pulse, 4 custom) and `u8 file` (1: the custom sound's file comes as a descriptor beside this message) | an incoming call is alerting. [Ringtones](#ringtones) |
 | KEY | `u8 character` | DTMF sound for `0-9 * #`, a click for anything else; for the owner's ear only, baresip sends the real DTMF |
 | GET | none | answered with STATE |
-| APP | `u8`: 0 gone, 1 off the screen, 2 in front; with a new app, its ring as a descriptor beside the message | [An app's sound](#an-apps-sound) |
+| APP | `u8`: 0 gone, 1 off the screen, 2 in front; then optional `u8 ring`: 1 when a new app's ring comes as a descriptor beside this message. A ring that fails the checks is refused before the one playing is let go | [An app's sound](#an-apps-sound) |
 
-The service sends STATE (route, mute, tone, ring, whether baresip's call stream is up, the volumes, what the hardware can do, where the app is and whether its sound is playing) in answer to HELLO and GET and whenever any of it changes, and ERROR for a message it refuses.
+The service sends STATE (route, mute, tone, ring, the ringtone, whether baresip's call stream is up, the volumes, what the hardware can do, where the app is and whether its sound is playing) in answer to HELLO and GET and whenever any of it changes, and ERROR for a message it refuses.
 
 What the shell does with it:
 
@@ -107,6 +107,21 @@ What the shell does with it:
 - **An app with the `audio-out` permission starts:** APP 2 with its ring. APP 1 the moment it is paused, 2 when it is back, 0 when it has gone. Sent again, with the ring, if the service restarts.
 
 Tones are the UK plan (dial 350+440 Hz; ringback 400+450 Hz in the double-ring rhythm; busy 400 Hz, 0.375 s on and off; error 400 Hz steady). The ringer is two notes (1000 and 1250 Hz) taking turns 20 times a second in the same double-ring rhythm; each note is a sine that fades into the other over 6 ms, and each burst fades in and out over 20 ms. Every tone starts and stops on a half-cosine fade. Another country is another small table in `tone.c`.
+
+## Ringtones
+
+Issue [#77](https://github.com/M0LTE/yealink-t48s/issues/77). The shell sends the ringtone of the account being called with RING. Built in, in [`tone.c`](../audiod/tone.c), at the ringer's reference level (16000 peak, so the ringer volume steps mean the same for each):
+
+| Ringtone | Made of |
+|---|---|
+| Standard | 1000 and 1250 Hz in turn, 20 times a second; 0.4 s, 0.2 s gap, 0.4 s, 2 s gap |
+| Long | the same notes, 1 s on, 2 s off |
+| Chime | 880 Hz for 0.45 s, then 659 Hz for 0.7 s, slow fades (60 and 120 ms), 2.3 s gap |
+| Pulse | three 120 ms beeps of 1400 Hz, 80 ms apart, 2 s gap |
+
+**Custom:** 16 kHz mono s16le samples, at most 10 s, from a file the shell opens and passes with RING. The service reads it once, when the ring starts, and keeps it until another comes; RING custom without a file plays the one it has (or Standard if none). It plays with a 20 ms fade in and out and a second of silence between rounds. The web setup page has already levelled and faded it ([phone.md](phone.md#ringtones)). Every ringtone, the custom one too, goes through the loudspeaker's limiter; with a route set, ringing is the call waiting beep whatever the ringtone.
+
+Tested in `test_engine` (each ringtone's pitch, level, limit and smoothness; the custom sound's level, gap and loop; the beep on a route) and the socket test (a custom file sent with RING, played on the limit, used again without a file).
 
 ## An app's sound
 
