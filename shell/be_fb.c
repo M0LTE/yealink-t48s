@@ -188,9 +188,12 @@ static int fb_init(void)
     if (dev[DEV_TOUCH] < 0) logmsg("no touchscreen found");
     /* The shell draws at the screen's own size. T48_FIT in the environment has it draw the T48S's
      * 800x480 and fit that to the screen, as it did before it had a layout for small screens: for
-     * comparing. A phone without a touch screen is one with soft keys (the T46S, T42S and T41S). */
-    if (getenv("T48_FIT")) shell_screen_is(APP_W, APP_H, dev[DEV_TOUCH] >= 0, dev[DEV_TOUCH] < 0);
-    else shell_screen_is(pw, ph, dev[DEV_TOUCH] >= 0, dev[DEV_TOUCH] < 0);
+     * comparing. Soft keys: the keypad says it has them (KEY_MACRO1), as on the T46S. */
+    unsigned char kb[KEY_MAX / 8 + 1] = {0};
+    int soft = dev[DEV_KEYS] >= 0 && ioctl(dev[DEV_KEYS], EVIOCGBIT(EV_KEY, sizeof kb), kb) >= 0 &&
+               (kb[KEY_MACRO1 / 8] >> (KEY_MACRO1 % 8) & 1);
+    if (getenv("T48_FIT")) shell_screen_is(APP_W, APP_H, dev[DEV_TOUCH] >= 0, soft);
+    else shell_screen_is(pw, ph, dev[DEV_TOUCH] >= 0, soft);
 
     FILE *pc = fopen("/etc/pointercal", "r");
     if (pc) {
