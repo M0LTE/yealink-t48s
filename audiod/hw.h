@@ -37,11 +37,17 @@ struct hw {
 	int play_delay;
 	/* counters for the log */
 	unsigned long cap_xruns, play_xruns, play_dropped;
+	/* samples queued in the playback buffer just after a write, when
+	 * measured: how many readings, their sum, least and most */
+	unsigned long depth_n, depth_sum, depth_min, depth_max;
 };
 
 /* room_ms, room_percent: 0, or an echo for tests: what is played returns to
  * the microphone that much later at that fraction of its level */
 struct hw *hw_null_new(const char *mic_wav, const char *spk_wav, int room_ms, int room_percent);
-struct hw *hw_alsa_new(int card);
+/* silent: a test aid for a quiet house. Everything runs as usual, but the
+ * amplifier, every output and the sidetone are held off, whatever a route
+ * says. measure: read the playback buffer's depth at each write, for the log. */
+struct hw *hw_alsa_new(int card, int silent, int measure);
 
 #endif

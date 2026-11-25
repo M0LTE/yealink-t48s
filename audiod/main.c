@@ -5,6 +5,7 @@
  *
  *   t48-audiod [--backend null|alsa] [--mic IN.wav] [--spk OUT.wav] [--room MS,PERCENT]
  *              [--run-dir DIR] [--routes FILE] [--card N] [--print-routes] [-v]
+ *              [--silent]
  *
  *   --backend    null (the default: no hardware, a timer for a clock) or alsa
  *                (the phone). --mic or --spk turn null into the file backend.
@@ -13,6 +14,8 @@
  *   --routes     a routes file to lay over the built-in table
  *   --room MS,PERCENT   file backend, for tests: what is played comes back
  *                into the microphone MS later at PERCENT of its level
+ *   --silent     alsa, for tests in a quiet house: everything runs, but the
+ *                amplifier, the outputs and the sidetone are never switched on
  *
  * One thread, one poll loop. While nothing is wanted (no route, no call
  * stream, no tone) the hardware is closed and the process sleeps in poll.
@@ -251,6 +254,9 @@ static void app_drop(const char *why)
 	    "%lu resets; hardware underruns %lu, dropped %lu",
 	    why, app.samples, app.frames, app.peak, app.dry, app.resets,
 	    hw->play_xruns, hw->play_dropped);
+	if (hw->depth_n)
+		say("playback buffer after each write: %lu samples on average, %lu to %lu (%lu writes)",
+		    hw->depth_sum / hw->depth_n, hw->depth_min, hw->depth_max, hw->depth_n);
 	appsnd_close(&app);
 	app_told = T48AC_APP_GONE;
 	app_owner = -1;
@@ -492,13 +498,14 @@ int main(int argc, char **argv)
 {
 	const char *backend = "null", *mic = 0, *spk = 0, *run_dir = "/run/t48-audiod", *routes_file = 0;
 	const char *rec_file = 0;
-	int card = 0, print_routes = 0, room_ms = 0, room_percent = 0, i, lctl, lcall, sfd;
+	int card = 0, print_routes = 0, room_ms = 0, room_percent = 0, silent = 0, i, lctl, lcall, sfd;
 	sigset_t sigs;
 
 	for (i = 1; i < argc; i++) {
 		const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : 0;
 		if (!strcmp(a, "-v")) verbose = 1;
 		else if (!strcmp(a, "--print-routes")) print_routes = 1;
+		else if (!strcmp(a, "--silent")) silent = 1;
 		else if (!strcmp(a, "--backend") && v) backend = v, i++;
 		else if (!strcmp(a, "--mic") && v) mic = v, i++;
 		else if (!strcmp(a, "--spk") && v) spk = v, i++;
@@ -510,7 +517,7 @@ int main(int argc, char **argv)
 		else {
 			fprintf(stderr, "usage: t48-audiod [--backend null|alsa] [--mic IN.wav] [--spk OUT.wav] [--room MS,PERCENT]\n"
 				"                  [--run-dir DIR] [--routes FILE] [--card N] [--print-routes] [-v]\n"
-				"                  [--record CALL.wav]\n");
+				"                  [--record CALL.wav] [--silent]\n");
 			return 2;
 		}
 	}
@@ -531,7 +538,9 @@ int main(int argc, char **argv)
 		if (syscall(SYS_sched_setscheduler, 0, SCHED_FIFO, &prio) < 0 ||
 		    mlockall(MCL_CURRENT | MCL_FUTURE) < 0)
 			say("no real-time priority (%s): sound may break up when the phone is busy", strerror(errno));
-		hw = hw_alsa_new(card);
+		hw = hw_alsa_new(card, silent, verbose);
+		if (silent)
+			say("SILENT: the amplifier and every output stay off (test aid)");
 	}
 	else if (!strcmp(backend, "null"))
 		hw = hw_null_new(mic, spk, room_ms, room_percent);

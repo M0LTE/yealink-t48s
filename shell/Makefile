@@ -64,7 +64,7 @@ check: all $(O)/apps $(O)/extra $(O)/feeds
 	cd $(O) && for t in ../tests/*.script; do echo "== $$t"; rm -rf simdata; \
 		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(SIM) --script $$t 2>sim.log || { cat sim.log; exit 1; }; cat sim.log; \
 		if grep -q 7355719 sim.log; then echo "the password typed in 04-settings is in the log"; exit 1; fi; done
-	sh tests/sound-test.sh $(O)
+	sh tests/sound/sound-test.sh $(O)
 	@echo "all simulator tests passed"
 
 # the same against the real feed on the internet: installs hello, links and

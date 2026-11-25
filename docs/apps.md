@@ -19,7 +19,7 @@ Open **Apps**, then the last tile, **Get apps** (also Settings, Apps; and the Ap
 ## What is checked before an app is installed
 
 1. The feed's address must be `https://`. curl does the download, with mbedTLS and the image's CA bundle.
-2. The app's `api` in the feed must not be higher than the level this shell speaks (3 today). A newer app is listed as "needs newer firmware" and has no Install button.
+2. The app's `api` in the feed must not be higher than the level this shell speaks (4 today). A newer app is listed as "needs newer firmware" and has no Install button.
 3. The package must have exactly the `size` and `sha256` the feed gives. If not it is thrown away and the owner is told.
 4. The package must hold one folder, named with a proper app id, with only plain files and folders inside it: no links, no devices, nothing that climbs out with `..`. The shell unpacks the tar itself rather than trusting a tar program with that.
 5. The manifest inside must read properly, have the id the feed said, an API level this shell speaks, and a program to run.

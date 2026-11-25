@@ -107,7 +107,7 @@ u32 waiting     the app's: not 0 asks to be woken when rd moves
 - **To play:** put samples at `data[wr % frames]` onwards, then add the number to `wr`. `wr` and `rd` count up for ever and wrap at 2^32; `wr - rd` is what is waiting and must not pass `frames`. The app writes the samples, `wr` and `waiting`, and nothing else.
 - **To wait for room:** set `waiting` to 1 and sleep in `futex(FUTEX_WAIT)` on `rd`, with a timeout. Or look again later: the service takes 320 samples every 20 ms.
 - **How much to keep waiting:** 320 samples or more whenever the service comes for them, or there is a gap. A sound starts when 320 are there, or after 60 ms if it is shorter than that.
-- **Delay:** what is waiting, plus `delay`, plus 10 ms on average for the service's next take. With 640 waiting at most that is about 60 ms on the T48S.
+- **Delay:** what is waiting, plus `delay`, plus 10 ms on average for the service's next take. Measured on the T48S with 640 samples waiting at most: 65 ms from a write to the loudspeaker.
 - **Stop writing and there is silence.** Nothing is played twice. `dry` counts each time the ring ran out.
 - **Where it is heard:** the loudspeaker, at the owner's Apps volume. The volume keys change that volume while the app is in front. The [loudspeaker's limit](audiod.md#the-loudspeakers-limit) applies: a full-scale sample at volume 15 is on it, so sound from an app is quiet beside a desktop loudspeaker, and nothing an app writes can be louder.
 - **Calls win.** `state` 2: the phone is ringing, playing a tone, or in a call. Samples are taken at the same rate and not played. Lifting the handset, Speaker and Headset start a call as they always do; the app is paused.

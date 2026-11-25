@@ -37,21 +37,19 @@ int msg_fill_fd(int fd, struct msgbuf *b, int *passed)
 	do
 		n = recvmsg(fd, &mh, MSG_CMSG_CLOEXEC);
 	while (n < 0 && errno == EINTR);
-	if (n >= 0)
-		for (c = CMSG_FIRSTHDR(&mh); c; c = CMSG_NXTHDR(&mh, c)) {
-			int got;
+	/* there is room for one descriptor, so one header is all there can be */
+	c = n >= 0 ? CMSG_FIRSTHDR(&mh) : 0;
+	if (c && c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
+		int got;
 
-			if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS)
-				continue;
-			memcpy(&got, CMSG_DATA(c), sizeof(got));
-			if (!passed) {
-				close(got);
-				continue;
-			}
-			if (*passed >= 0)
-				close(*passed);
+		memcpy(&got, CMSG_DATA(c), sizeof(got));
+		if (passed && *passed >= 0)
+			close(*passed);
+		if (passed)
 			*passed = got;
-		}
+		else
+			close(got);
+	}
 	if (n > 0) {
 		b->len += (size_t)n;
 		return 1;

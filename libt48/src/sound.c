@@ -21,7 +21,7 @@
 #define STALE_US 250000   /* a full ring that has not moved for this long has nobody taking from it */
 #define HALF_TICK 160     /* the service takes every 320 samples: on average a sample waits half of that */
 
-static struct t48_sound_ring *ring;
+static struct t48_sound_ring *ring, *mapped;   /* mapped once; ring is NULL while sound is closed */
 static int16_t *data;
 static uint32_t frames, mask, wr;
 static int limit = 1024;          /* samples that may wait */
@@ -37,6 +37,7 @@ int t48_sound_open(void)
     struct stat st;
 
     if (ring) return 0;
+    if (mapped) { ring = mapped; wr = ring->wr; return 0; }
     if (!fd || fstat(atoi(fd), &st) < 0 || st.st_size < (off_t)sizeof h) return -1;
     void *m = mmap(NULL, (size_t)st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, atoi(fd), 0);
     if (m == MAP_FAILED) return -1;
@@ -46,7 +47,7 @@ int t48_sound_open(void)
         munmap(m, (size_t)st.st_size);
         return -1;
     }
-    ring = m;
+    ring = mapped = m;
     data = (int16_t *)((char *)m + h.data);
     frames = h.frames;
     mask = frames - 1;

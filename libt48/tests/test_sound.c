@@ -47,9 +47,24 @@ static int run(int rate, int ch, double hz, int level)
     return n;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     static const int rates[] = {8000, 11025, 16000, 22050, 32000, 44100, 48000};
+
+    if (argc > 1 && !strcmp(argv[1], "bench")) {
+        /* what the resampler costs: ten seconds of sound at each rate, in stereo */
+        static const int br[] = {22050, 44100, 48000};
+        for (unsigned i = 0; i < 3; i++) {
+            t48_resampler r;
+            t48_resample_init(&r, br[i], 2);
+            for (int k = 0; k < 2 * br[i]; k++) in[k] = (int16_t)(k * 7919);
+            long long t0 = t48_now_us();
+            for (int s = 0; s < 10; s++) t48_resample(&r, in, br[i], out, 20000);
+            long long us = t48_now_us() - t0;
+            printf("%d Hz stereo: %lld ms for 10 s of sound, %.2f%% of one processor\n", br[i], us / 1000, us / 100000.0);
+        }
+        return 0;
+    }
 
     for (unsigned i = 0; i < sizeof rates / sizeof rates[0]; i++)
         for (int ch = 1; ch <= 2; ch++) {

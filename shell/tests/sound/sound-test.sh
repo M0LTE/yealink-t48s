@@ -7,17 +7,17 @@
 set -e
 O=$(cd "$1" && pwd)
 HERE=$(cd "$(dirname "$0")" && pwd)
-make -s -C "$HERE/../../audiod" >/dev/null
-AUDIOD=$HERE/../../audiod/build/t48-audiod
+make -s -C "$HERE/../../../audiod" >/dev/null
+AUDIOD=$HERE/../../../audiod/build/t48-audiod
 RUN=$(mktemp -d)
-trap 'kill $PID 2>/dev/null; rm -rf "$RUN"' EXIT
+trap 'kill $PID 2>/dev/null || true; rm -rf "$RUN"' EXIT
 "$AUDIOD" --run-dir "$RUN" --spk "$RUN/spk.wav" 2>"$RUN/audiod.log" &
 PID=$!
-echo "== tests/sound.script (with t48-audiod)"
+echo "== tests/sound/sound.script (with t48-audiod)"
 cd "$O"
 rm -rf simdata
 ./t48-sim --apps simdata/installed:apps --data simdata/appdata --config simdata/config --state simdata/state \
-    --audio "$RUN/ctl.sock" --script ../tests/sound.script 2>sim.log || { cat sim.log "$RUN/audiod.log"; exit 1; }
+    --audio "$RUN/ctl.sock" --script ../tests/sound/sound.script 2>sim.log || { cat sim.log "$RUN/audiod.log"; exit 1; }
 kill $PID; wait $PID 2>/dev/null || true
 cat "$RUN/audiod.log"
 python3 - "$RUN/spk.wav" <<'PY'
@@ -35,21 +35,21 @@ def check(ok, what):
     print(("  ok   " if ok else "  FAIL ") + what)
     fails += not ok
 check(max(abs(v) for v in x) <= 1800, "nothing above the loudspeaker's limit")
-# the four notes, in order, at app volume 10: 12000 * 569 / 32768 = 208
+# the four notes, in order, at the Apps volume a phone starts with, 12: 24000 * 902 / 32768 = 661
 at = []
 for hz in (523, 659, 784, 1047):
     a, i = loudest(hz)
     at.append(i)
-    check(180 < a < 215, "note %d Hz played at %.0f (want about 208)" % (hz, a))
+    check(600 < a < 680, "note %d Hz played at %.0f (want about 661)" % (hz, a))
 check(at == sorted(at), "the notes came in order")
-# the steady tone at volume 12: 12000 * 902 / 32768 = 330
+# the steady tone at volume 14: 24000 * 1430 / 32768 = 1047
 a, i = loudest(600, 8000)
-check(310 < a < 340, "steady 600 Hz at %.0f after two presses of volume up (want 330)" % a)
+check(1000 < a < 1070, "steady 600 Hz at %.0f after two presses of volume up (want 1047)" % a)
 # the dial tone when the handset was lifted, and none of the app's tone under it
 a350, j = loudest(350, 8000)
 check(a350 > 300, "dial tone when the handset was lifted (350 Hz at %.0f)" % a350)
-check(amp(x[j:j + 8000], 600) < 15, "no app sound under the dial tone (600 Hz at %.0f)" % amp(x[j:j + 8000], 600))
+check(amp(x[j:j + 8000], 600) < 30, "no app sound under the dial tone (600 Hz at %.0f)" % amp(x[j:j + 8000], 600))
 a, k = loudest(880, 800)
-check(a > 200 and k > j, "the beep after the handset went down (880 Hz at %.0f)" % a)
+check(a > 600 and k > j, "the beep after the handset went down (880 Hz at %.0f)" % a)
 sys.exit(1 if fails else 0)
 PY

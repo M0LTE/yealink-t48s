@@ -169,7 +169,7 @@ int main(void)
 		engine_tick(&e, mic, call_frame, mo, so); } while (0)
 
 		/* on hook: the loudspeaker, at the app volume; 15 is the limit and no more */
-		CHECK(e.vol[T48AC_VOL_APP] == 10);
+		CHECK(e.vol[T48AC_VOL_APP] == 12);
 		engine_set_volume(&e, T48AC_VOL_APP, 15);
 		TICK(1, 0);
 		TICK(1, 0);

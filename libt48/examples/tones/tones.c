@@ -16,7 +16,7 @@
 #include "t48.h"
 
 #define RATE 16000
-#define CHUNK 160           /* 10 ms: written from the timer */
+#define CHUNK 160           /* 10 ms at a time, whenever there is room */
 
 /* One note: a sine made by a two-multiply recurrence, with 8 ms fades so it
  * does not click. No floating point once it has started. */
@@ -36,6 +36,29 @@ static long written;
 static long long last_log;
 static int busy;            /* something was started and has not been heard out */
 
+/* How long what is written waits before the audio service takes it: the end
+ * of each piece written and when, checked off as the queue goes down. */
+#define NMARK 64
+static struct { long end; long long at; } mark[NMARK];
+static int mark_n;
+static long wait_n, wait_sum_us, wait_max_us;
+
+static void marks_check(void)
+{
+    long taken = written - t48_sound_queued();
+    long long now = t48_now_us();
+    int k = 0;
+    while (k < mark_n && mark[k].end <= taken) {
+        long us = (long)(now - mark[k].at);
+        wait_n++;
+        wait_sum_us += us;
+        if (us > wait_max_us) wait_max_us = us;
+        k++;
+    }
+    if (k) memmove(mark, mark + k, (size_t)(mark_n - k) * sizeof mark[0]);
+    mark_n -= k;
+}
+
 static int sounding(void) { return note.pos < note.total; }
 
 static void start_note(int hz, int ms)
@@ -45,7 +68,7 @@ static void start_note(int hz, int ms)
     note.pos = note.looped = 0;
     note.k = (int32_t)lrint(2 * cos(w) * 16384);
     note.y1 = 0;
-    note.y2 = note.first = (int32_t)lrint(-sin(w) * 12000);   /* a peak of 12000: 9 dB under full scale */
+    note.y2 = note.first = (int32_t)lrint(-sin(w) * 24000);   /* a peak of 24000: 3 dB under full scale */
 }
 
 static void stop_note(void)
@@ -71,7 +94,7 @@ static int make(int16_t *out, int n)
         note.y2 = note.y1;
         note.y1 = y;
         y = y * g / FADE;
-        out[i] = (int16_t)(y > 16000 ? 16000 : y < -16000 ? -16000 : y);
+        out[i] = (int16_t)(y > 30000 ? 30000 : y < -30000 ? -30000 : y);
     }
     return i;
 }
@@ -86,13 +109,15 @@ static void feed(void)
         }
         int n = make(buf, CHUNK);
         written += t48_sound_put(buf, n);
+        if (mark_n < NMARK) { mark[mark_n].end = written; mark[mark_n++].at = t48_now_us(); }
     }
 }
 
 static void say(const char *what)
 {
-    fprintf(stderr, "tones: %s: %ld samples written, %d waiting, latency %d ms, %s, dry %u\n", what, written,
-            t48_sound_queued(), t48_sound_latency_us() / 1000, t48_sound_playing() ? "playing" : "not playing", t48_sound_dry());
+    fprintf(stderr, "tones: %s: %ld samples written, %d waiting, latency %d ms, %s, dry %u; waited %ld ms on average, %ld at most\n",
+            what, written, t48_sound_queued(), t48_sound_latency_us() / 1000, t48_sound_playing() ? "playing" : "not playing",
+            t48_sound_dry(), wait_n ? wait_sum_us / wait_n / 1000 : 0, wait_max_us / 1000);
 }
 
 static void draw(void)
@@ -126,7 +151,7 @@ int main(void)
     start_note(tune[0], 180);
     feed();
     draw();
-    t48_timer(0, 10, 1);
+    t48_timer(0, 5, 1);
     t48_timer(1, 250, 1);
     for (;;) {
         if (t48_poll(&ev, -1) < 0) break;
@@ -142,6 +167,7 @@ int main(void)
             draw();
         }
         if (ev.type == T48_EV_TIMER && ev.id == 0 && !paused) {
+            marks_check();
             feed();
             if (sounding() || tune_at >= 0) busy = 1;
             else if (busy && !t48_sound_queued()) { busy = 0; say("played"); }

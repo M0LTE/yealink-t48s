@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Sound from an app, with the audio service running on its file backend
-# (tests/sound-test.sh starts it and reads what was played afterwards).
+# (sound-test.sh starts it and reads what was played afterwards).
 run mkdir -p simdata/installed && cp -r extra/tones simdata/installed/
 waitstate audio up 3000
 key ok
@@ -19,8 +19,8 @@ run grep -q "tones: played: 11520 samples written, 0 waiting, .* ms, playing, dr
 # the volume keys: the app's level, told to the audio service
 key volup
 key volup
-expectstate vol.apps 12
-waitstate audio.vol.apps 12 500
+expectstate vol.apps 14
+waitstate audio.vol.apps 14 500
 expectstate vol.ringer 13
 # a steady tone, and the handset is lifted: the dialler takes the screen, the app is silent at once
 key 2

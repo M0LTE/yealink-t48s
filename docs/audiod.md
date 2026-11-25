@@ -56,6 +56,8 @@ t48-audiod --mic in.wav --spk out.wav             # a PC: files for microphone a
 t48-audiod                                        # null: silence in, sound thrown away
     --run-dir DIR      where call.sock and ctl.sock go (default /run/t48-audiod)
     --routes FILE      lay a routes file over the built-in table; --print-routes shows the result
+    --silent           alsa, for tests in a quiet house: all as usual, but the amplifier,
+                       the outputs and the sidetone are never switched on
 ```
 
 The default backend is null, so starting it by accident on a PC or the phone makes no sound. `t48-audioctl` speaks the shell's protocol from a prompt: `t48-audioctl route handset tone dial`, `t48-audioctl volume ringer 9`, `t48-audioctl` alone prints the state.
@@ -125,11 +127,11 @@ Issue [#63](https://github.com/M0LTE/yealink-t48s/issues/63). The app's side is 
 - **Calls win.** While RING is on, a tone is playing, or a route is set with the call stream up, the app's samples are taken at the same rate and not played, and the ring's `state` says held. The change is a 20 ms fade each way, so nothing clicks. A key sound does not hold it.
 - **Off the screen is silent.** APP 1 drops what is waiting and nothing more is taken until APP 2.
 - **An app that stops writing is silence.** A frame is taken only if it is there; a part frame is played out and padded. Nothing is ever played twice.
-- **The hardware.** Sound from an app starts it, as a tone does. With the hardware idle the service looks at the ring every 20 ms while an app with sound is in front (nothing tells it when the app writes; that look costs about as much as nothing). After an app's last sound the hardware is kept for 2 s, so a game's next beep starts at once and the amplifier is not switched for every one.
+- **The hardware.** Sound from an app starts it, as a tone does. With the hardware idle the service looks at the ring every 20 ms while an app with sound is in front (nothing tells it when the app writes; the look is a read of one number). After an app's last sound the hardware is kept for 2 s, so a game's next beep starts at once and the amplifier is not switched for every one.
 
-**Delay.** A sample waits in the ring for the next tick (10 ms on average), then behind the 20 ms the playback buffer holds, then 5 ms in the driver: 35 ms, plus whatever the app keeps waiting in the ring so as never to run out. An app that writes every 10 ms and keeps 640 samples at most is about 60 ms from write to loudspeaker.
+**Delay.** A sample waits in the ring for the next tick (10 ms on average), then behind the 20 ms the playback buffer holds, then 5 ms in the driver: 35 ms, plus whatever the app keeps waiting in the ring so as never to run out. Measured on the phone with the example app, which writes 10 ms at a time and keeps 640 samples at most: 40 ms in the ring on average, and the playback buffer held exactly 640 samples after every write, so 65 ms from a write to the loudspeaker. The floor for an app that keeps 480 waiting is about 50 ms. The 20 ms tick and the 40 ms the playback buffer starts with are what the call path was built on, and were left alone.
 
-**Cost.** One more source to mix: about 5 microseconds a frame on the phone by the bench's scale. The clock is the cost, as for anything else that makes sound: 2.6% of the processor while it runs.
+**Cost.** One more source to mix: about 5 microseconds a frame on the phone by the bench's scale. The clock is the cost, as for anything else that makes sound: 2.6% of the processor while it runs. libt48's resampler, measured on the phone: 0.55% of the processor for 48 kHz stereo, 0.51% for 44.1 kHz, 0.26% for 22.05 kHz.
 
 ## The route table
 
@@ -272,7 +274,7 @@ Nothing else: no rate other than 16 kHz, no volume ramps, no routing logic. Rout
 
 Run on 2026-11-23. Nothing in this section touched the phone or any sound device; the phone's results follow it.
 
-`make -C audiod check`: 755 checks in seven unit tests, and 32 in the socket test, all passing (2026-11-24).
+`make -C audiod check`: 851 checks in eight unit tests, and 52 in the socket test, all passing (2026-11-25).
 
 | Test | What it shows |
 |---|---|
@@ -320,13 +322,27 @@ Run on 2026-11-24 for the loudspeaker's limit (issue #57), on development builds
 
 Loudness and the levels that freeze the phone are in [The loudspeaker's limit](#the-loudspeakers-limit).
 
+Run on 2026-11-25, at night, for an app's sound (issue #63). **Nothing was audible:** the service ran with `--silent`, and the mixer read back with the amplifier and all four outputs off each time it was looked at while sound was flowing. The phone's own shell and audio service were stopped and this tree's ARM builds run in their place from `/tmp`, with `libt48/examples/tones` as the app, keys and the hook pressed through the kernel's test hooks, and `--record` keeping what the service sent to the codec.
+
+| Test | Result |
+|---|---|
+| The four notes, twice, at Apps volume 10 | sent to the codec at 208 to 210 (a peak of 12000 at volume 10 should be 208) |
+| Volume up twice, then a steady 600 Hz tone for 6 s | Apps volume 12 at the service, ringer untouched; sent at 332 (should be 330), without a gap |
+| Handset lifted during the tone | the app paused in the same moment, the service on the handset route with dial tone; handset down: the app back in front |
+| Home during a tone | paused, nothing more taken; the hardware idle 2 s later |
+| The whole run | 173120 samples in 544 frames, no hardware underrun, none dropped, no reset of the ring; the ring ran dry three times, each the end of a sound |
+| Delay | 40 ms waiting in the ring on average (the app keeps up to 640 samples there); the playback buffer held 640 samples after each of 1099 writes. 65 ms from write to loudspeaker |
+| Afterwards | the phone's own services started again, registered, idle, amplifier and outputs off |
+
+Not done: hearing it. That is the morning's test: start Tones from the launcher (it must be installed, or run with `t48-shell --app tones`), and listen for four rising notes; OK repeats them, 1 beeps, 2 holds a tone, the volume keys change the level.
+
 Found and fixed on the way: switching a microphone on makes a thump (14000 counts, gone in 0.4 s) that went to the far end, so the first half second after a route change is now sent as silence; the service left the amplifier and microphone on when idle; and it needed real-time priority (above).
 
 `t48-audiod --record FILE.wav` is a test aid: while a call stream is open it writes a 3-channel WAV (the microphone as sent to baresip, the far end as received, the loudspeaker as played), 120 s at most. It is how the echo call above was measured, and it is what to use for tuning the speakerphone.
 
 ## What needs the phone, and Tom
 
-1. **A listen.** Everything above was measured with microphones. How the loudspeaker and earpiece sound, and whether the levels are right, needs an ear.
+1. **A listen.** Everything above was measured with microphones. How the loudspeaker and earpiece sound, and whether the levels are right, needs an ear. An app's sound has not been heard at all yet; whether volume 15 on the limit is loud enough for a game is the first thing to find out.
 2. **Sidetone level** on the handset (`Codec B Sidetone Volume` in the handset route; -18 dB now).
 3. **Speakerphone tuning by ear:** microphone gain, then `coupling`, then whether 36 dB and 15 dB feel right.
 4. **The headset**, with one plugged in.

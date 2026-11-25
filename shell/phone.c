@@ -230,6 +230,7 @@ static void load_settings(void)
 
     for (int i = 1; i < T48AC_VOL_COUNT; i++) P.vol[i] = 10;
     P.vol[T48AC_VOL_RINGER] = 13;   /* the audio service's default: 4 dB under the loudspeaker's limit (docs/audiod.md) */
+    P.vol[T48AC_VOL_APP] = 12;      /* likewise: a full-scale sample 6 dB under it */
     snprintf(path, sizeof path, "%s/audio", opt.config);
     if ((f = fopen(path, "r"))) {
         while (fgets(line, sizeof line, f)) {

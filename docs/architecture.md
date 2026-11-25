@@ -66,7 +66,7 @@ Our baresip module does two jobs: audio in and out through the audio service, an
 
 **Decision: one small daemon, `t48-audiod`, is the only program that touches audio hardware.** Issue [#24](https://github.com/M0LTE/yealink-t48s/issues/24).
 
-It handles routes (handset, speakerphone, headset), volumes, mute, locally made tones and ringing, and two streams over a Unix socket: a two-way call stream for baresip and a playback stream for apps, which is silenced during calls.
+It handles routes (handset, speakerphone, headset), volumes, mute, locally made tones and ringing, and two streams: a two-way call stream for baresip over a Unix socket, and a playback stream for apps, which is a ring of samples in shared memory and is silenced during calls ([audiod.md](audiod.md#an-apps-sound)).
 
 This is also where the unknown in [#6](https://github.com/M0LTE/yealink-t48s/issues/6) is contained. The hardware side of the daemon has two possible backends and nothing above it changes:
 

@@ -15,7 +15,7 @@ void engine_init(struct engine *e)
 	for (i = 0; i < T48AC_VOL_COUNT; i++)
 		e->vol[i] = 8;
 	e->vol[T48AC_VOL_RINGER] = 13;	/* 4 dB under the loudspeaker's limit */
-	e->vol[T48AC_VOL_APP] = 10;
+	e->vol[T48AC_VOL_APP] = 12;	/* a full-scale sample 6 dB under the limit */
 	echo_init(&e->echo, ECHO_NONE, 0);
 }
 
