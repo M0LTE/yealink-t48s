@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ctrl import Ctrl
 
 ALICE_HZ, BOB_HZ, LEVEL = 700, 1100, 6000     # what each microphone "hears"
+SPK_LIMIT = 1800    # the loudspeaker's peak limit (SPK_LIMIT in audiod/dsp.h, #57)
 fails = 0
 
 
@@ -134,8 +135,11 @@ def main():
     # before the call
     check(best(ap[:a_dialled], 350) > 4000 and best(ap[:a_dialled], 440) > 4000, "alice heard dial tone before dialling")
     check(best(ap[a_dialled:a_answered], 400) > 3000 and best(ap[a_dialled:a_answered], 450) > 3000, "alice heard ringback while bob rang")
-    check(best(bp[:b_answered], 1000, 320) > 12000, "bob's ringer rang (first note 1000 Hz)")
-    check(best(bp[b_answered + 4800:], 1250, 320) < 2000, "bob's ringer stopped when he answered")
+    # ringer volume 15 puts the ringer on the loudspeaker's limit
+    r = best(bp[:b_answered], 1000, 320)
+    check(r > SPK_LIMIT * 0.9, "bob's ringer rang (first note 1000 Hz at %.0f of %d)" % (r, SPK_LIMIT))
+    r = best(bp[b_answered + 4800:], 1250, 320)
+    check(r < SPK_LIMIT * 0.25, "bob's ringer stopped when he answered (%.0f)" % r)
 
     a_talk, b_talk = ap[a_talk0:a_talk1], bp[b_talk0:b_talk1]
     if scenario in ("call", "call-slow"):
@@ -151,7 +155,9 @@ def main():
         back = best(a_talk[len(a_talk) // 3:], ALICE_HZ)
         db = 20 * math.log10(max(back, 0.01) / max(sent, 0.01))
         print("  bob's loudspeaker played alice at %.0f; alice heard herself back at %.0f (%.1f dB)" % (sent, back, db))
-        check(sent > LEVEL * 0.6, "bob's loudspeaker played alice")
+        # the speakerphone turns alice down to the loudspeaker's limit
+        want = SPK_LIMIT * 0.9 if scenario == "echo-speaker" else LEVEL * 0.6
+        check(sent > want, "bob's loudspeaker played alice")
         if scenario == "echo-handset":
             check(-9 < db < -3, "no echo control on this route: the room's echo (half level) comes straight back")
         else:
