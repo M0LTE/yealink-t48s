@@ -35,7 +35,7 @@ Sources outside our own dumps: Yealink's SIP-T46S datasheet (V6, May 2017); Yeal
 
 ### How the facts were dug out
 
-- **Which keymap is the T46S's.** Yealink's app partition holds six keymaps; file names in that partition are scrambled and were not recovered, so the files were told apart by content. Two have 42 keys. One of them places the digits and Speakerphone exactly where U-Boot's key table for id 70 (the T54S) has them, so the other is `T46.qmap`. This is the weakest link in the key table: if it is wrong, keys do the wrong thing or nothing, and the kernel logs every key it does not know with its row and column.
+- **Which keymap is the T46S's.** Yealink's app partition holds six keymaps; file names in that partition are scrambled and were not recovered, so the files were told apart by content. Two have 42 keys. One of them places the digits and Speakerphone exactly where U-Boot's key table for id 70 (the T54S) has them, so the other is `T46.qmap`. This is the weakest link in the key table: if it is wrong, keys do the wrong thing or nothing. The shell's key test ([shell.md](shell.md#the-key-test)) shows every key's row, column and code on the screen, in the table or not, so the table can be put right from photos; the kernel also logs every key it does not know.
 - **This U-Boot does not fit a T46S's keys.** Our T48S's U-Boot has key tables for ids 65, 70 and 74 and a default; none has Speakerphone where `T46.qmap` puts it. So a T46S has another build of U-Boot. Its screen set-up and file names for id 66 are in ours all the same (shared source), which is why those are "medium to high" and not "high".
 - **The screen.** U-Boot's set-up for ids 66 and 70: 480 wide, 272 high, 16 bits, 960 bytes a row, shown from 0x03f80000; when the hardware version says "upside down" it draws at 0x03f00000 and copies the turned picture across.
 - **The backlight.** Yealink's level 1 to 99 becomes a 5-bit PWM number, smaller is brighter: 25 up to level 10, then 26 - (2 x (level - 1)) / 10 up to 70, then 29 - (3 x level - 33) / 10. Our ten steps are its values at 10, 20 ... 99: 25, 23, 21, 19, 17, 15, 13, 9, 6, 3.
@@ -62,6 +62,8 @@ Code = row x 8 + column + 1, as Yealink's driver numbers the matrix.
 
 Which soft key is leftmost and which line key is at the top are guesses.
 
+**To check it on a phone:** hold any key for 5 seconds at the clock. The key test opens: press each key and photograph the screen, which shows the key's row, column and code and what the table makes of it. Hold any key for 3 seconds to leave.
+
 ### The lamp matrix (not driven yet)
 
 Read from `keypad.ko` and Yealink's kernel (`ledmHw_Init`, `ledmHw_Write`). The SoC's LED matrix block is at 0x80002000, in the same block as the backlight PWM (0x80002040).
@@ -83,7 +85,7 @@ One system image serves both phones. The kernel is built once per model, with th
 | Model | the device tree: `model`, `compatible` (`yealink,sip-t46s` or `yealink,sip-t48s`, both also `yealink,sip-t4xs`), `yealink,hardware-id` | `kernel6/dts/bcm11188-yealink-t46s.dts`, `...-t48s.dts`, shared `yealink-t4xs.dtsi` |
 | Check at start | the Holtek chip's own hardware id is compared with the device tree's; a mismatch is a loud line in the kernel log (`wrong image for this model`). The id and the full version are in `/sys/module/t48s_holtek/parameters/hwid` and `hwversion` | `kernel6/drivers/t48s_holtek.c` |
 | Memory, screen | device tree: 59 MB and a 480x272 16-bit frame buffer at 0x03f80000, with `rotation = <180>` | the T46S's `.dts` |
-| Keys | `yealink,keymap` in the device tree's `keypad` node replaces the built-in table | `t48s_keypad.c` |
+| Keys | `yealink,keymap` in the device tree's `keypad` node replaces the built-in table. A place not in the table is sent as `KEY_UNKNOWN` with its code, for the key test | `t48s_keypad.c`, `shell/keytest.c` |
 | Backlight | `yealink,enable-pin` and `yealink,pwm-fields` in the `backlight` node | `t48s_backlight.c` |
 | Touch | the driver starts on a T48S only | `t48s_touch.c` (unchanged) |
 | Key lamps | `gpio-leds` in the T48S's tree; none in the T46S's | |
@@ -143,7 +145,7 @@ Do not use the T48S's stick or its Install page on a T46S: the kernel it writes 
 | # | Do | Expect |
 |---|---|---|
 | 1 | look | the clock screen, the right way up, five buttons along the bottom. Top left: a green square and the phone's address. Top right: a red square and "No service" (if that square is blue, the colours are swapped: tell us). A note says it was started in recovery mode and that nothing is installed |
-| 2 | press each key once: digits (a digit opens the dialler; X rubs out), arrows, OK, X | Up: Calls. Left: Contacts. Down: Settings. OK: Apps. X: back |
+| 2 | press each key once: digits (a digit opens the dialler; X rubs out), arrows, OK, X | Up: Calls. Left: Contacts. Down: Settings. OK: Apps. X: back. If any is wrong: hold any key for 5 seconds at the clock, press every key in the key test and photograph the screen |
 | 3 | lift the handset, put it back | the call screen appears and goes |
 | 4 | Left (Contacts), then the four soft keys under the screen, one at a time | soft key 2 opens "Add": type a name on the dial keys, OK, a number, OK |
 | 5 | Down (Settings), Screen, change the brightness with Left and Right | the screen gets dimmer and brighter, no flicker |

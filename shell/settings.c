@@ -40,7 +40,7 @@ enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16 };
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
               A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME,
               A_UPD_CHANNEL, A_UPD_CHECK, A_UPD_INSTALL, A_UPD_KERNEL, A_UPD_RESTART,
-              A_FW_BACKUP, A_FW_INSTALL, A_FW_RESTORE };
+              A_FW_BACKUP, A_FW_INSTALL, A_FW_RESTORE, A_KEYTEST };
 
 struct row {
     int kind, flags;
@@ -956,6 +956,7 @@ static void build_about(void)
     FILE *f;
     int up;
     snprintf(title, sizeof title, "About");
+    add_action("Key test", A_KEYTEST, "");   /* first: a phone whose keys are in doubt gets there on Down and OK alone */
     add_info("Phone", "Yealink SIP-T48S, open firmware");
     firmware_version(v, sizeof v);
     add_info("Firmware", v);
@@ -1386,6 +1387,7 @@ static void do_action(const struct row *r)
         break;
     }
     case A_OPEN: shell_settings_open_app(r->arg); return;
+    case A_KEYTEST: shell_show_keytest(); return;
     case A_APP_DEFAULTS: {
         char path[400];
         snprintf(path, sizeof path, "%s/apps/%s.conf", opt.config, r->def);

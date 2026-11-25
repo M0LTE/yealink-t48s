@@ -1161,6 +1161,14 @@ void phone_key(int code, int down)
     changed();
 }
 
+/* The key test wants the screen. A dialler goes (a key held at the idle screen may have opened it); a
+ * call stays. */
+int phone_stand_down(void)
+{
+    if (P.st == PH_DIAL && !P.hook_off) go_idle();
+    return P.st == PH_IDLE;
+}
+
 int phone_idle_key(int code)
 {
     if ((code >= '0' && code <= '9') || code == T48_KEY_STAR || code == T48_KEY_HASH) {

@@ -131,6 +131,12 @@ static void step(long long now)
             release_key = code;
             resume_at = now + (b[0] ? atoi(b) : 60);
         }
+    } else if (!strcmp(cmd, "scandown") || !strcmp(cmd, "scanup")) {
+        /* a key as the phone's keypad sends it: its place in the matrix, the Linux key code its table
+         * gives (none: a place with no key event), and the name of the key that is to the shell, if any */
+        int code = c[0] ? key_named(c) : 0;
+        if (c[0] && !code) { fail("no such key"); return; }
+        shell_scan(atoi(a), atoi(b), code, !b[0] ? -1 : cmd[4] == 'd');
     } else if (!strcmp(cmd, "touch")) {  /* a tap */
         shell_touch(T48_TOUCH_DOWN, atoi(a), atoi(b));
         shell_touch(T48_TOUCH_UP, atoi(a), atoi(b));

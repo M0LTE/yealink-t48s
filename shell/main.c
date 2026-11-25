@@ -43,8 +43,8 @@ struct options opt = {
     .web = "/run/t48-web",
 };
 
-enum screen { SCR_IDLE, SCR_LAUNCHER, SCR_APP, SCR_CALL, SCR_MESSAGE, SCR_HISTORY, SCR_SETTINGS, SCR_CONTACTS };
-static const char *const screen_names[] = {"idle", "launcher", "app", "call", "message", "history", "settings", "contacts"};
+enum screen { SCR_IDLE, SCR_LAUNCHER, SCR_APP, SCR_CALL, SCR_MESSAGE, SCR_HISTORY, SCR_SETTINGS, SCR_CONTACTS, SCR_KEYS };
+static const char *const screen_names[] = {"idle", "launcher", "app", "call", "message", "history", "settings", "contacts", "keys"};
 
 static const struct backend *be;
 long long shell_input_us;
@@ -60,6 +60,11 @@ static int sel;                      /* launcher: selected app */
 static char pending_id[64];          /* app to start once the old one has gone */
 static char msg_title[96], msg_text[200];
 static long long x_deadline;         /* in an app: when a held X becomes Home; 0 if X is up */
+/* The key test opens when any key is held from the idle screen, whatever the key table makes of it: the
+ * key, and when it has been held long enough (0: none is). And the key still held when the test was left,
+ * whose release is nobody's. */
+static int hold_scan, hold_key, left_scan, left_key, left_held;
+static long long hold_deadline;
 static int idle_notices;             /* how many notices the idle screen's row had room for */
 static char idle_shown[900];         /* time, date, network, accounts and notices as last drawn, to redraw only on a change */
 static volatile sig_atomic_t stopping;
@@ -360,6 +365,7 @@ static void redraw(void)
     case SCR_APP: draw_starting(); break;
     case SCR_SETTINGS: settings_draw(); break;
     case SCR_CONTACTS: contacts_draw(); break;
+    case SCR_KEYS: keytest_draw(); break;
     }
     phone_draw_overlay();
     if (scr != SCR_CALL) watch_draw_overlay();
@@ -543,6 +549,39 @@ static void launcher_key(int code)
     redraw();
 }
 
+static void open_keytest(void)
+{
+    if (scr == SCR_APP || scr == SCR_KEYS || !phone_stand_down()) return;
+    if (scr == SCR_SETTINGS) settings_close();
+    keytest_open();
+    show(SCR_KEYS);
+}
+
+void shell_show_keytest(void) { open_keytest(); }
+
+void shell_scan(int scan, int key, int code, int value)
+{
+    if (scr == SCR_KEYS) {
+        /* every key is the test's, and does nothing else */
+        if (code) backlight_key(code, value > 0);
+        else if (value) backlight_wake("a key");
+        keytest_event(scan, key, value);
+        redraw();
+        return;
+    }
+    if (value < 0) return;
+    if (!value && left_held && scan == left_scan && key == left_key) { left_held = 0; return; }
+    if (value && scr == SCR_IDLE && !hold_deadline) {
+        hold_scan = scan;
+        hold_key = key;
+        hold_deadline = t48_now_ms() + KEYTEST_OPEN_MS;
+    } else if (!value && scan == hold_scan && key == hold_key) {
+        hold_deadline = 0;
+    }
+    if (code) shell_key(code, value);
+    else if (value) logmsg("key code %d has no meaning yet", key);
+}
+
 void shell_key(int code, int down)
 {
     if (backlight_key(code, down)) return;   /* it woke a dark screen, and that is all it does */
@@ -614,6 +653,7 @@ int ui_inside(int x, int y, int bx, int by, int bw, int bh)
 void shell_touch(int state, int x, int y)
 {
     if (backlight_touch(state)) return;
+    if (scr == SCR_KEYS) return;
     if (scr == SCR_APP) { app_touch(state, x, y); return; }
     if (scr != SCR_CALL && watch_touch(state, x, y)) return;
     if (scr == SCR_SETTINGS) { settings_touch(state, x, y); return; }
@@ -674,7 +714,7 @@ void shell_phone_screen(int want)
     if (want) backlight_wake("the phone");
     if (want && scr != SCR_CALL) {
         /* calls come first: whatever is showing gives way at once */
-        under_call = scr == SCR_HISTORY || scr == SCR_CONTACTS ? SCR_IDLE : scr;
+        under_call = scr == SCR_HISTORY || scr == SCR_CONTACTS || scr == SCR_KEYS ? SCR_IDLE : scr;
         if (scr == SCR_APP) {
             if (app_state() == APP_RUNNING) app_pause();
             else { app_quit(); under_call = SCR_LAUNCHER; }
@@ -730,6 +770,7 @@ const char *shell_state(const char *key)
         snprintf(n, sizeof n, "%d", idle_notices);
         return n;
     }
+    if (!v) v = keytest_state(key);
     if (!v) v = watch_state(key);
     if (!v) v = settings_state(key);
     if (!v) v = backlight_state(key);
@@ -878,6 +919,8 @@ int main(int argc, char **argv)
         if ((t = watch_timeout(now)) < wait) wait = t;
         if ((t = leds_timeout(now)) >= 0 && t < wait) wait = t;
         if (x_deadline && x_deadline - now < wait) wait = (int)(x_deadline > now ? x_deadline - now : 0);
+        if (hold_deadline && hold_deadline - now < wait) wait = (int)(hold_deadline > now ? hold_deadline - now : 0);
+        if (scr == SCR_KEYS && (t = keytest_timeout(now)) >= 0 && t < wait) wait = t;
 
         pf[n].fd = chld_pipe[0]; pf[n++].events = POLLIN;
         int app_at = -1;
@@ -922,6 +965,8 @@ int main(int argc, char **argv)
         watch_tick(now);
         leds_tick(now);
         if (x_deadline && now >= x_deadline && scr == SCR_APP) go_home();
+        if (hold_deadline && now >= hold_deadline) { hold_deadline = 0; open_keytest(); }
+        if (scr == SCR_KEYS && keytest_tick(now, &left_scan, &left_key)) { left_held = 1; show(SCR_IDLE); }
         if (now >= next_clock) {
             next_clock = now + 1000;
             char b[sizeof idle_shown];
