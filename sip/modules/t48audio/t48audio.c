@@ -17,6 +17,11 @@
  *    codecs with another packet time.
  *  - Always 16 kHz, mono, signed 16-bit. baresip resamples for 8 kHz codecs
  *    (config: ausrc_srate/auplay_srate 16000, channels 1).
+ *  - In-band DTMF (issue #77): for an account whose DTMF is "inband" the
+ *    shell sends the command t48inband with the digits, and each becomes
+ *    100 ms of its two tones in place of the microphone, then 60 ms of
+ *    the microphone again, before the next. baresip has no in-band mode of
+ *    its own; RFC 2833 and SIP INFO are its dtmfmode.
  *  - If the service is not there (not started, or restarting), a call still
  *    works: this module keeps its own 20 ms clock, feeds silence as the
  *    microphone, drops the loudspeaker audio, and tries the socket again
@@ -27,6 +32,7 @@
  *          t48audio_socket /run/t48-audiod/call.sock     (optional)
  */
 #include <errno.h>
+#include <math.h>
 #include <poll.h>
 #include <string.h>
 #include <unistd.h>
@@ -76,6 +82,64 @@ static struct {
 
 static struct ausrc *ausrc;
 static struct auplay *auplay;
+
+/* In-band DTMF: digits waiting, and how far into the first one we are */
+enum {
+	DTMF_QUEUE = 32,
+	DTMF_ON = T48A_SRATE * 100 / 1000,    /* samples of tone */
+	DTMF_GAP = T48A_SRATE * 60 / 1000,    /* then of the microphone */
+};
+static struct {
+	char q[DTMF_QUEUE];
+	size_t n;
+	uint32_t pos;         /* samples into q[0]'s tone and gap */
+} dtmf;                   /* under cs.lock */
+
+
+/* the two frequencies of a key, or false if it is not one */
+static bool dtmf_freqs(char key, double *lo, double *hi)
+{
+	static const char keys[] = "123A456B789C*0#D";
+	static const double row[] = { 697, 770, 852, 941 };
+	static const double col[] = { 1209, 1336, 1477, 1633 };
+	const char *p = key ? strchr(keys, key) : NULL;
+
+	if (!p)
+		return false;
+	*lo = row[(p - keys) / 4];
+	*hi = col[(p - keys) % 4];
+	return true;
+}
+
+
+/* With the lock held: the next 20 ms of the digit being sent into frame,
+ * in place of the microphone while its tone lasts. */
+static void dtmf_frame(int16_t *frame)
+{
+	double lo, hi;
+	size_t k;
+
+	if (!dtmf.n)
+		return;
+	if (dtmf_freqs(dtmf.q[0], &lo, &hi)) {
+		for (k = 0; k < T48A_FRAME; k++) {
+			uint32_t t = dtmf.pos + (uint32_t)k;
+			double v;
+
+			if (t >= DTMF_ON)
+				break;
+			/* high group 2 dB over the low, about -9 dBFS together */
+			v = 7000 * sin(2 * M_PI * lo * t / T48A_SRATE) +
+			    8800 * sin(2 * M_PI * hi * t / T48A_SRATE);
+			frame[k] = (int16_t)v;
+		}
+	}
+	dtmf.pos += T48A_FRAME;
+	if (dtmf.pos >= DTMF_ON + DTMF_GAP) {
+		memmove(dtmf.q, dtmf.q + 1, --dtmf.n);
+		dtmf.pos = 0;
+	}
+}
 
 
 /* Read or write exactly len bytes, giving up after STALL_MS without progress */
@@ -218,6 +282,7 @@ static bool stream_tick(int16_t *mic, int16_t *spk)
 
 	mtx_lock(&cs.lock);
 
+	dtmf_frame(mic);
 	for (i = 0; i < MAX_CALLS; i++) {
 		if (!cs.src[i])
 			continue;
@@ -342,6 +407,10 @@ static int stream_open(void)
 
 	cs.frames = 0;
 	cs.said_missing = false;
+	mtx_lock(&cs.lock);
+	dtmf.n = 0;           /* nothing left over from the last call */
+	dtmf.pos = 0;
+	mtx_unlock(&cs.lock);
 	re_atomic_rlx_set(&cs.run, true);
 
 	err = thread_create_name(&cs.thread, "t48audio", stream_thread, NULL);
@@ -511,6 +580,35 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 }
 
 
+/* t48inband DIGITS: queue them as tones in the call's audio */
+static int cmd_inband(struct re_printf *pf, void *arg)
+{
+	const struct cmd_arg *carg = arg;
+	const char *p;
+	double lo, hi;
+	(void)pf;
+
+	if (!carg->prm || !*carg->prm)
+		return EINVAL;
+	mtx_lock(&cs.lock);
+	for (p = carg->prm; *p; p++) {
+		if (!dtmf_freqs(*p, &lo, &hi) || dtmf.n >= DTMF_QUEUE)
+			continue;
+		dtmf.q[dtmf.n++] = *p;
+		info("t48audio: in-band DTMF '%c'\n", *p);
+	}
+	mtx_unlock(&cs.lock);
+
+	return 0;
+}
+
+
+static const struct cmd cmdv[] = {
+	{"t48inband", 0, CMD_PRM, "Send DTMF as tones in the audio",
+	 cmd_inband},
+};
+
+
 static int module_init(void)
 {
 	int err;
@@ -526,6 +624,7 @@ static int module_init(void)
 			      src_alloc);
 	err |= auplay_register(&auplay, baresip_auplayl(), "t48audio",
 			       play_alloc);
+	err |= cmd_register(baresip_commands(), cmdv, RE_ARRAY_SIZE(cmdv));
 
 	return err;
 }
@@ -533,6 +632,7 @@ static int module_init(void)
 
 static int module_close(void)
 {
+	cmd_unregister(baresip_commands(), cmdv);
 	ausrc = mem_deref(ausrc);
 	auplay = mem_deref(auplay);
 	stream_close();

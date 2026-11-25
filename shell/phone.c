@@ -38,7 +38,7 @@ enum reg { REG_NONE, REG_TRYING, REG_OK, REG_FAIL };
 #define HIST_MAX 50
 #define HIST_ROWS (SMALL ? SROWS : 6)
 
-#define MAX_ACCTS 6
+#define MAX_ACCTS T48_ACCOUNTS
 
 /* one call, as baresip has it */
 struct call {
@@ -84,16 +84,17 @@ static struct {
     int hist_sel, hist_confirm;
 } P;
 
-struct hist { long long when; char kind; int secs; char number[64], name[64]; int acct; /* 1 to 6, 0 not known */ };
+struct hist { long long when; char kind; int secs; char number[64], name[64]; int acct; /* 1 to 16, 0 not known */ };
 static struct hist hist[HIST_MAX];   /* newest first */
 static int nhist;
 static long long hist_seen;          /* missed calls before this have been looked at */
 
-/* the accounts: /data/config/sip is the first, sip2 to sip6 the others */
+/* the accounts: /data/config/sip is the first, sip2 to sip16 the others */
 struct acct {
     int used;                  /* has a user and a domain */
     int on;                    /* used, and not switched off */
     char user[64], domain[64], label[32], voicemail[40];
+    int inband;                /* DTMF as tones in the audio, made by t48audio (issue #77) */
     char aor[140];             /* "sip:user@domain", as baresip names it */
     enum reg reg;
     char why[64];
@@ -204,6 +205,7 @@ static void load_accounts(void)
         cfg_get(f, "domain", a->domain, sizeof a->domain);
         cfg_get(f, "label", a->label, sizeof a->label);
         cfg_get(f, "voicemail", a->voicemail, sizeof a->voicemail);
+        a->inband = !strcmp(cfg_str(f, "dtmf", ""), "inband");
         a->used = a->user[0] && a->domain[0];
         v[0] = 0;
         cfg_get(f, "enabled", v, sizeof v);
@@ -300,7 +302,7 @@ static void count_missed(void)
 
 /* one call a line, newest last: when|kind|seconds|number|name|account. kind
  * is o (outgoing), i (incoming, answered or turned away) or m (missed). The
- * account (1 to 6) was added for issue #36; older lines have none. */
+ * account (1 to 16) was added for issue #36; older lines have none. */
 static void history_load(void)
 {
     char path[300], line[300];
@@ -1143,7 +1145,9 @@ void phone_key(int code, int down)
                 if (k + 1 >= sizeof P.c.dtmf) { memmove(P.c.dtmf, P.c.dtmf + 1, k); k--; }
                 P.c.dtmf[k] = (char)code;
                 P.c.dtmf[k + 1] = 0;
-                sipc_cmd("sndcode", d);
+                /* in-band: t48audio puts the tone into the call's audio; otherwise baresip sends
+                 * it as the account's dtmfmode says (RFC 2833 event or SIP INFO) */
+                sipc_cmd(P.c.acct >= 0 && P.c.acct < MAX_ACCTS && A[P.c.acct].inband ? "t48inband" : "sndcode", d);
                 audioc_key(code);
             } else if (code == T48_KEY_BACK) {
                 P.keypad = 0;
@@ -2000,7 +2004,7 @@ void phone_account_text(char *out, size_t n, uint32_t *colour)
 
 /* How many accounts are switched on, and for the k-th of them (from 0) a short
  * line for the idle screen and a colour for its dot. Returns the account's
- * number, 1 to 6, or 0 if there is no k-th. */
+ * number, 1 to 16, or 0 if there is no k-th. */
 int phone_account_line(int k, char *out, size_t n, uint32_t *colour, int *is_default)
 {
     for (int i = 0; i < MAX_ACCTS; i++) {
@@ -2019,6 +2023,7 @@ int phone_account_line(int k, char *out, size_t n, uint32_t *colour, int *is_def
 }
 
 int phone_accounts(void) { return accts_on(); }
+int phone_account_default(void) { return def_acct; }
 
 static const char *under(char *b)
 {
@@ -2051,7 +2056,7 @@ const char *phone_state(const char *key)
     if (!strcmp(key, "parked")) return P.parked ? "1" : "0";
     if (!strcmp(key, "dnd")) return P.dnd ? "on" : "off";
     if (!strcmp(key, "messages")) { snprintf(b, sizeof b, "%d", phone_messages()); return b; }
-    /* accounts: "reg" is the usual one's, "reg.2" the second's; "acct" the one in use, 1 to 6 */
+    /* accounts: "reg" is the usual one's, "reg.2" the second's; "acct" the one in use, 1 to 16 */
     if (!strcmp(key, "reg") || !strncmp(key, "reg.", 4)) {
         int i = key[3] ? atoi(key + 4) - 1 : def_acct;
         if (i < 0 || i >= MAX_ACCTS || !A[i].on) return "none";

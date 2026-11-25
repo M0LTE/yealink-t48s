@@ -235,6 +235,49 @@ int sip_host_ok(const char *h, int scheme)
     return v >= 1 && v <= 65535;
 }
 
+/* an account's register_seconds: not set (baresip's 3600), or 60 s to a day */
+int sip_regint_ok(const char *v)
+{
+    size_t n = strlen(v);
+    if (!n) return 1;
+    if (n > 5 || strspn(v, "0123456789") != n) return 0;
+    return atol(v) >= 60 && atol(v) <= 86400;
+}
+
+/* An account's codecs, as the codecs key holds them (issue #77): all four,
+ * in the order offered, an off one with a - in front: "opus,g722,-pcmu,pcma".
+ * Not set: all on, in the usual order. A codec missing from it is off, as
+ * t48-sip takes it, and follows the others. */
+const char *const sip_codec_keys[T48_CODECS] = {"opus", "g722", "pcmu", "pcma"};
+const char *const sip_codec_names[T48_CODECS] = {"Opus", "G.722", "PCMU", "PCMA"};
+
+void sip_codecs(const char *stored, int order[T48_CODECS], int on[T48_CODECS])
+{
+    int n = 0, seen[T48_CODECS] = {0};
+    const char *p = stored = stored ? stored : "";
+    while (*p && n < T48_CODECS) {
+        size_t k = strcspn(p, ",");
+        int off = *p == '-';
+        for (int c = 0; c < T48_CODECS; c++)
+            if (!seen[c] && k - off == strlen(sip_codec_keys[c]) && !strncmp(p + off, sip_codec_keys[c], k - off)) {
+                seen[c] = 1;
+                order[n] = c;
+                on[n++] = !off;
+            }
+        p += k + (p[k] == ',');
+    }
+    for (int c = 0; c < T48_CODECS; c++)
+        if (!seen[c]) { order[n] = c; on[n++] = !*stored; }
+}
+
+void sip_codecs_str(const int order[T48_CODECS], const int on[T48_CODECS], char *out, size_t n)
+{
+    size_t at = 0;
+    out[0] = 0;
+    for (int i = 0; i < T48_CODECS && at < n; i++)
+        at += (size_t)snprintf(out + at, n - at, "%s%s%s", i ? "," : "", on[i] ? "" : "-", sip_codec_keys[order[i]]);
+}
+
 static int list_file(const char *name, int with_name)
 {
     char *text = storage->load(name);

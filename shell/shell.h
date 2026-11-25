@@ -237,6 +237,7 @@ void phone_toggle_dnd(void);
 int phone_dnd(void);
 int phone_messages(void);                    /* new voice messages waiting, over all accounts */
 int phone_accounts(void);                    /* how many accounts are switched on */
+int phone_account_default(void);             /* the default account, from 0 */
 int phone_account_line(int k, char *out, size_t n, uint32_t *colour, int *is_default);
 
 /* ---------- the key test (keytest.c): every key's place in the matrix, on the screen ---------- */
@@ -279,6 +280,13 @@ char *cfg_load_text(const char *file);                                     /* th
 int cfg_save_text(const char *file, const char *text);                     /* the whole file, atomically */
 int cfg_secret(const char *key);                                           /* a password: never shown */
 int sip_host_ok(const char *h, int scheme);   /* host, host:port, [IPv6]:port or empty; scheme: a sip: or sips: in front allowed */
+#define T48_ACCOUNTS 16                       /* sip, sip2 ... sip16, as the stock firmware's 16 lines (issue #77) */
+#define T48_REG_DEFAULT 3600                  /* register_seconds when not set: baresip's own */
+int sip_regint_ok(const char *v);             /* register_seconds: empty, or 60 to 86400 */
+#define T48_CODECS 4
+extern const char *const sip_codec_keys[T48_CODECS], *const sip_codec_names[T48_CODECS];
+void sip_codecs(const char *stored, int order[T48_CODECS], int on[T48_CODECS]);   /* an account's codecs= */
+void sip_codecs_str(const int order[T48_CODECS], const int on[T48_CODECS], char *out, size_t n);
 int config_main(int argc, char **argv);                                    /* the t48-config command */
 
 /* ---------- the app manager (pkg.c): the t48-app command ---------- */

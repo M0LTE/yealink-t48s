@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Start baresip for the T48S (issue #25). Reads the owner's SIP accounts from
-# the settings files (up to six, issue #36), writes baresip's accounts file
+# the settings files (up to 16, issues #36 and #77), writes baresip's accounts file
 # into a run directory next to a copy of the config, and runs baresip there.
 # Meant to be run by runit.
 #
 # The settings file is key=value, one per line, # for comments
 # (sip/config/sip.example). Paths can be moved for testing:
-#   T48_SIP_SETTINGS  default /data/config/sip: account 1. Accounts 2 to 6
+#   T48_SIP_SETTINGS  default /data/config/sip: account 1. Accounts 2 to 16
 #                     are the same name with the number on the end (sip2).
 #   T48_SIP_CONFIG    default /data/local/sip/config if present,
 #                     else /usr/share/t48/sip/config
@@ -55,7 +55,8 @@ host_ok() {
 # $line. Returns 1 (and says why) if the file does not make an account.
 account() {
     f=$1
-    user= password= domain= auth_user= display_name= transport=udp proxy= regint=600 enabled=on mwi=on keepalive=on
+    user= password= domain= auth_user= display_name= transport=udp proxy= regint= enabled=on mwi=on keepalive=on
+    dtmf=rfc2833 codecs=
     while IFS= read -r l || [ -n "$l" ]; do
         case "$l" in ''|'#'*) continue ;; esac
         key=${l%%=*}
@@ -72,6 +73,8 @@ account() {
             enabled) enabled=$val ;;
             mwi) mwi=$val ;;
             keepalive) keepalive=$val ;;
+            dtmf) dtmf=$val ;;
+            codecs) codecs=$val ;;
             label|voicemail) ;;    # the shell's business
             *) echo "t48-sip: $f: ignoring unknown setting '$key'" >&2 ;;
         esac
@@ -81,7 +84,37 @@ account() {
     [ -n "$user" ] || { echo "t48-sip: $f: user is missing" >&2; return 1; }
     [ -n "$domain" ] || { echo "t48-sip: $f: domain is missing" >&2; return 1; }
     case "$transport" in udp|tcp|tls) ;; *) echo "t48-sip: $f: transport must be udp, tcp or tls" >&2; return 1 ;; esac
-    case "$regint" in ''|*[!0-9]*) echo "t48-sip: $f: register_seconds must be a number" >&2; return 1 ;; esac
+    # the registration expiry asked for; empty is baresip's own, 3600 s
+    case "$regint" in
+        '') ;;
+        *[!0-9]*|??????*) echo "t48-sip: $f: register_seconds must be 60 to 86400, using 3600" >&2; regint= ;;
+        *) [ "$regint" -ge 60 ] && [ "$regint" -le 86400 ] || { echo "t48-sip: $f: register_seconds must be 60 to 86400, using 3600" >&2; regint=; } ;;
+    esac
+    # DTMF: RFC 2833 events, SIP INFO, or tones in the audio. In-band tones
+    # are made by t48audio when the shell asks (t48inband), so baresip itself
+    # is left on events for them.
+    case "$dtmf" in
+        rfc2833|inband) dtmfmode=rtpevent ;;
+        info) dtmfmode=info ;;
+        *) echo "t48-sip: $f: dtmf must be rfc2833, inband or info, using rfc2833" >&2; dtmfmode=rtpevent ;;
+    esac
+    # codecs offered, in order: baresip names them with rate and channels.
+    # Not set: all of them, in the config's order (Opus, G.722, PCMU, PCMA).
+    # The shell writes all four, an off one with a - in front: opus,-g722,pcmu,pcma
+    aucodecs=
+    for c in $(echo "$codecs" | tr ',' ' '); do
+        case "$c" in
+            opus) c=opus/48000/2 ;;
+            g722) c=G722/16000/1 ;;
+            pcmu) c=PCMU/8000/1 ;;
+            pcma) c=PCMA/8000/1 ;;
+            -*) continue ;;    # off
+            *) echo "t48-sip: $f: ignoring unknown codec '$c'" >&2; continue ;;
+        esac
+        case ",$aucodecs," in *",$c,"*) continue ;; esac
+        aucodecs=${aucodecs:+$aucodecs,}$c
+    done
+    [ -n "$aucodecs" ] || [ -z "$codecs" ] || echo "t48-sip: $f: every codec is off, offering all" >&2
     # baresip's accounts line has no quoting for these
     for v in "$user" "$domain" "$auth_user" "$password" "$proxy"; do
         case "$v" in *[\;\<\>\"\ ]*) echo "t48-sip: $f: ; < > \" and spaces are not allowed in values" >&2; return 1 ;; esac
@@ -105,7 +138,9 @@ account() {
     # the proxy is reached on the account's transport
     [ -n "$proxy" ] && line="$line;outbound=\"$scheme:$proxy;transport=$transport\""
     case "$mwi" in off|no|false|0) mwi=no ;; *) mwi=yes ;; esac
-    line="$line;regint=$regint;answermode=manual;mwi=$mwi"
+    [ -n "$regint" ] && line="$line;regint=$regint"
+    line="$line;answermode=manual;mwi=$mwi;dtmfmode=$dtmfmode"
+    [ -n "$aucodecs" ] && line="$line;audio_codecs=$aucodecs"
     case "$keepalive" in off|no|false|0) line="$line;keepalive=no" ;; esac
     return 0
 }
@@ -132,17 +167,17 @@ echo $$ > "$RUN/pid"
 grep -v '^t48ctrl_socket' "$CONFIG" > "$RUN/config"
 printf 't48ctrl_socket\t\t%s\n' "$RUN/ctrl.sock" >> "$RUN/config"
 
-# account 1 is the settings file itself, accounts 2 to 6 the files beside it
-# with that number on the end: /data/config/sip, sip2, ... sip6
-printf '# Written by t48-sip from %s and %s2 to 6; edits here are lost\n' "$SETTINGS" "$SETTINGS" > "$RUN/accounts"
+# account 1 is the settings file itself, accounts 2 to 16 the files beside it
+# with that number on the end: /data/config/sip, sip2, ... sip16
+printf '# Written by t48-sip from %s and %s2 to 16; edits here are lost\n' "$SETTINGS" "$SETTINGS" > "$RUN/accounts"
 n=0
-for i in "" 2 3 4 5 6; do
+for i in "" 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
     [ -f "$SETTINGS$i" ] || continue
     if account "$SETTINGS$i"; then
         printf '%s\n' "$line" >> "$RUN/accounts"
         n=$((n + 1))
     fi
 done
-[ $n -gt 0 ] || die "no usable account in $SETTINGS or ${SETTINGS}2 to 6 (see sip.example)"
+[ $n -gt 0 ] || die "no usable account in $SETTINGS or ${SETTINGS}2 to 16 (see sip.example)"
 
 exec "$BARESIP" -f "$RUN" "$@"

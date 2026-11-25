@@ -72,7 +72,7 @@ static int hold_scan, hold_key, left_scan, left_key, left_held;
 static int down_scan, down_key, down_held;   /* the key that went down last, and whether it is still down */
 static long long hold_deadline;
 static int idle_notices;             /* how many notices the idle screen's row had room for */
-static char idle_shown[900];         /* time, date, network, accounts and notices as last drawn, to redraw only on a change */
+static char idle_shown[2000];         /* time, date, network, accounts and notices as last drawn, to redraw only on a change */
 static volatile sig_atomic_t stopping;
 static int exit_status;
 static int chld_pipe[2];
@@ -192,7 +192,7 @@ enum { IB_APPS, IB_CALLS, IB_CONTACTS, IB_SETTINGS };
 /* one line for each account, when there is more than one */
 #define ACC_Y 292
 #define ACC_H 36
-#define ACC_MAX 6
+#define ACC_MAX 6          /* tiles on the idle screen; with more accounts on, the last says how many more */
 
 /* The standing notice: up to two short lines that something else wants on the idle
  * screen for as long as its file exists. The first leads the row of notices, the second
@@ -222,7 +222,7 @@ static void idle_text(char *out, size_t n)
     phone_account_text(acc, sizeof acc, &c);
     size_t k = strftime(out, n, "%H:%M|%A %e %B %Y|", &tm);
     k += (size_t)snprintf(out + k, n - k, "%s|%s|%d|%d|%d", net, acc, phone_missed(), phone_messages(), phone_dnd());
-    for (int i = 0; i < ACC_MAX && k < n; i++) {
+    for (int i = 0; i < T48_ACCOUNTS && k < n; i++) {
         char line[80];
         int def;
         if (!phone_account_line(i, line, sizeof line, &c, &def)) break;
@@ -245,10 +245,10 @@ static void acc_box(int k, int n, int *x, int *y, int *w)
 /* Small screens: one line for all the accounts, a lamp and a name each, with as many words as there is room for */
 static void idle_accounts_small(int y)
 {
-    char line[ACC_MAX][80];
-    uint32_t c[ACC_MAX];
+    char line[T48_ACCOUNTS][80];
+    uint32_t c[T48_ACCOUNTS];
     int n = 0, def, total = 0;
-    while (n < ACC_MAX && phone_account_line(n, line[n], sizeof line[0], &c[n], &def)) n++;
+    while (n < T48_ACCOUNTS && phone_account_line(n, line[n], sizeof line[0], &c[n], &def)) n++;
     for (int cut = 0; cut < 3; cut++) {
         total = 0;
         for (int i = 0; i < n; i++) {
@@ -298,13 +298,24 @@ static void draw_idle(void)
         ny = several ? 340 : 320;
         y2 = 372;
     }
-    for (int i = 0; !SMALL && several && i < ACC_MAX; i++) {
+    int tiles = naccts > ACC_MAX ? ACC_MAX : naccts;
+    for (int i = 0; !SMALL && several && i < tiles; i++) {
         char line[80];
         uint32_t c;
         int def, x, y, w;
         struct row_ink ink;
         if (!phone_account_line(i, line, sizeof line, &c, &def)) break;
-        acc_box(i, naccts, &x, &y, &w);
+        if (i == ACC_MAX - 1 && naccts > ACC_MAX) {
+            /* the rest in one tile: how many, and the worst lamp among them */
+            const uint32_t rank[] = {C_GOOD, C_DIM, C_ACCENT, C_BAD};
+            int worst = 0;
+            for (int k = i; k < naccts && phone_account_line(k, line, sizeof line, &c, &def); k++)
+                for (int r = 3; r > worst; r--) if (c == rank[r]) worst = r;
+            c = rank[worst];
+            snprintf(line, sizeof line, "%d more", naccts - i);
+            def = 0;
+        }
+        acc_box(i, tiles, &x, &y, &w);
         ui_tile(x, y, w, ACC_H, 0, &ink);
         ui_lamp(x + 12, y + ACC_H / 2 - 6, c);
         t48_text_fit(&ui, x + 34, y + (ACC_H - t48_font_normal.height) / 2, w - (def ? 112 : 44), &t48_font_normal, ink.text, line);
@@ -863,12 +874,15 @@ void shell_touch(int state, int x, int y)
     } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_SETTINGS), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
         shell_key(T48_KEY_DOWN, 1);
     } else if (scr == SCR_IDLE && phone_accounts() > 1) {
-        for (int i = 0; i < ACC_MAX; i++) {
+        int tiles = phone_accounts() > ACC_MAX ? ACC_MAX : phone_accounts();
+        for (int i = 0; i < tiles; i++) {
             char line[80];
             uint32_t c;
             int def, ax, ay, aw, acct = phone_account_line(i, line, sizeof line, &c, &def);
             if (!acct) break;
-            acc_box(i, phone_accounts(), &ax, &ay, &aw);
+            acc_box(i, tiles, &ax, &ay, &aw);
+            /* the tile of the rest: the dialler, where Left and Right choose among them all */
+            if (i == ACC_MAX - 1 && phone_accounts() > ACC_MAX) acct = phone_account_default() + 1;
             if (ui_inside(x, y, ax, ay, aw, ACC_H)) { phone_dial_from(acct - 1); return; }
         }
     } else if (scr == SCR_MESSAGE && ui_inside(x, y, MSG_BTN_X, MSG_BTN_Y, MSG_BTN_W, MSG_BTN_H)) {

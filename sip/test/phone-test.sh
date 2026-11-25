@@ -89,7 +89,7 @@ chmod +x $W/apply
 side bob 1002 5072 tcp "Bob Example" $W/bob.sip far
 side carol 1003 5073 udp "Carol Example" $W/carol.sip far
 
-export FAR="python3 $SIP/test/far.py"
+export FAR="python3 $SIP/test/far.py" DTMF="python3 $SIP/test/dtmf.py"
 export PHONE=$W/phone/run/ctrl.sock BOB=$W/bob/run/ctrl.sock CAROL=$W/carol/run/ctrl.sock
 export BOBLOG=$W/bob.events CAROLLOG=$W/carol.events
 export MWI="python3 $SIP/test/mwi.py set $W/mwi" CONFIG="$ROOT/shell/build/t48-config --config $W/phone-config"
