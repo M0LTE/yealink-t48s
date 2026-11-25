@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """DTMF digits heard in a recording, for the in-band test of sip/test/phone-test.sh
-(issue #77, shell/tests/phone/22-dtmf-modes.script).
+(issue #77, shell/tests/phone/23-dtmf-modes.script).
 
   dtmf.py WAV DIGITS    exit 0 if the digits found in WAV (16-bit mono) are DIGITS, in order
 

@@ -19,6 +19,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "web.h"
+#include "dialplan.h"
 #include "zones.h"
 
 #ifndef T48_VERSION
@@ -411,7 +412,37 @@ static void page_accounts(struct req *r)
         }
         H("</details>");
     }
+    /* what is set for all the accounts and seldom changed */
+    const char *dp = val("phone", "dialplan", "");
+    H("<details class='card' id='advanced'%r><summary><h2>Advanced</h2></summary>", dp[0] ? " open" : "");
+    form_begin(r, "/accounts/advanced", NULL);
+    H("<label class='field'><span>Dial plan</span><input name='dialplan' value='%s' maxlength='%d' "
+      "autocomplete='off' autocapitalize='none' spellcheck='false' placeholder='%s'><small>Empty for the default: <code>%s</code>. 999 and 112 always dial at once.</small></label>"
+      "<div class='actions'><button class='primary' type='submit'>Save</button></div></form></details>",
+      dp, DP_MAX, DP_DEFAULT, DP_DEFAULT);
     page_end(r);
+}
+
+/* the digit map that says when a number is complete (docs/phone.md#dial-plan) */
+static void post_account_advanced(struct req *r)
+{
+    char v[DP_MAX + 1];
+    int at;
+    if (!line(r, "dialplan", v, sizeof v)) { flash(r, 1, "Dial plan not saved: longer than %d characters.", DP_MAX); redirect(r, "/accounts#advanced"); return; }
+    if (v[0] && dp_check(v, &at) < 0) {
+        flash(r, 1, "Dial plan not saved: not a digit map at character %d.", at + 1);
+        redirect(r, "/accounts#advanced");
+        return;
+    }
+    /* the default as it stands is not stored, so a better one in a later release reaches this phone */
+    if (set("phone", "dialplan", strcmp(v, DP_DEFAULT) ? v : NULL) < 0) {
+        flash(r, 1, "Dial plan not saved: %s.", errno == EINVAL ? "invalid characters" : strerror(errno));
+        redirect(r, "/accounts#advanced");
+        return;
+    }
+    logmsg("dial plan saved");
+    flash(r, 0, "Dial plan saved.");
+    redirect(r, "/accounts#advanced");
 }
 
 static void post_account_save(struct req *r)
@@ -1746,6 +1777,7 @@ const struct route routes[] = {
     {"POST", "/accounts/save", post_account_save},
     {"POST", "/accounts/remove", post_account_remove},
     {"POST", "/accounts/default", post_account_default},
+    {"POST", "/accounts/advanced", post_account_advanced},
     {"GET", "/network", page_network},
     {"POST", "/network", post_network},
     {"GET", "/time", page_time},

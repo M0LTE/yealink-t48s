@@ -77,6 +77,7 @@ main.lone form{margin-bottom:16px}
 .field{display:block;margin:0 0 12px}
 .field>span:first-child{display:block;font-size:.9rem;color:var(--dim);margin-bottom:4px}
 .field small{display:block;color:var(--dim);margin-top:4px}
+.field code{overflow-wrap:anywhere}
 input,select,textarea,button,.button{font:inherit}
 input:not([type=checkbox]):not([type=range]):not([type=file]),select,textarea{width:100%;background:var(--field);color:var(--text);border:1px solid var(--line);border-radius:3px;padding:8px 12px}
 ::placeholder{color:var(--dim);opacity:.7}

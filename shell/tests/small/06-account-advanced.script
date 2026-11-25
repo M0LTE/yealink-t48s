@@ -11,8 +11,8 @@ key soft4
 expect settings
 key soft1
 expectstate settings.page accounts
-# all sixteen, and the default: the list scrolls
-expectstate settings.rows 17
+# all sixteen, the default and Advanced: the list scrolls
+expectstate settings.rows 18
 key up
 expectstate settings.row Account_1
 key down

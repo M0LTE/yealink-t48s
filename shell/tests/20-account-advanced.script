@@ -17,8 +17,8 @@ expectstate settings.row Accounts
 expectstate settings.value 1001@pbx.example.org_+7
 key ok
 expectstate settings.page accounts
-# accounts 1 and 3 to 8 and 16, account 2 to add, and the default
-expectstate settings.rows 10
+# accounts 1 and 3 to 8 and 16, account 2 to add, the default, and Advanced
+expectstate settings.rows 11
 expectstate settings.value Office:_1001@pbx.example.org
 key down
 expectstate settings.row Account_2

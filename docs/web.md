@@ -34,7 +34,7 @@ Open that address in a browser. A browser the phone has not seen gets one page o
 | Page | What it does |
 |---|---|
 | Overview | where things stand, a tile for each page |
-| Accounts | the SIP accounts that are set and one to add, up to 16: every field the phone's screen has, Advanced (registration expiry, DTMF, codecs with Up and Down, NAT keepalive) folded until one is changed. The default account. Remove |
+| Accounts | the SIP accounts that are set and one to add, up to 16: every field the phone's screen has, Advanced (registration expiry, DTMF, codecs with Up and Down, NAT keepalive) folded until one is changed. The default account. Remove. The page's own Advanced: the dial plan ([phone.md](phone.md#dial-plan)) |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server |
 | Date and time | the time zone, from the phone's list, or a TZ string for a place the list lacks |
 | Sound and screen | ringer, handset, speaker and headset levels; brightness, and when the screen dims and goes off; the theme, which the page wears too ([design](design/README.md)) |

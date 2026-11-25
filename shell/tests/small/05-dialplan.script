@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The dial plan on a small screen (issue #77): the countdown in the dialler, a UK mobile called on its eleventh
+# digit with no Call key, and the map on Settings, Accounts, Advanced.
+wait 2500
+expect idle
+hook off
+expectstate phone dial
+key 0
+key 7
+key 7
+key 0
+key 0
+key 9
+key 0
+key 0
+key 1
+key 2
+expectstate autodial 4
+shot shots/t46s-dialplan-countdown.png
+key 3
+waitstate phone outgoing 1000
+expectstate peer 07700900123
+waitstate phone incall 4000
+key soft4
+waitstate phone ended 3000
+hook on
+waitscreen idle 5000
+# a short number goes 4 s after the last digit
+hook off
+key 1
+key 0
+key 0
+key 3
+wait 1200
+expectstate autodial 3
+waitstate phone outgoing 4000
+expectstate peer 1003
+waitstate phone incall 4000
+hook on
+waitstate phone ended 3000
+waitscreen idle 5000
+# the map: Settings, Accounts, Advanced
+key soft4
+expect settings
+key soft1
+expectstate settings.page accounts
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Advanced
+key soft1
+expectstate settings.page advanced
+expectstate settings.row Dial_plan
+expectstate soft1 Edit
+shot shots/t46s-settings-advanced.png
+key soft4
+key soft4
+key soft4
+expect idle
+quit
