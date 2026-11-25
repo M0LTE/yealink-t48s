@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Ringtones (issue 77): the ringer plays the ringtone of the account the call came in on. The phone's
+# audio service runs on its null backend, so nothing is heard; the service says which it plays.
+waitstate reg ok 8000
+waitstate audio up 3000
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+waitstate audio.ringtone 0 2000
+key x
+waitstate phone idle 5000
+run $CONFIG set sip ringtone chime
+wait 1500
+# a second account, 1004, with its own
+run $CONFIG set sip2 user 1004
+run $CONFIG set sip2 password test-only-1004
+run $CONFIG set sip2 domain 127.0.0.1
+run $CONFIG set sip2 register_seconds 60
+run $CONFIG set sip2 ringtone pulse
+run ./apply sip
+waitstate sip up 10000
+waitstate reg.2 ok 15000
+waitstate reg.1 ok 15000
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+expectstate acct 1
+waitstate audio.ringtone 2 2000
+key x
+waitstate phone idle 5000
+run $FAR $CAROL cmd dial 1004
+waitstate phone incoming 5000
+expectstate acct 2
+waitstate audio.ringtone 3 2000
+key x
+waitstate phone idle 5000
+# a custom sound for the second account, as the web setup page keeps it
+run sh -c "mkdir -p phone-state/ringtones && python3 -c 'import math,struct,sys; sys.stdout.buffer.write(struct.pack(\"<8000h\", *[int(16000*math.sin(i/3)) for i in range(8000)]))' > phone-state/ringtones/sip2.s16"
+run $CONFIG set sip2 ringtone custom
+wait 1500
+run $FAR $CAROL cmd dial 1004
+waitstate phone incoming 5000
+waitstate audio.ringtone 4 2000
+key x
+waitstate phone idle 5000
+# its file gone: the standard one
+run rm phone-state/ringtones/sip2.s16
+run $FAR $CAROL cmd dial 1004
+waitstate phone incoming 5000
+waitstate audio.ringtone 0 2000
+key x
+waitstate phone idle 5000
+run rm phone-config/sip2
+run $CONFIG set sip ringtone standard
+run ./apply sip
+waitstate sip up 10000
+waitstate reg ok 15000
+expectstate accounts 1
+quit

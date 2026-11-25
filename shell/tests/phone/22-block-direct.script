@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Block direct calls (issue 77), on by default: a call straight to the phone from an address that is
+# not its registrar is refused with 403 and never rings; one through the registrar rings. Turned off,
+# the same direct call rings.
+waitstate reg ok 8000
+waitstate audio up 3000
+run $STRANGER 127.0.0.2 127.0.0.1:5071 1001 403
+wait 500
+expectstate phone idle
+expectstate audio.ring 0
+expectstate missed 0
+# through the registrar it rings as ever
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+key x
+waitstate phone idle 5000
+# off: the phone service starts again without the check, and the stranger's call rings
+run $CONFIG set phone block_direct off
+run ./apply sip
+waitstate sip up 10000
+waitstate reg ok 15000
+run sh -c "($STRANGER 127.0.0.2 127.0.0.1:5071 1001 180; echo \$? > stranger.rc) > stranger.log 2>&1 &"
+waitstate phone incoming 8000
+expectstate peer mallory
+key x
+waitstate phone idle 5000
+run $FAR waitlog stranger.rc ^0$ 10
+# on again, for what follows
+run $CONFIG set phone block_direct on
+run ./apply sip
+waitstate sip up 10000
+waitstate reg ok 15000
+run $STRANGER 127.0.0.2 127.0.0.1:5071 1001 403
+quit

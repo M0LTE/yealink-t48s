@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Issue 77 on the small screen: Block direct calls, an account's ringtone and call forwarding from
+# the soft keys, and FWD in the header.
+run ./t48-config --config simdata/config set sip user 1001
+run ./t48-config --config simdata/config set sip domain pbx.example.org
+wait 2500
+expect idle
+key soft4
+expect settings
+key soft1
+expectstate settings.page accounts
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Block_direct_calls
+expectstate soft1 Turn_off
+wait 200
+shot shots/t46s-settings-accounts-block.png
+key soft1
+expectstate cfg.phone.block_direct off
+key soft1
+expectstate cfg.phone.block_direct on
+key up
+key up
+key up
+key up
+key up
+key up
+key soft1
+expectstate settings.page sip
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Ringtone
+expectstate soft1 Change
+key soft1
+expectstate cfg.sip.ringtone long
+wait 200
+shot shots/t46s-settings-account-ringtone.png
+key down
+expectstate settings.row Call_forwarding
+key soft1
+expectstate settings.page forward
+key soft1
+expectstate cfg.sip.forward_always on
+key down
+key soft1
+expectstate kbd open
+key 2
+key 0
+key 0
+key 2
+key ok
+expectstate cfg.sip.forward_always_to 2002
+wait 200
+shot shots/t46s-settings-forward.png
+key soft4
+key soft4
+key soft4
+key soft4
+expect idle
+expectstate fwd on
+wait 300
+shot shots/t46s-idle-fwd.png
+quit

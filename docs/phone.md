@@ -85,6 +85,39 @@ Left on the idle screen, or the Contacts button. A list of names and numbers, in
 
 Right on the idle screen, or Settings, Do not disturb, on both models. While it is on, callers are told the phone is not available (SIP 480), nothing rings, and each call is listed as missed. Calls out work as usual. It is kept in `/data/config/phone` (`dnd=on`) so it survives a restart. The idle screen's header says so with an amber lamp and DND after the network address, whatever notices are up.
 
+## Call forwarding
+
+Issue [#77](https://github.com/M0LTE/yealink-t48s/issues/77). Per account, in Settings, Accounts, the account, Call forwarding, or on the web setup page. Three kinds, each on or off with its own number, all off at first:
+
+| Kind | When |
+|---|---|
+| Always | every call. It never rings here |
+| Busy | the owner is on another call (in place of call waiting), or turns a ringing call away with X |
+| No answer | the call has rung for its delay (5 to 60 s, 20 at first) |
+
+The phone answers the caller with **302 Moved Temporarily**, the target in its Contact, and the caller's phone or server makes the new call itself; this phone is out of it. A number is taken as one at the account's own server (`1003` becomes `sip:1003@server`); a `sip:` address or `user@host` is used as it is. Each forwarded call is listed in Calls as an incoming call that was turned away, not as missed. Always wins over do not disturb; do not disturb wins over Busy and No answer.
+
+While any account that is on forwards Always, the idle screen's header says FWD with an amber lamp, as for DND.
+
+A call this phone makes that is answered with a 3xx is followed: baresip calls the new place, and the call screen carries on with it.
+
+| | |
+|---|---|
+| ![FWD in the header](img/idle-fwd.png) | ![the forwarding page](img/settings-forward.png) |
+
+## Ringtones
+
+Each account has its own ringtone, and the ringer plays the one of the account a call came in on. Four are built in, all made in the audio service from sines, faded in and out ([audiod.md](audiod.md#ringtones)):
+
+| Ringtone | Sound |
+|---|---|
+| Standard | two notes in turn, in the UK double ring (as before) |
+| Long | the same notes, one long ring |
+| Chime | two falling notes |
+| Pulse | three short beeps |
+
+**Custom:** a WAV given on the web setup page ([web.md](web.md)), up to 500 KB. The page turns it into the phone's 16 kHz mono, cuts it to 10 s, brings its peak to the built-in ringtones' level (so the ringer volume means the same) and fades its ends; it is kept in `/data/phone/ringtones/sipN.s16` and goes when the account is removed. It plays through the loudspeaker's limiter like every other sound, with a second's gap between plays. Nothing is played while choosing.
+
 ## Messages waiting
 
 For each account the phone asks the server to tell it about waiting voicemail (SIP message-summary, RFC 3842). While there are new messages the lamp blinks slowly and the idle screen says how many. The Message key calls the account's voicemail number, set in Settings, Phone accounts ("Voicemail number"). A server without voicemail just says no and nothing more happens.
@@ -160,7 +193,12 @@ Result on 2026-11-23, all passing, both as PC builds and with `ARM=1`:
 | 14 do not disturb | the caller gets 480, nothing rings, the call is listed as missed; calls out still work; off again and the next call rings |
 | 15 message waiting | the server says two messages: the idle screen and the slow lamp; the Message key calls voicemail; a ringing call takes the lamp and gives it back; the server says none and the lamp shows the missed call alone |
 | 16 contact names | a contact added on the phone names the caller in place of what the caller sends, in the call, the history and when dialled from the list; a stranger keeps their own name |
+| 22 block direct calls | an INVITE straight to the phone from 127.0.0.2, not the registrar, gets 403 and nothing rings; bob's call through the registrar rings; with the setting off the same direct call rings; on again, 403 |
+| 23 call forwarding | Always to 1003: bob's call reaches carol, the phone never rings and lists it; Busy to 1002 while on a call to bob: carol's call reaches bob and the call goes on undisturbed; a ringing call turned away with X goes to bob too; No answer after 5 s: the phone rings, then the call is at bob's |
+| 24 ringtones | the audio service plays the ringtone of the account called: Standard, then Chime for 1001 and Pulse for a second account, 1004; a custom sound for 1004; its file gone, Standard |
 | 20 several accounts | a second account is typed in on the Settings screens and the phone service restarts with both registered; a call out from the chosen account arrives from 1004, Redial uses it again, a plain call still goes from 1001; calls in to each say which was called; the history has the account; the usual account is changed and changed back; the account is removed and one is left |
+
+`make -C shell check` also runs `19-calls.script` (and `small/05-calls.script` on the T46S's screen): Block direct calls, the ringtone row (Custom once there is a sound) and the forwarding page, and FWD in the header.
 
 `make -C shell check` also runs `08-contacts.script`: the contact list, the history's buttons and do not disturb with no services behind them.
 
