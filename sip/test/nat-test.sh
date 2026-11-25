@@ -13,6 +13,8 @@
 #   2. the router restarts (all bindings gone): alice's next OPTIONS comes
 #      back with a new public port, she registers again, and bob's call
 #      reaches her
+#      (meanwhile carol, on TLS in a build without it, cannot send her
+#      REGISTER at all, and must be tried again every 30 to 60 s)
 #   3. keepalive=off: the binding goes after 40 s and bob's call does not
 #      reach alice (the NAT stand-in is real)
 #
@@ -27,7 +29,8 @@ rm -rf $W/* && mkdir -p $W
 FAILS=0
 
 PIDS=
-cleanup() { kill $PIDS $KAM $NAT 2>/dev/null || true; }
+# waits, so a test run straight after finds the ports free
+cleanup() { kill $PIDS $KAM $NAT 2>/dev/null || true; wait 2>/dev/null || true; }
 trap cleanup EXIT
 
 pass() { echo "PASS $1"; }
@@ -77,6 +80,7 @@ sys.exit(0 if rang else 1)
 echo "== 1. keepalives on, 130 s"
 instance alice 5071 udp 127.0.0.1:5090
 instance bob 5072 tcp 127.0.0.1
+instance carol 5073 tls 127.0.0.1
 sleep 130
 grep -h "t48keepalive" $W/alice/log $W/bob/log | sed 's/^/  log: /'
 for who in alice bob; do
@@ -97,6 +101,9 @@ print(("PASS" if okb else "FAIL") + f" bob keepalive once in 130 s ({len(b)})")
 sys.exit(0 if ok and okb else 1)
 EOF
 if grep -q "dropped" $W/nat.log; then fail "binding kept"; else pass "binding kept"; fi
+n=$(grep -c "registration not sent" $W/carol/log || true)
+echo "  carol: $n tries not sent"
+if [ "$n" -ge 3 ]; then pass "unsent registration tried again"; else fail "unsent registration tried again"; fi
 if bob_calls_alice; then pass "call reaches alice behind the NAT"; else fail "call reaches alice behind the NAT"; fi
 
 echo "== 2. router restarts"

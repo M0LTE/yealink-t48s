@@ -36,7 +36,7 @@ static const char *const page_names[] = {"root", "accounts", "sip", "network", "
                                          "appsettings", "appconf", "store", "storeapp", "theme", "update", "install"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
-enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16 };
+enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16, F_HOST = 32, F_PROXY = 64 };
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
               A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME,
               A_UPD_CHANNEL, A_UPD_CHECK, A_UPD_INSTALL, A_UPD_KERNEL, A_UPD_RESTART,
@@ -791,8 +791,8 @@ static void build_sip(const char *arg)
     snprintf(title, sizeof title, "Account %d", n);
     add_stored(R_TEXT, "User", f, "user", "", 0);
     add_stored(R_TEXT, "Password", f, "password", "", F_PASSWORD);
-    add_stored(R_TEXT, "Server host", f, "domain", "", 0);
-    add_stored(R_TEXT, "Outbound proxy", f, "outbound_proxy", "", 0);
+    add_stored(R_TEXT, "Server host", f, "domain", "", F_HOST);
+    add_stored(R_TEXT, "Outbound proxy", f, "outbound_proxy", "", F_PROXY);
     add_stored(R_TEXT, "Auth user", f, "auth_user", "", 0);
     add_stored(R_TEXT, "Display name", f, "display_name", "", 0);
     add_stored(R_CHOICE, "Transport", f, "transport", "udp", 0)->choices = "udp|tcp|tls";
@@ -1604,6 +1604,10 @@ static void kbd_done(void)
     if ((kbd_row.flags & F_PASSWORD) && !text[0]) return;
     if ((kbd_row.flags & F_IP) && text[0] && inet_pton(AF_INET, text, &a) != 1) {
         message("Not an address", "Use the form 192.168.1.20");
+        return;
+    }
+    if (((kbd_row.flags & F_HOST) && !sip_host_ok(text, 0)) || ((kbd_row.flags & F_PROXY) && !sip_host_ok(text, 1))) {
+        message("Not a host", "Use host or host:port, IPv6 in [ ]");
         return;
     }
     if (!strcmp(kbd_row.file, "feed") && !strcmp(kbd_row.key, "url") && strncmp(text, "https://", 8) &&

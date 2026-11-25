@@ -73,12 +73,13 @@ Behind a home router, the router's UDP binding for the phone's SIP port lasts fr
 
 While an account is registered, our module `t48keepalive` sends its server an OPTIONS request on the account's own transport and route (through the outbound proxy, if set): every **23 to 29 s over UDP**, every **96 to 120 s over TCP and TLS**. These are RFC 5626's intervals, spread the way libre spreads its own. Every SIP server answers OPTIONS (200, 401, 404 or 405); any answer will do.
 
-- **No answer at all** (32 s, the server unreachable or a TCP connection gone): the account registers again, once per run of failures.
 - **The server sees a new public address or port** (its `received` and `rport` on our Via): the router lost the binding and made a new one, so the account registers again and calls follow. The test below finds this within one interval of a router restart.
+- **No answer at all over TCP or TLS** (32 s: the connection has gone): the account registers again, once per run of failures. Over UDP no answer only means packets are being lost; libre's own refresh deals with an outage, and the address check catches a new binding when answers resume.
+- **A registration that fails before anything is sent** (no network yet, say) gets no retry from libre or baresip. The module tries it again every 30 to 60 s until one goes out, for every account. One that was sent and failed is retried by libre.
 
 libre's own keepalives are not used: it starts them only when the registrar does SIP outbound (RFC 5626), which most providers do not; over UDP they are STUN requests that most SIP servers ignore; and over TCP it closes the connection when the server does not answer the CRLF ping.
 
-On by default for every account. `keepalive=off` in an account's settings file turns them off, for a server that objects; it is not in Settings.
+On by default for every account. `keepalive=off` in an account's settings file turns them off, for a server that objects; it is not in Settings. A custom `/data/local/sip/config` replaces the whole config, so it must load `t48keepalive.so` (before `account.so`) to keep them.
 
 When an account is changed in Settings, `t48-apply sip` kills baresip and starts `t48-sip` again a second later. `t48-sip` keeps its process number in the run directory and waits (up to five seconds) for an old baresip to let go of the SIP port before starting the new one.
 
@@ -196,6 +197,7 @@ Result on 2026-11-23, all passing (Opus rows 2026-11-25):
 | bob calls alice after 130 s | alice rang |
 | The router restarts (every binding gone) | alice's next OPTIONS showed a new port, she registered again (26 s after the restart); bob's call rang |
 | alice with `keepalive=off` | the binding went after 40 s and bob's call did not reach her |
+| carol, whose REGISTER cannot be sent (TLS on a build without it) | tried again every 30 to 60 s |
 
 `sip/test/audiod-test.sh` adds an Opus call through two audio services, and one with alice's side as the ARM binaries under qemu; both pass.
 

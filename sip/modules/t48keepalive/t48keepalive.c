@@ -15,13 +15,21 @@
  * answers OPTIONS, with 200, 401, 404 or 405; any answer will do.
  *
  * Two things start a new registration, which tells the server where the
- * phone is now. An OPTIONS that gets no answer at all (the server is
- * unreachable, or a TCP connection has gone): once per run of failures, so
- * a server that drops OPTIONS is not registered with every half minute. And
- * an answer that shows the phone's public address or port has changed (the
- * server's received and rport on our Via): the router lost the binding and
- * made a new one, and calls would go to the old one until the next
- * registration.
+ * phone is now. An answer that shows the phone's public address or port
+ * has changed (the server's received and rport on our Via): the router lost
+ * the binding and made a new one, and calls would go to the old one until
+ * the next registration. And, over TCP and TLS only, an OPTIONS that gets no
+ * answer at all (the connection has gone), once per run of failures. Over
+ * UDP no answer only means packets are lost for now: libre's own refresh
+ * deals with an outage, and the address check catches a new binding once
+ * answers come back.
+ *
+ * A registration that fails before anything is sent (REGISTER_FAIL straight
+ * after REGISTERING, in the same turn of the main loop) leaves libre no
+ * request to retry, and baresip does not retry it either. That is tried
+ * again here every 30 to 60 s, for every account, until one goes out. A
+ * REGISTER that was sent and failed is retried by libre itself. While an
+ * account is not registered no OPTIONS are sent.
  *
  * An account opts out with ;keepalive=no (t48-sip writes that for
  * keepalive=off).
@@ -33,6 +41,16 @@
 enum {
 	UDP_INTERVAL = 29,       /* seconds, RFC 5626 section 4.4.1 */
 	STREAM_INTERVAL = 120,   /* TCP and TLS */
+	RETRY_MS = 30000,        /* a registration that could not be sent */
+};
+
+/* every account: is a registration being started right now */
+struct start {
+	struct le le;
+	struct tmr settle;        /* clears starting on the next loop turn */
+	struct tmr retry;
+	struct ua *ua;            /* not a reference, as for struct ka */
+	bool starting;
 };
 
 struct ka {
@@ -42,6 +60,8 @@ struct ka {
 	char *uri;                /* the server: the account's URI without the user */
 	uint32_t interval;
 	unsigned id;              /* the response handler finds us by this */
+	bool stream;              /* TCP or TLS */
+	bool registered;
 	bool pending;
 	bool failed;              /* the last OPTIONS had no answer */
 	struct sa server;         /* the server that last answered */
@@ -49,7 +69,49 @@ struct ka {
 };
 
 static struct list kal;
+static struct list startl;
 static unsigned next_id;
+
+
+static void start_destructor(void *arg)
+{
+	struct start *st = arg;
+
+	tmr_cancel(&st->settle);
+	tmr_cancel(&st->retry);
+	list_unlink(&st->le);
+}
+
+
+static struct start *start_find(const struct ua *ua)
+{
+	struct le *le;
+
+	for (le = startl.head; le; le = le->next) {
+		struct start *st = le->data;
+
+		if (st->ua == ua)
+			return st;
+	}
+
+	return NULL;
+}
+
+
+static void settled(void *arg)
+{
+	struct start *st = arg;
+
+	st->starting = false;
+}
+
+
+static void retry(void *arg)
+{
+	struct start *st = arg;
+
+	(void)ua_register(st->ua);
+}
 
 
 static void ka_destructor(void *arg)
@@ -119,26 +181,36 @@ static void public_addr(char *out, size_t n, const struct sip_msg *msg)
 }
 
 
+/* register again. The caller's last use of ka for this event */
+static void reregister(struct ka *ka)
+{
+	(void)ua_register(ka->ua);
+}
+
+
 static void resp_handler(int err, const struct sip_msg *msg, void *arg)
 {
 	struct ka *ka = ka_find_id((unsigned)(uintptr_t)arg);
 	const char *aor;
 	char now[64];
+	bool moved;
 
 	/* the account unregistered while this was in flight */
 	if (!ka)
 		return;
 
 	ka->pending = false;
+	if (!ka->registered)
+		return;
 	aor = account_aor(ua_account(ka->ua));
 
 	if (err || !msg) {
-		if (ka->failed)
+		if (ka->failed || !ka->stream)
 			return;
 		ka->failed = true;
 		info("t48keepalive: %s: no answer from the server (%m),"
 		     " registering again\n", aor, err);
-		(void)ua_register(ka->ua);
+		reregister(ka);
 		return;
 	}
 
@@ -148,14 +220,15 @@ static void resp_handler(int err, const struct sip_msg *msg, void *arg)
 		return;
 	/* only the same server's view counts: behind a NAT that maps each
 	 * destination apart, another server sees another port */
-	if (ka->mapped[0] && sa_cmp(&ka->server, &msg->src, SA_ALL) &&
-	    strcmp(ka->mapped, now)) {
+	moved = ka->mapped[0] && sa_cmp(&ka->server, &msg->src, SA_ALL) &&
+		strcmp(ka->mapped, now);
+	if (moved)
 		info("t48keepalive: %s: public address now %s, was %s,"
 		     " registering again\n", aor, now, ka->mapped);
-		(void)ua_register(ka->ua);
-	}
 	ka->server = msg->src;
 	str_ncpy(ka->mapped, now, sizeof ka->mapped);
+	if (moved)
+		reregister(ka);
 }
 
 
@@ -174,6 +247,18 @@ static void timeout(void *arg)
 			      (void *)(uintptr_t)ka->id);
 	if (!err)
 		ka->pending = true;
+}
+
+
+/* registered (again): keepalives from now; what the server saw before
+ * this registration no longer counts */
+static void registered(struct ka *ka)
+{
+	if (!ka->registered || !tmr_isrunning(&ka->tmr))
+		tmr_start(&ka->tmr, wait_ms(ka->interval), timeout, ka);
+	ka->registered = true;
+	ka->failed = false;
+	ka->mapped[0] = '\0';
 }
 
 
@@ -203,13 +288,12 @@ static void start(struct ua *ua)
 
 	ka->ua = ua;
 	ka->id = ++next_id;
-	ka->interval = UDP_INTERVAL;
-	if (!msg_param_decode(&uri.params, "transport", &tp) &&
-	    (!pl_strcasecmp(&tp, "tcp") || !pl_strcasecmp(&tp, "tls")))
-		ka->interval = STREAM_INTERVAL;
+	ka->stream = !msg_param_decode(&uri.params, "transport", &tp) &&
+		(!pl_strcasecmp(&tp, "tcp") || !pl_strcasecmp(&tp, "tls"));
+	ka->interval = ka->stream ? STREAM_INTERVAL : UDP_INTERVAL;
 
 	list_append(&kal, &ka->le, ka);
-	tmr_start(&ka->tmr, wait_ms(ka->interval), timeout, ka);
+	registered(ka);
 	info("t48keepalive: %s: OPTIONS to %s every %u to %u s\n",
 	     account_aor(acc), ka->uri, ka->interval * 4 / 5, ka->interval);
 }
@@ -218,19 +302,56 @@ static void start(struct ua *ua)
 static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 {
 	struct ua *ua = bevent_get_ua(event);
+	struct start *st;
+	struct ka *ka;
 	(void)arg;
 
 	switch (ev) {
 	case BEVENT_REGISTER_OK:
-		if (ua && !ka_find(ua))
+		ka = ka_find(ua);
+		if (ka)
+			registered(ka);
+		else if (ua)
 			start(ua);
 		break;
+	case BEVENT_REGISTERING:
+		st = start_find(ua);
+		if (!st && ua) {
+			st = mem_zalloc(sizeof(*st), start_destructor);
+			if (!st)
+				break;
+			st->ua = ua;
+			list_append(&startl, &st->le, st);
+		}
+		if (!st)
+			break;
+		st->starting = true;
+		tmr_cancel(&st->retry);
+		tmr_start(&st->settle, 0, settled, st);
+		break;
 	case BEVENT_REGISTER_FAIL:
+		/* kept: keepalives wait for the next REGISTER_OK */
+		ka = ka_find(ua);
+		if (ka) {
+			ka->registered = false;
+			tmr_cancel(&ka->tmr);
+		}
+		st = start_find(ua);
+		if (st && st->starting) {
+			info("t48keepalive: %s: registration not sent (%s),"
+			     " trying again\n", account_aor(ua_account(ua)),
+			     bevent_get_text(event));
+			tmr_start(&st->retry, RETRY_MS + rand_u16() % RETRY_MS,
+				  retry, st);
+		}
+		break;
 	case BEVENT_UNREGISTERING:
 		mem_deref(ka_find(ua));
+		mem_deref(start_find(ua));
 		break;
 	case BEVENT_SHUTDOWN:
 		list_flush(&kal);
+		list_flush(&startl);
 		break;
 	default:
 		break;
@@ -241,6 +362,7 @@ static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 static int module_init(void)
 {
 	list_init(&kal);
+	list_init(&startl);
 	return bevent_register(event_handler, NULL);
 }
 
@@ -249,6 +371,7 @@ static int module_close(void)
 {
 	bevent_unregister(event_handler);
 	list_flush(&kal);
+	list_flush(&startl);
 	return 0;
 }
 

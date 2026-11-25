@@ -438,9 +438,16 @@ class Paired(unittest.TestCase):
         self.assertEqual(p.get("sip2", "outbound_proxy"), "edge.example.org:5080")
         self.ok("/accounts/save", {"n": "2", "user": "3003", "domain": "[2001:db8::1]:5060", "transport": "udp"}, "/accounts")
         self.assertEqual(p.get("sip2", "domain"), "[2001:db8::1]:5060")
-        for host in ("pbx.example.org:0", "pbx.example.org:65536", "pbx.example.org:sip", "pbx.example.org:", "2001:db8::1", "[2001:db8::1"):
-            self.bad("/accounts/save", {"n": "2", "user": "3003", "domain": host, "transport": "udp"}, "/accounts")
+        for host in ("pbx.example.org:0", "pbx.example.org:65536", "pbx.example.org:sip", "pbx.example.org:", "2001:db8::1", "[2001:db8::1",
+                     "sip:pbx.example.org", "SIP:pbx.example.org"):
+            text = self.bad("/accounts/save", {"n": "2", "user": "3003", "domain": host, "transport": "udp"}, "/accounts")
+            self.assertIn("server host must be", text)
             self.assertEqual(p.get("sip2", "domain"), "[2001:db8::1]:5060")
+        for proxy in ("fe80::1", "SIP:fe80::1", "edge.example.org:99999", "sip:"):
+            text = self.bad("/accounts/save", {"n": "2", "user": "3003", "domain": "pbx.example.org", "outbound_proxy": proxy, "transport": "udp"}, "/accounts")
+            self.assertIn("outbound proxy must be", text)
+        self.ok("/accounts/save", {"n": "2", "user": "3003", "domain": "pbx.example.org", "outbound_proxy": "SIP:[fe80::1]:5080", "transport": "udp"}, "/accounts")
+        self.assertEqual(p.get("sip2", "outbound_proxy"), "SIP:[fe80::1]:5080")
         self.ok("/accounts/remove", {"n": "2", "sure": "yes"}, "/accounts")
         self.assertEqual(b.post("/accounts/save", {"n": "7", "user": "x"}).status, 303)
         self.assertFalse(os.path.exists(os.path.join(p.config, "sip7")))

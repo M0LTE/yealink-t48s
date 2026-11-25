@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include "shell.h"
@@ -203,6 +204,36 @@ int cfg_set(const char *file, const char *key, const char *value)
 
 /* a key whose value is never shown */
 int cfg_secret(const char *key) { return strstr(key, "password") || strstr(key, "secret") || strstr(key, "token"); }
+
+/* an account's server host or outbound proxy, as t48-sip takes it: a name or
+ * address with :port after it if not the usual one, an IPv6 address in
+ * brackets. The proxy may have sip: or sips: in front, in any case. */
+int sip_host_ok(const char *h, int scheme)
+{
+    if (!strncasecmp(h, "sip:", 4) || !strncasecmp(h, "sips:", 5)) {
+        if (!scheme) return 0;
+        h = strchr(h, ':') + 1;
+        if (!*h) return 0;
+    }
+    if (!*h) return 1;
+    const char *port;
+    if (*h == '[') {
+        const char *end = strchr(h, ']');
+        if (!end || end == h + 1) return 0;
+        port = end + 1;
+        if (!*port) return 1;
+        if (*port != ':') return 0;
+    } else {
+        port = strchr(h, ':');
+        if (!port) return 1;
+        if (strchr(port + 1, ':') || port == h) return 0;      /* bare IPv6, or no host */
+    }
+    port++;
+    size_t n = strlen(port);
+    if (!n || n > 5 || strspn(port, "0123456789") != n) return 0;
+    long v = atol(port);
+    return v >= 1 && v <= 65535;
+}
 
 static int list_file(const char *name, int with_name)
 {

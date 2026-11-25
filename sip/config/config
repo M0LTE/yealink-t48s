@@ -80,12 +80,13 @@ module			ausine.so
 # is the shell's way in: JSON commands and events on a Unix socket that only
 # root can open (docs/sip.md), so apps cannot place calls. t48-sip sets
 # t48ctrl_socket to ctrl.sock in its run directory.
+# NAT keepalives and retries of registrations that could not be sent
+# (docs/sip.md). Before account.so, which starts the registrations.
+module_app		t48keepalive.so
 module_app		account.so
 module_app		menu.so
 # message waiting (voicemail): the shell lights the message lamp from its events
 module_app		t48mwi.so
-# NAT keepalives: OPTIONS to the server while registered (docs/sip.md)
-module_app		t48keepalive.so
 module_app		t48ctrl.so
 # No tone files on the phone: the audio service plays them (see Audio above)
 ringback_disabled	yes

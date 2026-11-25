@@ -29,6 +29,28 @@ die() { echo "t48-sip: $*" >&2; exit 1; }
 
 [ -f "$CONFIG" ] || die "no config $CONFIG"
 
+# host, host:port or [IPv6]:port, as the shell's sip_host_ok takes it.
+# Returns 1 with the reason in $why.
+host_ok() {
+    port=-
+    case "$1" in
+        [Ss][Ii][Pp]:*|[Ss][Ii][Pp][Ss]:*) why="no sip: here"; return 1 ;;
+        \[\]*) why="empty brackets"; return 1 ;;
+        \[*\]) ;;
+        \[*\]:*) port=${1##*]:} ;;
+        \[*) why="no closing ]"; return 1 ;;
+        *:*:*) why="an IPv6 address goes in brackets, as [2001:db8::1]:5060"; return 1 ;;
+        :*) why="no host"; return 1 ;;
+        *:*) port=${1##*:} ;;
+    esac
+    case "$port" in
+        -) ;;
+        ''|*[!0-9]*) why="port must be a number"; return 1 ;;
+        *) [ ${#port} -le 5 ] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || { why="port out of range"; return 1; } ;;
+    esac
+    return 0
+}
+
 # One account from one settings file, as a line of baresip's accounts file in
 # $line. Returns 1 (and says why) if the file does not make an account.
 account() {
@@ -67,29 +89,21 @@ account() {
     case "$display_name" in *[\"\<\>]*) echo "t48-sip: $f: display_name cannot hold \" < or >" >&2; return 1 ;; esac
     # domain is the server host, with :port when not the usual one. With no
     # port the server is found by DNS SRV records, then on 5060 (5061 for TLS).
-    port=-
-    case "$domain" in
-        \[*\]) ;;
-        \[*\]:*) port=${domain##*]:} ;;
-        *:*:*) echo "t48-sip: $f: an IPv6 server address goes in brackets: [2001:db8::1]:5060" >&2; return 1 ;;
-        *:*) port=${domain##*:} ;;
+    host_ok "$domain" || { echo "t48-sip: $f: domain: $why: $domain" >&2; return 1; }
+    # the outbound proxy may be a host, host:port or a sip: or sips: URI
+    scheme=sip
+    case "$proxy" in
+        [Ss][Ii][Pp]:*) proxy=${proxy#*:} ;;
+        [Ss][Ii][Pp][Ss]:*) proxy=${proxy#*:}; scheme=sips ;;
     esac
-    case "$port" in
-        -) ;;
-        ''|*[!0-9]*) echo "t48-sip: $f: port must be a number: $domain" >&2; return 1 ;;
-        *) [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || { echo "t48-sip: $f: port out of range: $domain" >&2; return 1; } ;;
-    esac
+    [ -z "$proxy" ] || host_ok "$proxy" || { echo "t48-sip: $f: outbound_proxy: $why: $proxy" >&2; return 1; }
 
     line="<sip:$user@$domain;transport=$transport>"
     [ -n "$display_name" ] && line="\"$display_name\" $line"
     [ -n "$auth_user" ] && line="$line;auth_user=$auth_user"
     [ -n "$password" ] && line="$line;auth_pass=$password"
-    # the outbound proxy may be given as a host, host:port or a sip: URI;
-    # either way it is reached on the account's transport
-    if [ -n "$proxy" ]; then
-        case "$proxy" in sip:*|sips:*) ;; *) proxy="sip:$proxy" ;; esac
-        line="$line;outbound=\"$proxy;transport=$transport\""
-    fi
+    # the proxy is reached on the account's transport
+    [ -n "$proxy" ] && line="$line;outbound=\"$scheme:$proxy;transport=$transport\""
     case "$mwi" in off|no|false|0) mwi=no ;; *) mwi=yes ;; esac
     line="$line;regint=$regint;answermode=manual;mwi=$mwi"
     case "$keepalive" in off|no|false|0) line="$line;keepalive=no" ;; esac
