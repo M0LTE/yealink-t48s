@@ -74,13 +74,25 @@ stick() {
     mkdir -p "$MNT"
     for d in "$DEV"/sd?1 "$DEV"/sd?; do
         [ -b "$d" ] || continue
+        # mounted read-only for apps (t48-usbmount): taken over only if it is ours,
+        # so another stick is not pulled from under an app every few seconds
+        a=$(awk -v d="$d" -v m="$MNT" '$1 == d && $2 != m { print $2; exit }' "$PROC/mounts")
+        if [ -n "$a" ]; then
+            [ -f "$a/T48S.rom" ] || continue
+            usbmount hold "${d##*/}"
+        fi
         umount "$MNT" 2>/dev/null
-        mount -t vfat -o rw,noatime,flush "$d" "$MNT" 2>/dev/null || continue
-        [ -f "$MNT/T48S.rom" ] && return 0
+        if mount -t vfat -o rw,noatime,flush "$d" "$MNT" 2>/dev/null; then
+            [ -f "$MNT/T48S.rom" ] && return 0
+            umount "$MNT" 2>/dev/null
+        fi
+        [ -n "$a" ] && usbmount free "${d##*/}"
     done
     umount "$MNT" 2>/dev/null
     return 1
 }
+# the apps' read-only mounts (t48-usbmount); not there in a rehearsal on a PC
+usbmount() { command -v t48-usbmount >/dev/null 2>&1 && t48-usbmount "$@" >/dev/null; return 0; }
 free_kb() { df -k "$S" | tail -n 1 | awk '{print $4}'; }
 B() { echo "$S/t48s-backup"; }
 
