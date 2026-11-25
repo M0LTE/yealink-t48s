@@ -791,8 +791,8 @@ static void build_sip(const char *arg)
     snprintf(title, sizeof title, "Account %d", n);
     add_stored(R_TEXT, "User", f, "user", "", 0);
     add_stored(R_TEXT, "Password", f, "password", "", F_PASSWORD);
-    add_stored(R_TEXT, "Domain", f, "domain", "", 0);
-    add_stored(R_TEXT, "Proxy", f, "outbound_proxy", "", 0);
+    add_stored(R_TEXT, "Server host", f, "domain", "", 0);
+    add_stored(R_TEXT, "Outbound proxy", f, "outbound_proxy", "", 0);
     add_stored(R_TEXT, "Auth user", f, "auth_user", "", 0);
     add_stored(R_TEXT, "Display name", f, "display_name", "", 0);
     add_stored(R_CHOICE, "Transport", f, "transport", "udp", 0)->choices = "udp|tcp|tls";

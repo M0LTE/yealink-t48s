@@ -409,6 +409,8 @@ class Paired(unittest.TestCase):
         self.assertEqual(os.stat(os.path.join(p.config, "sip")).st_mode & 0o777, 0o600)
         self.assertIn("sip", p.applied_list())
         page = b.get("/accounts").body
+        self.assertIn("<span>Server host</span>", page)
+        self.assertIn("<span>Outbound proxy</span>", page)
         # write only: the page says it is set and never what it is; what is shown is escaped
         self.assertNotIn("s3cret", page)
         self.assertIn("Set. Empty keeps it", page)
@@ -429,6 +431,17 @@ class Paired(unittest.TestCase):
         # refusals
         self.bad("/accounts/save", {"n": "2", "user": "x" * 300, "domain": "d", "transport": "udp"}, "/accounts")
         self.assertIsNone(p.get("sip2", "user"))
+        # the server host takes a port; a bad one is refused
+        self.ok("/accounts/save", {"n": "2", "user": "3003", "domain": "pbx.example.org:5070", "outbound_proxy": "edge.example.org:5080",
+                                   "transport": "udp", "enabled": "on"}, "/accounts")
+        self.assertEqual(p.get("sip2", "domain"), "pbx.example.org:5070")
+        self.assertEqual(p.get("sip2", "outbound_proxy"), "edge.example.org:5080")
+        self.ok("/accounts/save", {"n": "2", "user": "3003", "domain": "[2001:db8::1]:5060", "transport": "udp"}, "/accounts")
+        self.assertEqual(p.get("sip2", "domain"), "[2001:db8::1]:5060")
+        for host in ("pbx.example.org:0", "pbx.example.org:65536", "pbx.example.org:sip", "pbx.example.org:", "2001:db8::1", "[2001:db8::1"):
+            self.bad("/accounts/save", {"n": "2", "user": "3003", "domain": host, "transport": "udp"}, "/accounts")
+            self.assertEqual(p.get("sip2", "domain"), "[2001:db8::1]:5060")
+        self.ok("/accounts/remove", {"n": "2", "sure": "yes"}, "/accounts")
         self.assertEqual(b.post("/accounts/save", {"n": "7", "user": "x"}).status, 303)
         self.assertFalse(os.path.exists(os.path.join(p.config, "sip7")))
         self.bad("/accounts/remove", {"n": "6"}, "/accounts")          # the box was not ticked
