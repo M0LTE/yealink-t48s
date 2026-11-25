@@ -403,8 +403,16 @@ static void url_decode(char *s)
 const char *form(const struct req *r, const char *name)
 {
     for (int i = 0; i < r->nf; i++)
-        if (!strcmp(r->f[i].name, name)) return r->f[i].value;
+        if (!strcmp(r->f[i].name, name)) return strlen(r->f[i].value) == r->f[i].len ? r->f[i].value : "";
     return "";
+}
+
+const char *form_bytes(const struct req *r, const char *name, size_t *len)
+{
+    for (int i = 0; i < r->nf; i++)
+        if (!strcmp(r->f[i].name, name)) { *len = r->f[i].len; return r->f[i].value; }
+    *len = 0;
+    return NULL;
 }
 
 const char *query(const struct req *r, const char *name)
@@ -434,6 +442,7 @@ static void parse_urlencoded(struct req *r)
             url_decode(p);
             url_decode(eq + 1);
             r->f[r->nf].name = p;
+            r->f[r->nf].len = strlen(eq + 1);
             r->f[r->nf++].value = eq + 1;
         }
         p = amp ? amp + 1 : NULL;
@@ -449,7 +458,8 @@ static char *find_bytes(char *hay, size_t hn, const char *needle, size_t nn)
 }
 
 /* multipart/form-data: a file chosen in the browser arrives this way. Fields
- * are text; one with a zero byte in it is dropped. */
+ * keep their length: form() takes one with a zero byte in it for empty,
+ * form_bytes() has it whole. */
 static void parse_multipart(struct req *r)
 {
     char delim[120];
@@ -474,10 +484,11 @@ static void parse_multipart(struct req *r)
         char *vend = next >= value + 2 ? next - 2 : value;   /* the line break before the boundary */
         *vend = 0;
         char *name = strstr(p, "name=\"");
-        if (name && strlen(value) == (size_t)(vend - value)) {
+        if (name) {
             name += 6;
             name[strcspn(name, "\"")] = 0;
             r->f[r->nf].name = name;
+            r->f[r->nf].len = (size_t)(vend - value);
             r->f[r->nf++].value = value;
         }
         p = next;
@@ -826,7 +837,24 @@ static int read_request(struct req *r, char **keep)
     }
     if (strcmp(r->method, "POST")) return strcmp(r->method, "GET") && strcmp(r->method, "HEAD") ? 405 : 0;
     if (clen < 0) clen = 0;   /* a form with nothing in it */
-    if (clen > MAX_BODY) return 413;
+    int ringtone = !strcmp(r->path, "/accounts/ringtone");
+    if (ringtone && clen > MAX_RINGTONE_BODY && clen <= DRAIN_BODY) {
+        /* read to the end and drop it, so the browser gets a page that says why, not a broken connection */
+        char sink[4096];
+        long left = clen - (long)body_have;
+        while (left > 0) {
+            struct pollfd pf = {r->fd, POLLIN, 0};
+            if (now_ms() > deadline || poll(&pf, 1, 2000) < 0) return 400;
+            if (!pf.revents) continue;
+            ssize_t k = recv(r->fd, sink, left < (long)sizeof sink ? (size_t)left : sizeof sink, 0);
+            if (k <= 0) return 400;
+            left -= k;
+        }
+        r->too_big = 1;
+        r->body = *keep = calloc(1, 1);
+        return r->body ? 0 : 413;
+    }
+    if (clen > (ringtone ? MAX_RINGTONE_BODY : MAX_BODY)) return 413;
     r->body = *keep = malloc((size_t)clen + 1);
     if (!r->body) return 413;
     if (body_have > (size_t)clen) body_have = (size_t)clen;
@@ -896,6 +924,12 @@ static void handle(struct req *r)
         else if (!strcmp(r->path, "/pair")) page_pair(r);
         else if (!strcmp(r->path, "/")) page_welcome(r);
         else redirect(r, "/");
+        goto done;
+    }
+    /* nothing was kept of it, the form's token included: no change, only the reason */
+    if (post && r->too_big) {
+        flash(r, 1, "Ringtone not saved: the file is over 2 MB.");
+        redirect(r, "/accounts");
         goto done;
     }
     if (post && !same(r->s->csrf, form(r, "csrf"))) {

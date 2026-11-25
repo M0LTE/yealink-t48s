@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Issue 77 on the screens: Block direct calls on the Advanced page, an account's ringtone (Custom once
+# a sound has been given), its call forwarding page, and FWD in the header while Always is on.
+run ./t48-config --config simdata/config set sip user 1001
+run ./t48-config --config simdata/config set sip domain pbx.example.org
+wait 1500
+expect idle
+expectstate fwd off
+key down
+expect settings
+key ok
+expectstate settings.page accounts
+# Block direct calls: on the Advanced page, off unless the file says on
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Advanced
+key ok
+expectstate settings.page advanced
+key down
+key down
+expectstate settings.row Block_direct_calls
+expectstate settings.value off
+key ok
+expectstate cfg.phone.block_direct on
+wait 200
+shot shots/settings-advanced-block.png
+key ok
+expectstate cfg.phone.block_direct off
+key x
+expectstate settings.page accounts
+# the account: its ringtone steps through the four built in
+key up
+key up
+key up
+key up
+key up
+key up
+expectstate settings.row Account_1
+key ok
+expectstate settings.page sip
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Ringtone
+expectstate settings.value standard
+key ok
+expectstate cfg.sip.ringtone long
+key ok
+expectstate cfg.sip.ringtone chime
+key ok
+expectstate cfg.sip.ringtone pulse
+key ok
+expectstate cfg.sip.ringtone standard
+# a custom sound, as the web setup page leaves it: now Custom is a choice too
+run sh -c "mkdir -p simdata/state/ringtones && head -c 3200 /dev/zero > simdata/state/ringtones/sip.s16"
+key ok
+expectstate cfg.sip.ringtone long
+key ok
+key ok
+key ok
+expectstate cfg.sip.ringtone custom
+wait 200
+shot shots/settings-account-ringtone.png
+# call forwarding: its own page
+key down
+expectstate settings.row Call_forwarding
+expectstate settings.value Off
+key ok
+expectstate settings.page forward
+expectstate settings.row Always
+key ok
+expectstate cfg.sip.forward_always on
+key down
+expectstate settings.row Always_to
+# the account's own number would send calls round in a loop: refused
+key ok
+key 1
+key 0
+key 0
+key 1
+key ok
+expectstate overlay message
+expectstate overlay.text That_is_this_account
+expectstate cfg.sip.forward_always_to (unset)
+wait 200
+shot shots/settings-forward-self.png
+key ok
+expectstate overlay none
+key ok
+expectstate kbd open
+key 2
+key 0
+key 0
+key 2
+expectstate kbd.text 2002
+key ok
+expectstate cfg.sip.forward_always_to 2002
+# No answer: its number, and how long it rings first
+key down
+key down
+key down
+expectstate settings.row No_answer
+key ok
+key down
+key ok
+key 3
+key 0
+key 0
+key 3
+key ok
+expectstate cfg.sip.forward_noanswer_to 3003
+key down
+expectstate settings.row No_answer_after
+expectstate settings.value 20
+key ok
+expectstate cfg.sip.forward_noanswer_after 25
+wait 200
+shot shots/settings-forward.png
+key x
+expectstate settings.page sip
+expectstate settings.row Call_forwarding
+expectstate settings.value Always,_No_answer
+key x
+key x
+key x
+expect idle
+expectstate fwd on
+wait 300
+shot shots/idle-fwd.png
+# Always off again: the header loses it
+run ./t48-config --config simdata/config set sip forward_always off
+wait 1500
+expectstate fwd off
+quit

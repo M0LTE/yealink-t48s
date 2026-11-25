@@ -8,7 +8,8 @@
  *     route none|handset|speaker|headset
  *     volume handset|speaker|headset|ringer|app 0..15
  *     mute 0|1        tone off|dial|ringback|busy|error|waiting
- *     ring 0|1        key CHAR
+ *     ring 0|1|standard|long|chime|pulse    (a ringtone's name rings with it)
+ *     key CHAR
  *     state           (the default) print the state
  * Several commands can be given in one go. It always ends by printing the
  * state on one line.
@@ -28,6 +29,7 @@ static const char *const route_names[] = { "none", "handset", "speaker", "headse
 static const char *const vol_names[] = { "", "handset", "speaker", "headset", "ringer", "app" };
 static const char *const app_names[] = { "none", "paused", "front" };
 static const char *const tone_names[] = { "off", "dial", "ringback", "busy", "error", "waiting" };
+static const char *const ringtone_names[] = { "standard", "long", "chime", "pulse", "custom" };
 
 static int lookup(const char *const *names, int n, const char *s)
 {
@@ -81,8 +83,12 @@ int main(int argc, char **argv)
 			b[0] = (unsigned char)lookup(tone_names, 6, a1);
 			msg_send(fd, T48AC_TONE, b, 1);
 		} else if (!strcmp(c, "ring")) {
-			b[0] = (unsigned char)atoi(a1);
-			msg_send(fd, T48AC_RING, b, 1);
+			int t;
+			for (t = 0; t < 4 && strcmp(a1, ringtone_names[t]); t++)
+				;
+			b[0] = t < 4 ? 1 : (unsigned char)atoi(a1);
+			b[1] = (unsigned char)(t < 4 ? t : 0);
+			msg_send(fd, T48AC_RING, b, 2);
 		} else if (!strcmp(c, "key")) {
 			b[0] = (unsigned char)a1[0];
 			msg_send(fd, T48AC_KEY, b, 1);
@@ -122,10 +128,11 @@ int main(int argc, char **argv)
 		fprintf(stderr, "t48-audioctl: no answer\n");
 		return 1;
 	}
-	printf("route=%s mute=%u tone=%s ring=%u call=%u vol=handset:%u,speaker:%u,headset:%u,ringer:%u,app:%u "
+	printf("route=%s mute=%u tone=%s ring=%u ringtone=%s call=%u vol=handset:%u,speaker:%u,headset:%u,ringer:%u,app:%u "
 	       "app=%s%s hw=%s%s%s\n",
 	       s.route < 4 ? route_names[s.route] : "?", s.mute,
-	       s.tone < 6 ? tone_names[s.tone] : "?", s.ring, s.call,
+	       s.tone < 6 ? tone_names[s.tone] : "?", s.ring,
+	       s.ringtone < T48AC_RINGTONE_COUNT ? ringtone_names[s.ringtone] : "?", s.call,
 	       s.vol[1], s.vol[2], s.vol[3], s.vol[4], s.vol_app,
 	       s.app < 3 ? app_names[s.app] : "?", s.app_sound ? ",sounding" : "",
 	       s.hw & T48AC_HW_CAPTURE ? "capture," : "", s.hw & T48AC_HW_PLAYBACK ? "playback," : "",

@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Call forwarding (issue 77), each kind sent on with 302: the caller's baresip follows it and calls
+# the target itself. Always never rings here; Busy takes a call while the owner is on another, and
+# one turned away; No answer takes it after its delay.
+waitstate reg ok 8000
+waitstate audio up 3000
+# ---- Always, to carol: bob's call goes to her, and the phone stays quiet ----
+run $CONFIG set sip forward_always on
+run $CONFIG set sip forward_always_to 1003
+wait 1500
+expectstate fwd on
+run $FAR $BOB cmd dial 1001
+# (the shell does the forwarding: it must run before a far end is waited for)
+waitstate last i:1002 8000
+run $FAR waitlog $CAROLLOG CALL_INCOMING.*1002@ 8
+expectstate phone idle
+expectstate audio.ring 0
+expectstate last i:1002
+expectstate missed 0
+run $FAR $CAROL accept
+run $FAR $BOB waitcall established 5
+wait 300
+shot shots/phone-idle-fwd.png
+run $FAR $BOB cmd hangupall dir=all
+run $FAR $CAROL waitcall none 5
+run $CONFIG set sip forward_always off
+wait 1500
+expectstate fwd off
+# ---- Busy, to bob: carol calls while the phone is on a call to bob ----
+run $CONFIG set sip forward_busy on
+run $CONFIG set sip forward_busy_to 1002
+wait 1500
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone outgoing 2000
+run $FAR $BOB accept
+waitstate phone incall 5000
+run : > $BOBLOG
+run $FAR $CAROL cmd dial 1001
+waitstate last i:1003 8000
+run $FAR waitlog $BOBLOG CALL_INCOMING.*1003@ 8
+expectstate phone incall
+expectstate other none
+expectstate audio.ring 0
+run $FAR $BOB cmd hangupall dir=all
+waitstate phone ended 5000
+key x
+waitstate phone idle 5000
+run $FAR $CAROL cmd hangupall dir=all
+run $FAR $CAROL waitcall none 5
+# and a ringing call turned away with X goes there too
+run : > $BOBLOG
+run $FAR $CAROL cmd dial 1001
+waitstate phone incoming 5000
+key x
+expectstate phone ended
+expectstate ended Forwarded
+run $FAR waitlog $BOBLOG CALL_INCOMING.*1003@ 8
+expectstate last i:1003
+run $FAR $BOB cmd hangupall dir=all
+run $FAR $CAROL cmd hangupall dir=all
+run $FAR $CAROL waitcall none 5
+waitstate phone idle 5000
+run $CONFIG set sip forward_busy off
+# ---- No answer, to bob, after 5 s ----
+run $CONFIG set sip forward_noanswer on
+run $CONFIG set sip forward_noanswer_to 1002
+run $CONFIG set sip forward_noanswer_after 5
+wait 1500
+run : > $BOBLOG
+run $FAR $CAROL cmd dial 1001
+waitstate phone incoming 5000
+waitstate audio.ring 1 2000
+wait 2500
+expectstate phone incoming
+waitstate phone ended 4000
+expectstate ended Forwarded
+run $FAR waitlog $BOBLOG CALL_INCOMING.*1003@ 6
+expectstate audio.ring 0
+expectstate last i:1003
+run $FAR $BOB accept
+run $FAR $CAROL waitcall established 5
+run $FAR $CAROL cmd hangupall dir=all
+run $FAR $BOB waitcall none 5
+waitstate phone idle 5000
+run $CONFIG set sip forward_noanswer off
+# ---- the other way: the phone calls carol, who forwards to bob; the phone follows ----
+run : > $BOBLOG
+key 1
+key 0
+key 0
+key 3
+key ok
+waitstate phone outgoing 2000
+run $FAR $CAROL forward 1002
+run $FAR waitlog $BOBLOG CALL_INCOMING.*1001@ 8
+# the call screen names the new place
+waitstate peer 1002 2000
+expectstate note Forwarded
+wait 200
+shot shots/phone-outgoing-forwarded.png
+run $FAR $BOB accept
+waitstate phone incall 5000
+expectstate other none
+# the call the phone follows is the new one: bob hanging up ends it
+run $FAR $BOB cmd hangupall dir=all
+waitstate phone ended 5000
+expectstate last o:1002
+run $FAR $BOB waitcall none 5
+waitstate phone idle 5000
+# a loop: carol forwards to herself each time; after three the phone gives up and makes no fourth call
+key 1
+key 0
+key 0
+key 3
+key ok
+waitstate phone outgoing 2000
+run $FAR $CAROL forward 1003
+run $FAR $CAROL forward 1003
+run $FAR $CAROL forward 1003
+run $FAR $CAROL forward 1003
+waitstate phone ended 5000
+expectstate ended Call_failed
+run $FAR $CAROL waitcall none 5
+key x
+waitstate phone idle 5000
+quit
