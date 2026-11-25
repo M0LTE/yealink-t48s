@@ -10,6 +10,8 @@ run $CONFIG set sip forward_always_to 1003
 wait 1500
 expectstate fwd on
 run $FAR $BOB cmd dial 1001
+# (the shell does the forwarding: it must run before a far end is waited for)
+waitstate last i:1002 8000
 run $FAR waitlog $CAROLLOG CALL_INCOMING.*1002@ 8
 expectstate phone idle
 expectstate audio.ring 0
@@ -38,6 +40,7 @@ run $FAR $BOB accept
 waitstate phone incall 5000
 run : > $BOBLOG
 run $FAR $CAROL cmd dial 1001
+waitstate last i:1003 8000
 run $FAR waitlog $BOBLOG CALL_INCOMING.*1003@ 8
 expectstate phone incall
 expectstate other none
@@ -53,6 +56,7 @@ run : > $BOBLOG
 run $FAR $CAROL cmd dial 1001
 waitstate phone incoming 5000
 key x
+expectstate phone ended
 expectstate ended Forwarded
 run $FAR waitlog $BOBLOG CALL_INCOMING.*1003@ 8
 expectstate last i:1003
@@ -72,8 +76,9 @@ waitstate phone incoming 5000
 waitstate audio.ring 1 2000
 wait 2500
 expectstate phone incoming
-run $FAR waitlog $BOBLOG CALL_INCOMING.*1003@ 6
+waitstate phone ended 4000
 expectstate ended Forwarded
+run $FAR waitlog $BOBLOG CALL_INCOMING.*1003@ 6
 expectstate audio.ring 0
 expectstate last i:1003
 run $FAR $BOB accept
@@ -82,4 +87,22 @@ run $FAR $CAROL cmd hangupall dir=all
 run $FAR $BOB waitcall none 5
 waitstate phone idle 5000
 run $CONFIG set sip forward_noanswer off
+# ---- the other way: the phone calls carol, who forwards to bob; the phone follows ----
+run : > $BOBLOG
+key 1
+key 0
+key 0
+key 3
+key ok
+waitstate phone outgoing 2000
+run $FAR $CAROL forward 1002
+waitstate peer 1003 1000
+run $FAR waitlog $BOBLOG CALL_INCOMING.*1001@ 8
+run $FAR $BOB accept
+waitstate phone incall 5000
+expectstate other none
+# the call the phone follows is the new one: bob hanging up ends it
+run $FAR $BOB cmd hangupall dir=all
+waitstate phone ended 5000
+expectstate last o:1003
 quit

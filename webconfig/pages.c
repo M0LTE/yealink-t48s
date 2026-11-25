@@ -320,7 +320,7 @@ static void account_sound(struct req *r, int n)
 {
     form_begin(r, "/accounts/ringtone", "enctype='multipart/form-data' class='sub'");
     H("<input type='hidden' name='n' value='%d'><label class='field'><span>Custom ringtone</span>"
-      "<input type='file' name='sound' accept='.wav,audio/wav,audio/x-wav' required><small>WAV, up to 500 KB. Played for 10 s at most.</small></label>"
+      "<input type='file' name='sound' accept='.wav,audio/wav,audio/x-wav' required><small>WAV, up to 500 KB, 10 s at most</small></label>"
       "<button type='submit'>Upload</button></form>", n);
     if (custom_ringtone(n)) {
         form_begin(r, "/accounts/ringtone-remove", "class='inline'");
@@ -347,7 +347,7 @@ static void page_accounts(struct req *r)
     form_begin(r, "/accounts/block", "class='row'");
     H("<label class='check'><input type='checkbox' name='block_direct' value='on'%r> Block direct calls</label>"
       "<button type='submit'>Save</button></form>"
-      "<p class='dim'>Only calls through an account's server or outbound proxy ring. Off for calls straight to this phone's address.</p></div>",
+      "<p class='dim'>Only calls through an account's server or outbound proxy ring.</p></div>",
       strcmp(val("phone", "block_direct", "on"), "off") ? " checked" : "");
     for (int n = 1; n <= MAX_ACCTS; n++) {
         const char *f = sip_file(n);
