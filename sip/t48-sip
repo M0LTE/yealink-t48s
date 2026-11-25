@@ -10,6 +10,8 @@
 # (sip/config/sip.example). Paths can be moved for testing:
 #   T48_SIP_SETTINGS  default /data/config/sip: account 1. Accounts 2 to 16
 #                     are the same name with the number on the end (sip2).
+#   T48_PHONE_SETTINGS  default phone beside it (/data/config/phone): the
+#                     shell's own file, read here for block_direct only.
 #   T48_SIP_CONFIG    default /data/local/sip/config if present,
 #                     else /usr/share/t48/sip/config
 #   T48_SIP_RUN       default /run/t48-sip (holds the password: mode 0700).
@@ -75,7 +77,7 @@ account() {
             keepalive) keepalive=$val ;;
             dtmf) dtmf=$val ;;
             codecs) codecs=$val ;;
-            label|voicemail) ;;    # the shell's business
+            label|voicemail|ringtone|forward_*) ;;    # the shell's business
             *) echo "t48-sip: $f: ignoring unknown setting '$key'" >&2 ;;
         esac
     done < "$f"
@@ -84,11 +86,13 @@ account() {
     [ -n "$user" ] || { echo "t48-sip: $f: user is missing" >&2; return 1; }
     [ -n "$domain" ] || { echo "t48-sip: $f: domain is missing" >&2; return 1; }
     case "$transport" in udp|tcp|tls) ;; *) echo "t48-sip: $f: transport must be udp, tcp or tls" >&2; return 1 ;; esac
-    # the registration expiry asked for: 60 s to a day, 600 s if not set
+    # the registration expiry asked for: 60 s to a day, 600 s if not set; 0 does
+    # not register at all (peer to peer)
     case "$regint" in
         '') regint=600 ;;
-        *[!0-9]*|??????*) echo "t48-sip: $f: register_seconds must be 60 to 86400, using 600" >&2; regint=600 ;;
-        *) [ "$regint" -ge 60 ] && [ "$regint" -le 86400 ] || { echo "t48-sip: $f: register_seconds must be 60 to 86400, using 600" >&2; regint=600; } ;;
+        *[!0-9]*|??????*) echo "t48-sip: $f: register_seconds must be 0 or 60 to 86400, using 600" >&2; regint=600 ;;
+        *) [ "$regint" -eq 0 ] || { [ "$regint" -ge 60 ] && [ "$regint" -le 86400 ]; } ||
+               { echo "t48-sip: $f: register_seconds must be 0 or 60 to 86400, using 600" >&2; regint=600; } ;;
     esac
     # DTMF: RFC 2833 events, SIP INFO, or tones in the audio. In-band tones
     # are made by t48audio when the shell asks (t48inband), so baresip itself
@@ -145,9 +149,12 @@ account() {
     # the proxy is reached on the account's transport
     [ -n "$proxy" ] && line="$line;outbound=\"$scheme:$proxy;transport=$transport\""
     case "$mwi" in off|no|false|0) mwi=no ;; *) mwi=yes ;; esac
-    line="$line;regint=$regint;answermode=manual;mwi=$mwi;dtmfmode=$dtmfmode"
+    # a 3xx answer to a call we make is followed (call forwarding at the far end)
+    line="$line;regint=$regint;answermode=manual;mwi=$mwi;sip_autoredirect=yes;dtmfmode=$dtmfmode"
     [ -n "$aucodecs" ] && line="$line;audio_codecs=$aucodecs"
     case "$keepalive" in off|no|false|0) line="$line;keepalive=no" ;; esac
+    # no registration, no server address to hold its calls to (Block direct calls)
+    [ "$regint" != 0 ] || line="$line;check_origin=no"
     return 0
 }
 
@@ -170,8 +177,26 @@ if [ -f "$RUN/pid" ]; then
 fi
 echo $$ > "$RUN/pid"
 
-grep -v '^t48ctrl_socket' "$CONFIG" > "$RUN/config"
+grep -v -e '^t48ctrl_socket' -e '^filter_registrar' "$CONFIG" > "$RUN/config"
 printf 't48ctrl_socket\t\t%s\n' "$RUN/ctrl.sock" >> "$RUN/config"
+
+# Block direct calls (issue #77), off unless the phone file says on: a call or
+# other request that does not come from the address the account's last
+# registration was answered from (its server, or the outbound proxy) is
+# refused with 403 and never rings. baresip's own check (check_origin, on by
+# default for each account); filter_registrar switches it on for these
+# transports. An account that does not register has no such address, so it
+# opts out (check_origin=no, in account above).
+PHONE=${T48_PHONE_SETTINGS:-$(dirname "$SETTINGS")/phone}
+block=off
+if [ -f "$PHONE" ]; then
+    v=$(sed -n 's/^block_direct=//p' "$PHONE" | tail -n 1)
+    case "$v" in on|yes|true|1) block=on ;; esac
+fi
+if [ $block = on ]; then
+    printf 'filter_registrar\tudp,tcp,tls\n' >> "$RUN/config"
+    echo "t48-sip: direct calls blocked" >&2
+fi
 
 # account 1 is the settings file itself, accounts 2 to 16 the files beside it
 # with that number on the end: /data/config/sip, sip2, ... sip16

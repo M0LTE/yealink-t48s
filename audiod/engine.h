@@ -18,6 +18,8 @@ struct engine {
 	int mute;
 	int tone;		/* t48ac_tone asked for */
 	int ring;
+	int ringtone;		/* t48ac_ringtone for the next ring */
+	struct tone_def custom;	/* the custom ringtone; pcm NULL until one is loaded */
 	int vol[T48AC_VOL_COUNT];
 	const struct tone_def *alert_def;	/* what the alert generator plays now */
 	struct tone_gen alert;	/* progress tone or ringer */
@@ -38,6 +40,14 @@ void engine_set_volume(struct engine *e, int which, int level);
 void engine_set_mute(struct engine *e, int on);
 void engine_set_tone(struct engine *e, int tone);
 void engine_set_ring(struct engine *e, int on);
+/* Which ringtone rings: takes effect at once if it is ringing. CUSTOM with
+ * no sound loaded plays STANDARD. */
+void engine_set_ringtone(struct engine *e, int ringtone);
+/* The custom ringtone's samples (16 kHz mono), kept by the caller until the
+ * next call; NULL or 0 forgets it. Stops it first if it is sounding. */
+void engine_set_custom(struct engine *e, const int16_t *pcm, uint32_t n);
+/* The ringtone the ringer plays now, as STATE reports it */
+int engine_ringtone(const struct engine *e);
 void engine_key(struct engine *e, int key);
 
 /* Whether baresip's call stream is up: with a route set, that is a call */

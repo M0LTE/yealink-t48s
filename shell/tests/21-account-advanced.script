@@ -68,6 +68,8 @@ expectstate settings.value Office
 key down
 key down
 key down
+key down
+key down
 expectstate settings.row Advanced
 key ok
 expectstate settings.page sipadvanced
@@ -90,11 +92,28 @@ expectstate overlay message
 expectstate overlay.title Out_of_range
 key ok
 expectstate cfg.sip.register_seconds 6000
+# 59 is refused, 0 (no registration) is not
 key ok
 key x
 key x
 key x
 key x
+key 5
+key 9
+key ok
+expectstate overlay.title Out_of_range
+key ok
+key ok
+key x
+key x
+key x
+key x
+key 0
+key ok
+expectstate cfg.sip.register_seconds 0
+key ok
+key x
+expectstate kbd open
 expectstate kbd.text -
 key ok
 expectstate cfg.sip.register_seconds (unset)

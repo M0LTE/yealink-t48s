@@ -169,7 +169,7 @@ class App:
         self.wr = self.n = 0
 
     def tell(self, what, with_ring=False):
-        msg = struct.pack("<HHB", 9, 1, what)   # APP
+        msg = struct.pack("<HHBB", 9, 2, what, 1 if with_ring else 0)   # APP, and whether a ring comes with it
         if with_ring:
             socket.send_fds(self.s, [msg], [self.fd])
         else:
@@ -228,6 +228,12 @@ def app_tests():
     rate = (rd1 - rd0) / (t1 - t0)
     check(15000 < rate < 17000, "taken at %.0f samples a second (want 16000)" % rate)
     check(a.dry == 0, "never ran dry while it was fed")
+    # a bad ring from another client is refused before anything is let go
+    bad = App(d, sealed=False)
+    bad.tell(2, with_ring=True)
+    time.sleep(0.1)
+    check("app=front" in d.ctl() and a.field(1) == 1, "a bad ring does not drop the app that is playing")
+    bad.close()
     # calls win: the phone rings, the app goes on writing
     d.ctl("ring", "1")
     time.sleep(0.1)
@@ -279,7 +285,55 @@ def app_tests():
     check(850 < short < 900, "the short sound: 2000 Hz at %.0f (want 879: half scale at volume 15)" % short)
 
 
+def ringtone_tests():
+    print("== ringtones")
+    d = Daemon("ringtone")
+    d.ctl("volume", "ringer", "15")
+    check("ringtone=chime" in d.ctl("ring", "chime") and "ring=1" in d.ctl(), "a built-in ringtone by name")
+    time.sleep(1.0)
+    d.ctl("ring", "0")
+    time.sleep(0.3)
+    # a custom sound: the shell opens the file and sends it with RING
+    f = os.path.join(d.dir, "custom.s16")
+    ramp = [min(1, i / 320, (8000 - i) / 320) for i in range(8000)]
+    with open(f, "wb") as o:
+        o.write(struct.pack("<8000h", *[int(x * r) for x, r in zip(sine(700, 16000, 8000), ramp)]))
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(os.path.join(d.dir, "ctl.sock"))
+    s.sendall(struct.pack("<HHH", 1, 2, 1))   # HELLO
+    # a descriptor with a message that does not say it carries one is not taken
+    fd = os.open(f, os.O_RDONLY)
+    socket.send_fds(s, [struct.pack("<HHBBB", 6, 3, 1, 4, 0)], [fd])
+    os.close(fd)
+    time.sleep(0.2)
+    check("ringtone=standard" in d.ctl(), "a file not claimed by its message is not used")
+    s.sendall(struct.pack("<HHBBB", 6, 3, 0, 0, 0))
+    time.sleep(0.2)
+    fd = os.open(f, os.O_RDONLY)
+    socket.send_fds(s, [struct.pack("<HHBBB", 6, 3, 1, 4, 1)], [fd])   # RING on, custom, with its file
+    os.close(fd)
+    time.sleep(0.2)
+    check("ringtone=custom" in d.ctl(), "a custom sound sent with RING is taken")
+    time.sleep(1.2)
+    s.sendall(struct.pack("<HHBB", 6, 2, 0, 0))
+    time.sleep(0.3)
+    # again with no file: the custom sound already loaded
+    s.sendall(struct.pack("<HHBB", 6, 2, 1, 4))
+    time.sleep(0.2)
+    check("ringtone=custom" in d.ctl(), "custom again without a file: the one loaded before")
+    s.sendall(struct.pack("<HHBB", 6, 2, 0, 0))
+    time.sleep(0.3)
+    s.close()
+    log, played = d.stop()
+    check(max(abs(x) for x in played) <= 1800, "nothing on the loudspeaker above its limit (1800)")
+    best = max(amp(played[i:i + 1600], 700) for i in range(0, len(played) - 1600, 800))
+    check(1600 < best <= 1810, "the custom sound at ringer volume 15 is on the limit (700 Hz at %.0f, want 1800)" % best)
+    chime = max(amp(played[i:i + 1600], 880) for i in range(0, 16000, 800))
+    check(chime > 1500, "the chime rang first (880 Hz at %.0f)" % chime)
+
+
 def main():
+    ringtone_tests()
     app_tests()
     if fails:
         return 1

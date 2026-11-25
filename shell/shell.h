@@ -235,6 +235,7 @@ void phone_prefill(const char *number, int acct);   /* the dialler with a number
 void phone_dial_from(int acct);              /* the dialler, set to call from that account */
 void phone_toggle_dnd(void);
 int phone_dnd(void);
+int phone_forwarding(void);                  /* an account that is on forwards every call */
 int phone_messages(void);                    /* new voice messages waiting, over all accounts */
 int phone_accounts(void);                    /* how many accounts are switched on */
 int phone_account_default(void);             /* the default account, from 0 */
@@ -279,10 +280,15 @@ int cfg_set(const char *file, const char *key, const char *value);         /* NU
 char *cfg_load_text(const char *file);                                     /* the whole file, malloc'd, or NULL */
 int cfg_save_text(const char *file, const char *text);                     /* the whole file, atomically */
 int cfg_secret(const char *key);                                           /* a password: never shown */
+/* an account's custom ringtone (issue #77): 16 kHz mono s16le samples, kept
+ * under the shell's state folder, by the account's file name (sip, sip2) */
+void ringtone_path(const char *acct_file, char *out, size_t n);
+int ringtone_code(const char *name);
+int forward_to_self(const char *target, const char *user, const char *domain);   /* 1: a forwarding target that is the account itself */                                       /* "chime" -> T48AC_RINGTONE_CHIME; standard if unknown */
 int sip_host_ok(const char *h, int scheme);   /* host, host:port, [IPv6]:port or empty; scheme: a sip: or sips: in front allowed */
 #define T48_ACCOUNTS 16                       /* sip, sip2 ... sip16, as the stock firmware's 16 lines (issue #77) */
 #define T48_REG_DEFAULT 600                   /* register_seconds when not set, as t48-sip has always had it */
-int sip_regint_ok(const char *v);             /* register_seconds: empty, or 60 to 86400 */
+int sip_regint_ok(const char *v);             /* register_seconds: empty, 0, or 60 to 86400 */
 #define T48_CODECS 4
 extern const char *const sip_codec_keys[T48_CODECS], *const sip_codec_names[T48_CODECS];
 void sip_codecs(const char *stored, int order[T48_CODECS], int on[T48_CODECS]);   /* an account's codecs= */
@@ -341,7 +347,7 @@ void audioc_route(int route);
 void audioc_volume(int which, int level);
 void audioc_mute(int on);
 void audioc_tone(int tone);
-void audioc_ring(int on);
+void audioc_ring(int on, int ringtone, const char *custom);   /* T48AC_RINGTONE_*; custom: the custom sound's file */
 void audioc_key(int ch);
 void audioc_app(int what, int ring_fd);       /* T48AC_APP_*; ring_fd: the app's sound ring to hand over, or -1 */
 

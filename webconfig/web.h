@@ -4,6 +4,7 @@
 #define T48_WEB_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include "shell.h"   /* the settings store (config.c), the manifests, and where things live (opt) */
 
 /* where the web page's own things are, beside the shell's (opt) */
@@ -20,6 +21,8 @@ extern struct web_options wopt;
 
 #define MAX_FIELDS 96
 #define MAX_BODY (512 * 1024)
+#define MAX_RINGTONE_BODY (2 * 1024 * 1024)   /* /accounts/ringtone: ten seconds of 44.1 kHz stereo WAV */
+#define DRAIN_BODY (16 * 1024 * 1024)         /* a ringtone bigger than that is read and dropped, to say so on the page */
 
 struct session {
     char token[65];       /* the cookie; "" for a free slot */
@@ -36,10 +39,17 @@ struct req {
     char peer[48];
     char *body;
     size_t blen;
-    struct { const char *name, *value; } f[MAX_FIELDS];
+    struct { const char *name, *value; size_t len; } f[MAX_FIELDS];   /* len: of value, which may hold zero bytes (a file) */
     int nf;
     struct session *s;    /* NULL: not paired */
+    int too_big;          /* a ringtone over its limit: read, dropped, and said so */
 };
+
+/* ---------- wav.c ---------- */
+
+/* a WAV file as a custom ringtone: 16 kHz mono samples (malloc'd), ten
+ * seconds at most (*cut says it was longer). 0, or -1 and a reason */
+int wav_to_ringtone(const unsigned char *in, size_t len, int16_t **out, size_t *n, int *cut, const char **why);
 
 /* ---------- http.c ---------- */
 
@@ -49,7 +59,8 @@ void H(const char *fmt, ...);
 void raw(const char *s, size_t n);
 void page_reset(void);                                     /* start again with nothing: for a download */
 extern int log_quiet;                                      /* 1: say nothing, while the shell's own code is at work */
-const char *form(const struct req *r, const char *name);   /* "" if the form has no such field */
+const char *form(const struct req *r, const char *name);   /* "" if the form has no such field, or it holds a zero byte */
+const char *form_bytes(const struct req *r, const char *name, size_t *len);   /* a file as it came; NULL if there is none */
 const char *query(const struct req *r, const char *name);  /* the same for the address's ?a=b; good until the next call */
 void flash(struct req *r, int bad, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 void send_page(struct req *r, int status);                 /* what H() has made, as HTML */

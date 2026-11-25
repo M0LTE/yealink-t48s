@@ -63,7 +63,7 @@ password=...
 domain=sip.example.com
 # optional: auth_user, display_name, transport (udp, tcp, tls), outbound_proxy, register_seconds,
 #           enabled (off), mwi (off), keepalive (off), dtmf (rfc2833, inband, info), codecs;
-#           label and voicemail are for the shell
+#           label, voicemail, ringtone and forward_* are for the shell
 ```
 
 `domain` is the server host, shown as Server host in Settings and on the web setup page; the key keeps its old name so existing files work. With no port the server is found by DNS SRV records for the account's transport, then the plain address on 5060 (5061 for TLS). With a port (`sip.example.com:5070`, `[2001:db8::1]:5070`) that host and port are used, without SRV. `outbound_proxy` (Outbound proxy) takes a host, `host:port` or a `sip:` URI, and is reached on the account's transport.
@@ -72,12 +72,12 @@ The rest are under Advanced on the account's page, on the phone and the web setu
 
 | Setting | Key | Default | To baresip |
 |---|---|---|---|
-| Registration expiry | `register_seconds`: 60 to 86400 | not set: 600 s, as before | `;regint=` |
+| Registration expiry | `register_seconds`: 60 to 86400, or 0 not to register | not set: 600 s, as before | `;regint=` |
 | DTMF | `dtmf`: `rfc2833`, `inband`, `info` | RFC 2833 | `;dtmfmode=rtpevent` or `info` |
 | Codecs | `codecs`: all four in the order offered, an off one with `-` in front: `g722,opus,-pcmu,pcma` | not set: Opus, G.722, PCMU, PCMA, all on | `;audio_codecs=` |
 | NAT keepalive | `keepalive`: `off` | on | `;keepalive=no` from us ([below](#nat-keepalives)) |
 
-A value `t48-sip` cannot use is logged and the default used; that includes a `register_seconds` outside 60 to 86400, which before #77 was passed to baresip as it was. A `codecs` that names only some leaves the others off; one with all off offers all.
+A value `t48-sip` cannot use is logged and the default used; that includes a `register_seconds` other than 0 or 60 to 86400, which before #77 was passed to baresip as it was. A `codecs` that names only some leaves the others off; one with all off offers all.
 
 **DTMF.** RFC 2833 sends each key as a telephone-event in the RTP stream, which nearly every server takes. SIP INFO sends an INFO request (`application/dtmf-relay`) for each key. In-band puts the key's two tones into the call's audio: baresip has no such mode, so for an account set to it the shell sends `t48inband` with the digit, and `t48audio` replaces the microphone with the tones for 100 ms, then 60 ms of microphone before the next digit: the low tone at -11 dBm0 and the high at -9, faded in and out over 2.5 ms. The queue is emptied whenever the call in front changes, so a tone never reaches another call. In-band suits a far end that listens for tones only; a lossy codec can blur them, so G.711 is safest for it. The phone keeps offering telephone-event in its SDP in every mode, as baresip always does.
 
@@ -94,6 +94,20 @@ While an account is registered, our module `t48keepalive` sends its server an OP
 libre's own keepalives are not used: it starts them only when the registrar does SIP outbound (RFC 5626), which most providers do not; over UDP they are STUN requests that most SIP servers ignore; and over TCP it closes the connection when the server does not answer the CRLF ping.
 
 On by default for every account. The **NAT keepalive** switch under Advanced on the account's page (phone and web setup) turns them off, for a server that objects; it writes `keepalive=off` in the account's file. A custom `/data/local/sip/config` replaces the whole config, so it must load `t48keepalive.so` (before `account.so`) to keep them.
+
+Every account follows a 3xx answer to a call it makes (`sip_autoredirect`): call forwarding at the far end ([phone.md](phone.md#call-forwarding)).
+
+### Block direct calls
+
+Issue [#77](https://github.com/M0LTE/yealink-t48s/issues/77). Off by default, for the whole phone: `block_direct=on` in `/data/config/phone` (Settings, Accounts, Advanced; or Advanced on the web setup page's Accounts) turns it on. Then a call, or an OPTIONS or REFER, that does not come from the account's server is refused with **403 Forbidden** and never rings.
+
+- **Which addresses.** baresip's own check (`check_origin`, on for every account; the config line `filter_registrar udp,tcp,tls`, which `t48-sip` adds when the setting is on): the request's source address must be the one address that answered the account's last successful registration. That is the server host, or the outbound proxy when one is set, as DNS (SRV, then A or AAAA) gave it for that registration. It is renewed with every registration, so it follows the server when its address changes, and the NAT keepalives register again when the phone's own public address changes. Port is not compared.
+- **Which providers it suits.** Those that send calls from the same server the phone registers with, as most do for a phone behind NAT. Not those that send calls from several addresses (a pool of edge servers, or a media gateway apart from the registrar): their calls would be refused. Leave it off for them.
+- **403, not silence.** The answer is one short packet, sent without keeping any state, so a flood from a SIP scanner costs no more than dropping it would, and is never larger than the request. A dropped INVITE would be sent again by an honest but misrouted server for 32 s, and its owner would see a timeout instead of a refusal. A scanner learns nothing new: the phone answers on its SIP port either way.
+- **Peer-to-peer.** Calls straight to this phone's address, with no server between, need it off. An account that does not register (`register_seconds=0`) has no server address to hold calls to, so `t48-sip` gives it `check_origin=no` whatever the setting.
+- An account that has not registered yet gets no calls at all while it is on.
+
+A custom `/data/local/sip/config` gets the line too: `t48-sip` takes any `filter_registrar` out of it and adds its own.
 
 When an account is changed in Settings, `t48-apply sip` kills baresip and starts `t48-sip` again a second later. `t48-sip` keeps its process number in the run directory and waits (up to five seconds) for an old baresip to let go of the SIP port before starting the new one.
 
@@ -125,6 +139,7 @@ The catch: ctrl_tcp only listens on TCP, so any local program, including an app 
 - Level meter and RTCP report events are left out; the shell has no use for them.
 - **Which account:** a command may carry `"account":"sip:user@domain"` and is then run for that account, so `dial` calls out from it. Every event already says which account it is about (`accountaor`).
 - **`joincalls <call-id> <call-id>`** is ours: it connects the two people we are talking to with each other and takes us out (an attended transfer, REFER with Replaces). The first call is the one sent away, the second where it is sent.
+- **`redirect <call-id> <target>`** is ours: a call that is still ringing is answered with 302 Moved Temporarily and the target as its Contact, for call forwarding. A target with no `sip:` and no `@` is a number at the account's server.
 - `MWI_NOTIFY` events (from `t48mwi`) carry the server's message-summary text in `param`.
 
 To try it by hand: `python3 sip/test/far.py /run/t48-sip/ctrl.sock cmd reginfo`.

@@ -302,7 +302,7 @@ static void account_advanced(const char *f)
     int known = 0;
     H("<details class='sub'%r><summary>Advanced</summary><div class='fields'>", changed ? " open" : "");
     field("Registration expiry", "register_seconds", val(f, "register_seconds", ""),
-          "inputmode='numeric' pattern='[0-9]*' placeholder='600'", "Seconds, 60 to 86400");
+          "inputmode='numeric' pattern='[0-9]*' placeholder='600'", "Seconds, 60 to 86400. 0: no registration");
     H("<label class='field'><span>DTMF</span><select name='dtmf'>");
     for (int i = 0; i < 3; i++) {
         known |= !strcmp(d, dtmf[i][0]);
@@ -331,7 +331,7 @@ static int advanced_values(const struct req *r, char *regint, char *codecs, size
     int order[T48_CODECS], on[T48_CODECS], k = 0, any = 0;
     char list[64], *save = NULL;
     snprintf(regint, 8, "%s", "");
-    if (!line(r, "register_seconds", list, 8) || !sip_regint_ok(list)) { *why = "registration expiry must be 60 to 86400 s"; return 0; }
+    if (!line(r, "register_seconds", list, 8) || !sip_regint_ok(list)) { *why = "registration expiry must be 0 or 60 to 86400 s"; return 0; }
     snprintf(regint, 8, "%s", list);
     /* the order the page showed, then the move asked for, if any */
     snprintf(list, sizeof list, "%s", form(r, "codec_order"));
@@ -367,6 +367,55 @@ static int advanced_values(const struct req *r, char *regint, char *codecs, size
     sip_codecs_str(order, on, codecs, n);
     if (!strcmp(codecs, "opus,g722,pcmu,pcma")) codecs[0] = 0;   /* the usual: not written */
     return 1;
+}
+
+static const char *const ringtones[][2] = {{"standard", "Standard"}, {"long", "Long"}, {"chime", "Chime"}, {"pulse", "Pulse"}, {"custom", "Custom"}};
+static const char *const fwd_kinds[][2] = {{"always", "Always"}, {"busy", "Busy"}, {"noanswer", "No answer"}};
+
+static int custom_ringtone(int n)
+{
+    char path[400];
+    struct stat st;
+    ringtone_path(sip_file(n), path, sizeof path);
+    return stat(path, &st) == 0;
+}
+
+/* issue #77: the ringtone, a custom sound, and call forwarding, inside an account's form */
+static void account_calls(int n)
+{
+    const char *f = sip_file(n), *rt = val(f, "ringtone", "standard");
+    char key[40];
+    H("<label class='field'><span>Ringtone</span><select name='ringtone'>");
+    for (int i = 0; i < 5; i++)
+        if (i < 4 || custom_ringtone(n))
+            H("<option value='%s'%r>%s</option>", ringtones[i][0], !strcmp(rt, ringtones[i][0]) ? " selected" : "", ringtones[i][1]);
+    H("</select></label></div><h3>Call forwarding</h3><input type='hidden' name='fwd' value='1'><div class='fields'>");
+    for (int k = 0; k < 3; k++) {
+        char name[40];
+        snprintf(key, sizeof key, "forward_%s", fwd_kinds[k][0]);
+        snprintf(name, sizeof name, "%s_to", key);
+        H("<label class='field'><span><input type='checkbox' name='%s' value='on'%r> %s</span>"
+          "<input name='%s' value='%s' maxlength='60' inputmode='tel' autocapitalize='none' spellcheck='false' placeholder='Number'></label>",
+          key, !strcmp(val(f, key, "off"), "on") ? " checked" : "", fwd_kinds[k][1], name, val(f, name, ""));
+    }
+    const char *after = val(f, "forward_noanswer_after", "20");
+    H("<label class='field'><span>No answer after</span><select name='forward_noanswer_after'>");
+    for (const char *const *t = (const char *const[]){"5", "10", "15", "20", "25", "30", "45", "60", NULL}; *t; t++)
+        H("<option value='%s'%r>%s s</option>", *t, !strcmp(after, *t) ? " selected" : "", *t);
+    H("</select></label>");
+}
+
+/* the custom sound's own form: a WAV to upload, or the one there to remove */
+static void account_sound(struct req *r, int n)
+{
+    form_begin(r, "/accounts/ringtone", "enctype='multipart/form-data' class='sub'");
+    H("<input type='hidden' name='n' value='%d'><label class='field'><span>Custom ringtone</span>"
+      "<input type='file' name='sound' accept='.wav,audio/wav,audio/x-wav' required><small>WAV, up to 2 MB, 10 s at most</small></label>"
+      "<button type='submit'>Upload</button></form>", n);
+    if (custom_ringtone(n)) {
+        form_begin(r, "/accounts/ringtone-remove", "class='inline'");
+        H("<input type='hidden' name='n' value='%d'><button type='submit'>Remove custom ringtone</button></form>", n);
+    }
 }
 
 static void page_accounts(struct req *r)
@@ -412,10 +461,12 @@ static void page_accounts(struct req *r)
         H("</select></label>");
         field("Account name", "label", val(f, "label", ""), "placeholder='Optional'", "Name on the phone's screens");
         field("Voicemail", "voicemail", val(f, "voicemail", ""), "inputmode='tel' placeholder='Optional'", "Number the Message key calls");
+        account_calls(n);
         H("</div><label class='check'><input type='checkbox' name='enabled' value='on'%r> Enabled</label>",
           strcmp(val(f, "enabled", "on"), "off") ? " checked" : "");
         account_advanced(f);
         H("<div class='actions'><button class='primary' type='submit'>Save</button></div></form>");
+        account_sound(r, n);
         if (has) {
             form_begin(r, "/accounts/remove", "class='danger'");
             H("<input type='hidden' name='n' value='%d'>", n);
@@ -426,12 +477,18 @@ static void page_accounts(struct req *r)
     }
     /* what is set for all the accounts and seldom changed */
     const char *dp = val("phone", "dialplan", "");
-    H("<details class='card' id='advanced'%r><summary><h2>Advanced</h2></summary>", dp[0] ? " open" : "");
+    int block = !strcmp(val("phone", "block_direct", "off"), "on");
+    H("<details class='card' id='advanced'%r><summary><h2>Advanced</h2></summary>", dp[0] || block ? " open" : "");
     form_begin(r, "/accounts/advanced", NULL);
     H("<label class='field'><span>Dial plan</span><input name='dialplan' value='%s' maxlength='%d' "
       "autocomplete='off' autocapitalize='none' spellcheck='false' placeholder='%s'><small>Empty for the default: <code>%s</code>. 999 and 112 always dial at once.</small></label>"
-      "<div class='actions'><button class='primary' type='submit'>Save</button></div></form></details>",
+      "<div class='actions'><button class='primary' type='submit'>Save</button></div></form>",
       dp, DP_MAX, DP_DEFAULT, DP_DEFAULT);
+    /* issue #77: calls only through the accounts' servers */
+    form_begin(r, "/accounts/block", "class='sub'");
+    H("<label class='check'><input type='checkbox' name='block_direct' value='on'%r> Block direct calls</label>"
+      "<small class='dim'>Only calls through an account's server or outbound proxy ring.</small>"
+      "<div class='actions'><button type='submit'>Save</button></div></form></details>", block ? " checked" : "");
     page_end(r);
 }
 
@@ -488,12 +545,46 @@ static void post_account_save(struct req *r)
     }
     /* RFC 2833, the usual, is not written; a value written by hand that the page showed is kept */
     if (strcmp(dtmf, "inband") && strcmp(dtmf, "info") && (!strcmp(dtmf, "rfc2833") || strcmp(dtmf, val(f, "dtmf", "")))) dtmf = "";
+    /* forwarding, when the form had it: a box not ticked is off. All checked before any is kept */
+    char fwd_to[3][64];
+    for (int k = 0; k < 3 && form(r, "fwd")[0]; k++) {
+        char key[48];
+        snprintf(key, sizeof key, "forward_%s_to", fwd_kinds[k][0]);
+        const char *why = !line(r, key, fwd_to[k], sizeof fwd_to[k]) || strpbrk(fwd_to[k], " <>\",;") ? "forwarding to %s is not a number or an address" :
+                          forward_to_self(fwd_to[k], v[0], v[1]) ? "%s forwarding is to this account" :
+                          (snprintf(key, sizeof key, "forward_%s", fwd_kinds[k][0]), !strcmp(form(r, key), "on") && !fwd_to[k][0]) ? "%s forwarding needs a number" : NULL;
+        if (why) {
+            char text[120];
+            snprintf(text, sizeof text, why, fwd_kinds[k][1]);
+            flash(r, 1, "Account %d not saved: %s.", n, text);
+            redirect(r, where);
+            return;
+        }
+    }
     for (int i = 0; i < 7 && ok; i++) ok = set(f, keys[i], v[i]) == 0;
     if (ok && adv) ok = set(f, "register_seconds", regint) == 0 && set(f, "dtmf", dtmf) == 0 && set(f, "codecs", codecs) == 0 &&
                         set(f, "keepalive", !strcmp(form(r, "keepalive"), "on") ? NULL : "off") == 0;
     if (ok) ok = cfg_set(f, "transport", tr) == 0 && cfg_set(f, "enabled", !strcmp(form(r, "enabled"), "on") ? "on" : "off") == 0;
     if (ok && pw[0]) ok = cfg_set(f, "password", pw) == 0;
     memset(pw, 0, sizeof pw);
+    if (ok && form(r, "ringtone")[0]) {
+        const char *rt = form(r, "ringtone");
+        int known = 0;
+        for (int i = 0; i < 5; i++) known |= !strcmp(rt, ringtones[i][0]);
+        ok = cfg_set(f, "ringtone", known ? rt : "standard") == 0;
+    }
+    for (int k = 0; k < 3 && ok && form(r, "fwd")[0]; k++) {
+        char key[40], to_key[48];
+        snprintf(key, sizeof key, "forward_%s", fwd_kinds[k][0]);
+        snprintf(to_key, sizeof to_key, "%s_to", key);
+        ok = cfg_set(f, key, !strcmp(form(r, key), "on") ? "on" : "off") == 0 && set(f, to_key, fwd_to[k]) == 0;
+    }
+    if (ok && form(r, "fwd")[0]) {
+        int a = atoi(form(r, "forward_noanswer_after"));
+        char v[8];
+        snprintf(v, sizeof v, "%d", a >= 5 && a <= 60 ? a : 20);
+        ok = cfg_set(f, "forward_noanswer_after", v) == 0;
+    }
     if (!ok) { flash(r, 1, "Account %d not saved: %s.", n, errno == EINVAL ? "invalid characters" : strerror(errno)); redirect(r, where); return; }
     logmsg("account %d saved", n);
     run_apply("sip", 0, 0);
@@ -508,10 +599,74 @@ static void post_account_remove(struct req *r)
     if (n < 1 || n > MAX_ACCTS || !sure(r)) { flash(r, 1, UNSURE); redirect(r, "/accounts"); return; }
     snprintf(path, sizeof path, "%s/%s", opt.config, sip_file(n));
     unlink(path);
+    ringtone_path(sip_file(n), path, sizeof path);
+    unlink(path);
     logmsg("account %d removed", n);
     run_apply("sip", 0, 0);
     flash(r, 0, "Account %d removed.", n);
     redirect(r, "/accounts");
+}
+
+static void post_account_block(struct req *r)
+{
+    int on = !strcmp(form(r, "block_direct"), "on");
+    if (cfg_set("phone", "block_direct", on ? "on" : "off") < 0) {
+        flash(r, 1, "Not saved: %s.", strerror(errno));
+    } else {
+        run_apply("sip", 0, 0);
+        flash(r, 0, "Direct calls %s.", on ? "blocked" : "allowed");
+    }
+    redirect(r, "/accounts#advanced");
+}
+
+/* a WAV for an account's custom ringtone, made into the phone's format and kept */
+static void post_account_ringtone(struct req *r)
+{
+    char path[400], tmp[410], dir[400], where[24];
+    int n = atoi(form(r, "n")), cut = 0;
+    size_t len = 0, ns = 0;
+    const unsigned char *wav = (const unsigned char *)form_bytes(r, "sound", &len);
+    int16_t *pcm = NULL;
+    const char *why = "no file";
+    if (n < 1 || n > MAX_ACCTS) { redirect(r, "/accounts"); return; }
+    snprintf(where, sizeof where, "/accounts#a%d", n);
+    if (!wav || !len || wav_to_ringtone(wav, len, &pcm, &ns, &cut, &why) < 0) {
+        flash(r, 1, "Ringtone not saved: %s.", why);
+        redirect(r, where);
+        return;
+    }
+    ringtone_path(sip_file(n), path, sizeof path);
+    snprintf(dir, sizeof dir, "%s", path);
+    *strrchr(dir, '/') = 0;
+    mkdir(opt.state, 0700);
+    mkdir(dir, 0700);
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    FILE *o = fopen(tmp, "wb");
+    int ok = o && fwrite(pcm, 2, ns, o) == ns;
+    if (o && fclose(o)) ok = 0;
+    free(pcm);
+    if (!ok || rename(tmp, path) < 0 || cfg_set(sip_file(n), "ringtone", "custom") < 0) {
+        unlink(tmp);
+        flash(r, 1, "Ringtone not saved: %s.", strerror(errno));
+        redirect(r, where);
+        return;
+    }
+    logmsg("account %d: custom ringtone, %zu samples", n, ns);
+    flash(r, 0, cut ? "Ringtone saved, cut to 10 s." : "Ringtone saved.");
+    redirect(r, where);
+}
+
+static void post_account_ringtone_remove(struct req *r)
+{
+    char path[400], where[24];
+    int n = atoi(form(r, "n"));
+    if (n < 1 || n > MAX_ACCTS) { redirect(r, "/accounts"); return; }
+    snprintf(where, sizeof where, "/accounts#a%d", n);
+    ringtone_path(sip_file(n), path, sizeof path);
+    unlink(path);
+    if (!strcmp(val(sip_file(n), "ringtone", ""), "custom")) cfg_set(sip_file(n), "ringtone", "standard");
+    flash(r, 0, "Custom ringtone removed.");
+    redirect(r, where);
 }
 
 static void post_account_default(struct req *r)
@@ -1791,6 +1946,9 @@ const struct route routes[] = {
     {"POST", "/accounts/remove", post_account_remove},
     {"POST", "/accounts/default", post_account_default},
     {"POST", "/accounts/advanced", post_account_advanced},
+    {"POST", "/accounts/block", post_account_block},
+    {"POST", "/accounts/ringtone", post_account_ringtone},
+    {"POST", "/accounts/ringtone-remove", post_account_ringtone_remove},
     {"GET", "/network", page_network},
     {"POST", "/network", post_network},
     {"GET", "/time", page_time},

@@ -34,7 +34,7 @@ Open that address in a browser. A browser the phone has not seen gets one page o
 | Page | What it does |
 |---|---|
 | Overview | where things stand, a tile for each page |
-| Accounts | the SIP accounts that are set and one to add, up to 16: every field the phone's screen has, Advanced (registration expiry, DTMF, codecs with Up and Down, NAT keepalive) folded until one is changed. The default account. Remove. The page's own Advanced: the dial plan ([phone.md](phone.md#dial-plan)) |
+| Accounts | the SIP accounts that are set and one to add, up to 16: every field the phone's screen has, ringtone and call forwarding included, and the account's Advanced (registration expiry, DTMF, codecs with Up and Down, NAT keepalive), folded until one is changed. A custom ringtone: a WAV of up to 2 MB, made into the phone's format here ([phone.md](phone.md#ringtones)), or removed. The default account. Remove. The page's own Advanced: the dial plan ([phone.md](phone.md#dial-plan)), Block direct calls ([sip.md](sip.md#block-direct-calls)) |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server |
 | Date and time | the time zone, from the phone's list, or a TZ string for a place the list lacks |
 | Sound and screen | ringer, handset, speaker and headset levels; brightness, and when the screen dims and goes off; the theme, which the page wears too ([design](design/README.md)) |
@@ -79,6 +79,7 @@ Alice Example|1002
 - **Passwords are left out unless the box is ticked.** With them, the file says `# SENSITIVE` at the top and its name ends `-SENSITIVE-with-passwords`.
 - Restoring a file without passwords keeps the passwords the phone has now.
 - A restore replaces each part that is in the file and leaves the rest alone. The whole file is read and checked first; a file that is cut short, or has anything in it that is not a setting, changes nothing.
+- Custom ringtones are not in it: after a restore an account set to Custom rings Standard until its sound is given again.
 - The settings of an app that is no longer installed are only in a backup with passwords: without the app's manifest there is no telling which of them are passwords.
 
 ## Update

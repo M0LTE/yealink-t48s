@@ -162,6 +162,64 @@ int main(void)
 	CHECK(tone_amp(spk_out + 816, 256, 1000) > SPK_LIMIT * 0.97);
 	engine_set_ring(&e, 0);
 
+	/* ringtones (issue #77): each built-in one at its pitch, under the
+	 * loudspeaker's limit, and only on hook */
+	{
+		static const int hz[] = { 1000, 1000, 880, 1400 };
+		static int16_t pcm[8000], three[3 * N];
+		int t, j;
+
+		engine_set_route(&e, T48AC_ROUTE_NONE);
+		for (t = 0; t < 4; t++) {
+			engine_set_ringtone(&e, t);
+			engine_set_ring(&e, 1);
+			CHECK(engine_ringtone(&e) == t);
+			run(&e, 1);
+			/* the two-note ones spend half their time on each */
+			CHECK(tone_amp(spk_out + 800, 1600, hz[t]) > SPK_LIMIT * (t < 2 ? 0.3 : 0.6));
+			CHECK(peak(spk_out, N) <= SPK_LIMIT);
+			/* no step bigger than the highest note's own (2 pi f / 16000 of the peak) */
+			CHECK(max_step(spk_out, N) < SPK_LIMIT * 0.6);
+			engine_set_ring(&e, 0);
+			run(&e, 1);
+		}
+		/* custom with nothing loaded: the standard ring */
+		engine_set_ringtone(&e, T48AC_RINGTONE_CUSTOM);
+		CHECK(engine_ringtone(&e) == T48AC_RINGTONE_STANDARD);
+		/* a half-second 500 Hz sound, peak 16000 like the built-in ones:
+		 * the same level at the same volume, then a second's gap, round again */
+		sine_fill(pcm, 8000, 500, 16000, 0);
+		for (j = 0; j < 320; j++) {
+			pcm[j] = (int16_t)(pcm[j] * j / 320);
+			pcm[7999 - j] = (int16_t)(pcm[7999 - j] * j / 320);
+		}
+		engine_set_custom(&e, pcm, 8000);
+		CHECK(engine_ringtone(&e) == T48AC_RINGTONE_CUSTOM);
+		engine_set_ring(&e, 1);
+		for (j = 0; j < 3 * N; j += FRAME)
+			engine_tick(&e, mic, 0, mic_out, three + j);
+		CHECK_RANGE(tone_amp(three + 1600, 3200, 500), SPK_LIMIT * 0.9, SPK_LIMIT);
+		CHECK(peak(three, 3 * N) <= SPK_LIMIT);
+		CHECK(rms(three + 9000, 6000) == 0);			/* the gap */
+		CHECK(tone_amp(three + 24000 + 1600, 3200, 500) > SPK_LIMIT * 0.9);	/* round again */
+		CHECK(max_step(three, 3 * N) < SPK_LIMIT * 0.25);
+		/* a call already up: the beep, never the sound */
+		engine_set_route(&e, T48AC_ROUTE_HANDSET);
+		run(&e, 1);
+		CHECK(tone_amp(spk_out + 160, 1280, 400) > 7000 && tone_amp(spk_out, N, 500) < 100);
+		engine_set_route(&e, T48AC_ROUTE_NONE);
+		run(&e, 1);
+		CHECK(tone_amp(spk_out + 1600, 3200, 500) > SPK_LIMIT * 0.9);
+		/* stopped half way: it fades, no click */
+		engine_set_ring(&e, 0);
+		run(&e, 1);
+		CHECK(max_step(spk_out, N) < SPK_LIMIT * 0.25 && rms(spk_out + 640, N - 640) == 0);
+		/* forgotten: standard again */
+		engine_set_custom(&e, 0, 0);
+		CHECK(engine_ringtone(&e) == T48AC_RINGTONE_STANDARD);
+		engine_set_ringtone(&e, T48AC_RINGTONE_STANDARD);
+	}
+
 	/* on-hook dialling: key sounds and tones play at the ringer volume
 	 * (8000 at 4 dB under the ringer's top, which is SPK_LIMIT for 16000) */
 	run(&e, 1);

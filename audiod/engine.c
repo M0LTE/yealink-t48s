@@ -17,6 +17,36 @@ void engine_init(struct engine *e)
 	e->vol[T48AC_VOL_RINGER] = 13;	/* 4 dB under the loudspeaker's limit */
 	e->vol[T48AC_VOL_APP] = 12;	/* a full-scale sample 6 dB under the limit */
 	echo_init(&e->echo, ECHO_NONE, 0);
+	e->custom.name = "custom";
+	e->custom.loop = 1;
+}
+
+int engine_ringtone(const struct engine *e)
+{
+	if (e->ringtone == T48AC_RINGTONE_CUSTOM)
+		return e->custom.pcm ? T48AC_RINGTONE_CUSTOM : T48AC_RINGTONE_STANDARD;
+	return e->ringtone;
+}
+
+static const struct tone_def *ring_def(struct engine *e)
+{
+	int t = engine_ringtone(e);
+
+	if (t == T48AC_RINGTONE_CUSTOM)
+		return &e->custom;
+	return tone_ringtones[t];
+}
+
+static int is_ring(const struct engine *e, const struct tone_def *d)
+{
+	int i;
+
+	if (d == &e->custom || d == &tone_waiting)
+		return 1;
+	for (i = 0; i < tone_nringtones; i++)
+		if (d == tone_ringtones[i])
+			return 1;
+	return 0;
 }
 
 /* The ring melody only ever plays with no route set, which means from the
@@ -29,7 +59,7 @@ static void update_alert(struct engine *e)
 	const struct tone_def *want;
 
 	if (e->ring)
-		want = e->route ? &tone_waiting : &tone_ring;
+		want = e->route ? &tone_waiting : ring_def(e);
 	else
 		want = defs[e->tone];
 	if (want == e->alert_def)
@@ -55,7 +85,7 @@ void engine_set_route(struct engine *e, int route)
 	memset(&e->lim, 0, sizeof(e->lim));
 	e->settle = route ? SETTLE_FRAMES : 0;
 	/* a ringer that was sounding must not carry on into the new route */
-	if (e->alert_def == &tone_ring || e->alert_def == &tone_waiting) {
+	if (e->alert_def && is_ring(e, e->alert_def)) {
 		e->alert_def = 0;
 		tone_start(&e->alert, 0);
 	}
@@ -85,6 +115,26 @@ void engine_set_tone(struct engine *e, int tone)
 void engine_set_ring(struct engine *e, int on)
 {
 	e->ring = !!on;
+	update_alert(e);
+}
+
+void engine_set_ringtone(struct engine *e, int ringtone)
+{
+	if (ringtone < 0 || ringtone >= T48AC_RINGTONE_COUNT)
+		ringtone = T48AC_RINGTONE_STANDARD;
+	e->ringtone = ringtone;
+	update_alert(e);
+}
+
+void engine_set_custom(struct engine *e, const int16_t *pcm, uint32_t n)
+{
+	/* the old samples are about to go: never read them again */
+	if (e->alert_def == &e->custom) {
+		e->alert_def = 0;
+		tone_start(&e->alert, 0);
+	}
+	e->custom.pcm = n ? pcm : 0;
+	e->custom.pcm_len = pcm ? n : 0;
 	update_alert(e);
 }
 

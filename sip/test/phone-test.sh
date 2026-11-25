@@ -7,7 +7,8 @@
 # t48audio modules and a real t48-audiod on its null backend, registered as
 # 1001 to a throwaway Kamailio on loopback. Two more baresips are the far
 # ends, 1002 and 1003, driven by far.py from the scripts' `run` lines.
-# mwi.py stands in for a voicemail server's message-waiting lamp. A second
+# mwi.py stands in for a voicemail server's message-waiting lamp. stranger.py
+# calls the phone straight, not through the registrar (Block direct calls). A second
 # account for the phone, 1004, is added and removed by a scenario through the
 # settings screens: the shell's "apply" restarts baresip, as on the phone.
 # Each script in shell/tests/phone/ is one scenario: it checks state as it
@@ -89,7 +90,7 @@ chmod +x $W/apply
 side bob 1002 5072 tcp "Bob Example" $W/bob.sip far
 side carol 1003 5073 udp "Carol Example" $W/carol.sip far
 
-export FAR="python3 $SIP/test/far.py" DTMF="python3 $SIP/test/dtmf.py"
+export FAR="python3 $SIP/test/far.py" STRANGER="python3 $SIP/test/stranger.py" DTMF="python3 $SIP/test/dtmf.py"
 export PHONE=$W/phone/run/ctrl.sock BOB=$W/bob/run/ctrl.sock CAROL=$W/carol/run/ctrl.sock
 export BOBLOG=$W/bob.events CAROLLOG=$W/carol.events
 export MWI="python3 $SIP/test/mwi.py set $W/mwi" CONFIG="$ROOT/shell/build/t48-config --config $W/phone-config"

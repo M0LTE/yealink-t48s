@@ -28,7 +28,13 @@ struct tone_def {
 	const struct tone_seg *seg;
 	uint8_t nseg;
 	uint8_t loop;		/* 1: start again after the last segment */
+	/* A recorded sound in place of the segments (a custom ringtone):
+	 * pcm_len samples, then PCM_GAP_MS of silence, round again. It fades
+	 * in and out like a tone; its own start and end should be quiet. */
+	const int16_t *pcm;
+	uint32_t pcm_len;
 };
+#define PCM_GAP_MS 1000
 
 struct tone_gen {
 	const struct tone_def *def;	/* NULL: silent */
@@ -36,6 +42,8 @@ struct tone_gen {
 	uint8_t stopping;	/* fading out after tone_stop */
 	uint32_t left;		/* samples left in this segment (if it is timed) */
 	uint32_t ph1, ph2, inc1, inc2;
+	uint32_t pcm_pos;	/* a recorded sound: the next sample, past
+				 * pcm_len while in the gap */
 	uint32_t warble_left, warble_len;
 	uint8_t warble_second;
 	int32_t env;		/* 0..32767, slewed over the fade time and then
@@ -47,6 +55,10 @@ struct tone_gen {
  * table of the same shape. */
 extern const struct tone_def tone_dial, tone_ringback, tone_busy, tone_error,
 	tone_waiting, tone_ring, tone_click;
+
+/* The built-in ringtones, by t48ac_ringtone (tone_ring is the first) */
+extern const struct tone_def *const tone_ringtones[];
+extern const int tone_nringtones;
 
 /* The sound for a key: DTMF for 0-9 * #, a click for anything else */
 const struct tone_def *tone_for_key(int key);

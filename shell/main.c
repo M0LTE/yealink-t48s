@@ -221,7 +221,7 @@ static void idle_text(char *out, size_t n)
     ui_network_status(net, sizeof net, &up);
     phone_account_text(acc, sizeof acc, &c);
     size_t k = strftime(out, n, "%H:%M|%A %e %B %Y|", &tm);
-    k += (size_t)snprintf(out + k, n - k, "%s|%s|%d|%d|%d", net, acc, phone_missed(), phone_messages(), phone_dnd());
+    k += (size_t)snprintf(out + k, n - k, "%s|%s|%d|%d|%d%d", net, acc, phone_missed(), phone_messages(), phone_dnd(), phone_forwarding());
     for (int i = 0; i < T48_ACCOUNTS && k < n; i++) {
         char line[80];
         int def;

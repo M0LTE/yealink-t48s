@@ -236,13 +236,13 @@ int sip_host_ok(const char *h, int scheme)
     return v >= 1 && v <= 65535;
 }
 
-/* an account's register_seconds: not set (600), or 60 s to a day */
+/* an account's register_seconds: not set (600), 0 (no registration), or 60 s to a day */
 int sip_regint_ok(const char *v)
 {
     size_t n = strlen(v);
     if (!n) return 1;
     if (n > 5 || strspn(v, "0123456789") != n) return 0;
-    return atol(v) >= 60 && atol(v) <= 86400;
+    return atol(v) == 0 || (atol(v) >= 60 && atol(v) <= 86400);
 }
 
 /* An account's codecs, as the codecs key holds them (issue #77): all four,
@@ -344,4 +344,39 @@ int config_main(int argc, char **argv)
         "list shows passwords only as (set). tz prints the time zone as a TZ string.\n"
         "Most changes take effect after: t48-apply FILE\n", opt.config);
     return 2;
+}
+
+/* ---------- ringtones (issue #77) ---------- */
+
+void ringtone_path(const char *acct_file, char *out, size_t n)
+{
+    snprintf(out, n, "%s/ringtones/%s.s16", opt.state, acct_file);
+}
+
+/* a forwarding target that is the account itself: its user, user@server,
+ * or sip:user@server. A call sent there would come straight back. */
+int forward_to_self(const char *target, const char *user, const char *domain)
+{
+    const char *t = target;
+    size_t ul = strlen(user), dl = strlen(domain);
+    if (!t[0] || !ul) return 0;
+    if (!strncasecmp(t, "sip:", 4)) t += 4;
+    else if (!strncasecmp(t, "sips:", 5)) t += 5;
+    if (strncmp(t, user, ul)) return 0;
+    t += ul;
+    if (!*t) return 1;
+    if (*t != '@') return 0;
+    t++;
+    /* the server as the account has it, with or without its port; parameters after it do not matter */
+    if (!dl || strncasecmp(t, domain, dl)) return 0;
+    t += dl;
+    return !*t || *t == ';' || *t == '>';
+}
+
+int ringtone_code(const char *name)
+{
+    static const char *const names[] = {"standard", "long", "chime", "pulse", "custom"};
+    for (int i = 0; i < T48AC_RINGTONE_COUNT; i++)
+        if (!strcmp(name, names[i])) return i;
+    return T48AC_RINGTONE_STANDARD;
 }
