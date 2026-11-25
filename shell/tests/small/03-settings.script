@@ -23,8 +23,10 @@ key down
 key down
 key down
 key down
+key down
 expectstate settings.row Install
 shot shots/t46s-settings-end.png
+key up
 key up
 key up
 key up
@@ -53,6 +55,15 @@ expectstate kbd closed
 key soft4
 key soft4
 expectstate settings.page root
+# Do not disturb: a switch, the same as Right at the home screen
+key down
+expectstate settings.row Do_not_disturb
+expectstate soft1 Turn_on
+key soft1
+expectstate dnd on
+shot shots/t46s-settings-dnd.png
+key soft1
+expectstate dnd off
 # Network
 key down
 key soft1
@@ -109,6 +120,7 @@ key down
 key down
 key down
 key down
+key down
 key soft1
 key down
 key soft1
@@ -121,6 +133,7 @@ key soft4
 key soft4
 shot shots/t46s-home-twotone.png
 key soft4
+key down
 key down
 key down
 key down

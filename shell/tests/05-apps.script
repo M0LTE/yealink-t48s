@@ -58,6 +58,7 @@ key down
 key down
 key down
 key down
+key down
 expectstate settings.row App_settings
 key ok
 key down

@@ -40,7 +40,7 @@ enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16 };
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
               A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME,
               A_UPD_CHANNEL, A_UPD_CHECK, A_UPD_INSTALL, A_UPD_KERNEL, A_UPD_RESTART,
-              A_FW_BACKUP, A_FW_INSTALL, A_FW_RESTORE, A_KEYTEST };
+              A_FW_BACKUP, A_FW_INSTALL, A_FW_RESTORE, A_KEYTEST, A_DND };
 
 struct row {
     int kind, flags;
@@ -713,6 +713,10 @@ static void build_root(void)
     if (extra && user[0]) { size_t at = strlen(v); snprintf(v + at, sizeof v - at, " +%d", extra); }
     else if (extra) snprintf(v, sizeof v, "%d set", extra);
     add_menu("Accounts", P_ACCOUNTS, v);
+    /* the same switch as Right on the home screen */
+    struct row *dnd = add_action("Do not disturb", A_DND, "");
+    dnd->kind = R_TOGGLE;
+    snprintf(dnd->value, sizeof dnd->value, "%s", phone_dnd() ? "on" : "off");
     ui_network_status(v, sizeof v, &up);
     add_menu("Network", P_NET, v);
     add_menu("Date and time", P_TIME, cfg_str("system", "timezone", "UTC"));
@@ -1499,6 +1503,7 @@ static void do_action(const struct row *r)
         ov.yes = "Restart";
         snprintf(ov.title, sizeof ov.title, "Restart phone?");
         break;
+    case A_DND: phone_toggle_dnd(); break;
     case A_UPD_CHANNEL:
     case A_NONE: break;
     }

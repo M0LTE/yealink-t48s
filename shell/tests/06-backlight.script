@@ -15,6 +15,7 @@ key down
 key down
 key down
 key down
+key down
 expectstate settings.row Screen
 key ok
 expectstate settings.page screen

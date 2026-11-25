@@ -135,13 +135,10 @@ void ui_header_idle(void)
     ui_network_status(net, sizeof net, &up);
     ui_lamp(m, HEAD_H / 2 - 6, up ? C_GOOD : C_BAD);
     int nx = t48_text(&ui, m + 22, y, &t48_font_normal, T->on_head, net);
-    if (SMALL && phone_dnd()) {
-        /* a small screen has no DND button: do not disturb is a tag after the address, clear of the notices */
-        const t48_font *f = &t48_font_small;
-        int lit = T->head != T->accent, tw = t48_text_width(f, "DND") + 14, th = f->height + 4;
-        t48_round_fill(&ui, nx + 12, (HEAD_H - th) / 2, tw, th, T->radius < 6 ? T->radius : th / 2, lit ? T->accent : T->on_head);
-        t48_text_centre(&ui, nx + 12 + tw / 2, (HEAD_H - f->height) / 2, f, lit ? T->on_accent : T->head, "DND");
-        nx += 12 + tw;
+    if (phone_dnd()) {
+        /* do not disturb: a state like the address, an amber lamp and the word after it, clear of the notices */
+        ui_lamp(nx + (SMALL ? 10 : 24), HEAD_H / 2 - 6, T->head != T->accent ? T->accent : T->on_head);
+        nx = t48_text(&ui, nx + (SMALL ? 32 : 46), y, &t48_font_normal, T->on_head, "DND");
     }
     phone_account_text(acc, sizeof acc, &acc_colour);
     int w = t48_text_width(&t48_font_normal, acc);
@@ -153,6 +150,44 @@ void ui_header_idle(void)
         t48_text_right(&ui, SW - m, y, &t48_font_normal, T->on_head, acc);
     }
     ui_lamp(SW - m - w - 22, HEAD_H / 2 - 6, acc_colour);
+}
+
+/* ---------- text drawn smaller than its face ---------- */
+
+/* Text with its top at y, at num/den of its size: each pixel the average of 4 x 4 points of
+ * the face. The small screen's clock is the large one's, in the same share of the screen. */
+int ui_text_scaled(int x, int y, const t48_font *f, uint32_t c, const char *str, int num, int den)
+{
+    int pen = 0;   /* in the face's pixels */
+    for (; *str; str++) {
+        int ch = (unsigned char)*str;
+        const t48_glyph *g = &f->g[(ch < 32 || ch > 126 ? '?' : ch) - 32];
+        const unsigned char *a = f->a + g->off;
+        int gx = pen + g->xoff, x0 = gx * num / den, x1 = ((gx + g->w) * num + den - 1) / den;
+        int y0 = g->yoff * num / den, y1 = ((g->yoff + g->h) * num + den - 1) / den;
+        for (int dy = y0; dy < y1; dy++) {
+            int py = y + dy;
+            if (py < 0 || py >= ui.h) continue;
+            for (int dx = x0; dx < x1; dx++) {
+                int px = x + dx, sum = 0;
+                if (px < 0 || px >= ui.w) continue;
+                for (int j = 0; j < 4; j++) {
+                    int sy = ((dy * 8 + 2 * j + 1) * den) / (8 * num) - g->yoff;
+                    if (sy < 0 || sy >= g->h) continue;
+                    for (int i = 0; i < 4; i++) {
+                        int sx = ((dx * 8 + 2 * i + 1) * den) / (8 * num) - gx;
+                        if (sx >= 0 && sx < g->w) sum += a[sy * g->w + sx];
+                    }
+                }
+                if (sum) {
+                    uint32_t *d = ui.px + py * ui.stride + px;
+                    *d = sum >= 255 * 16 ? c : t48_mix(*d, c, (unsigned)(sum / 16));
+                }
+            }
+        }
+        pen += g->adv;
+    }
+    return x + pen * num / den;
 }
 
 /* ---------- words over two lines ---------- */

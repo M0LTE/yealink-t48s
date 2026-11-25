@@ -135,7 +135,7 @@ void t48_ui_key(t48_surface *s, int x, int y, int w, int h, const char *label); 
 void t48_ui_panel(t48_surface *s, int x, int y, int w, int h);                    /* a quiet box that holds something */
 /* the ground of one row of a list, and the inks to write on it */
 void t48_ui_row(t48_surface *s, int x, int y, int w, int h, int selected, t48_ui_ink *ink);
-int t48_ui_tag(t48_surface *s, int x, int y, const char *text, int role);         /* a short word in a box; the x after it */
+int t48_ui_tag(t48_surface *s, int x, int y, const char *text, int role);         /* a state: a lamp and a word, no box; the x after it */
 int t48_ui_tag_width(const char *text);
 void t48_ui_switch(t48_surface *s, int rx, int y, int h, int on, int selected);   /* On or Off, its right edge at rx */
 void t48_ui_level(t48_surface *s, int x, int y, int w, int h, int level, int max, int disabled, int selected);

@@ -16,10 +16,12 @@ key down
 key down
 key down
 key down
+key down
 expectstate settings.row About
 key x
 run sh -c "mkdir -p simdata/fw && : > simdata/live && : > simdata/fw/in"
 touch 700 420
+key down
 key down
 key down
 key down

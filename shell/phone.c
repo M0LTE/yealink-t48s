@@ -1325,11 +1325,11 @@ static void chips(int cx, int x, int y)
     const char *t[4];
     int role[4], n = 0, w = 0;
 
-    if (P.route) { t[n] = route_labels[P.route]; role[n++] = B_PLAIN; }
+    if (P.route) { t[n] = route_labels[P.route]; role[n++] = B_GO; }
     if (P.muted) { t[n] = "Muted"; role[n++] = B_STOP; }
     if (P.c.held) { t[n] = "On hold"; role[n++] = B_LIT; }
     if (P.c.remote_held) { t[n] = "Held remotely"; role[n++] = B_LIT; }
-    for (int i = 0; i < n; i++) w += ui_tag_width(t[i]) + (i ? 8 : 0);
+    for (int i = 0; i < n; i++) w += ui_tag_width(t[i]) + (i ? (SMALL ? 14 : 20) : 0);
     if (cx >= 0) x = cx - w / 2;
     for (int i = 0; i < n; i++) x = ui_tag(x, y, t[i], role[i]);
 }

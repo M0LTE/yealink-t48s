@@ -183,12 +183,12 @@ void ui_ask(const char *title, const char *text, const char *extra, int tone)
     }
 }
 
-/* five buttons along the bottom of the idle screen */
+/* four buttons along the bottom of the idle screen, as the small screen's soft keys */
 #define IDLE_BTN_Y 400
-#define IDLE_BTN_W 144
+#define IDLE_BTN_W 182
 #define IDLE_BTN_H 56
 #define IDLE_BTN_X(i) (24 + (i) * (IDLE_BTN_W + 8))
-enum { IB_APPS, IB_CALLS, IB_CONTACTS, IB_DND, IB_SETTINGS };
+enum { IB_APPS, IB_CALLS, IB_CONTACTS, IB_SETTINGS };
 /* one line for each account, when there is more than one */
 #define ACC_Y 292
 #define ACC_H 36
@@ -280,15 +280,15 @@ static void draw_idle(void)
     /* the accounts, when there are several: which are registered, and a touch dials from one */
     int naccts = phone_accounts(), several = naccts > 1, ny, y2;
     if (SMALL) {
-        /* The clock, the date, the accounts on one line, the notices: down the middle, between where
-         * the line keys' labels will go. 214 rows between the header and the soft keys on 480x272. */
-        const t48_glyph *d = &t48_font_huge.g['0' - 32];
-        int top = HEAD_H + (BAR_Y - HEAD_H - 214) / 2 + (several ? 6 : 18);
-        t48_text_centre(&ui, SW / 2, top - d->yoff, &t48_font_huge, C_TEXT, hm);
-        int y = top + d->h + 9;
-        if (t48_text_width(&t48_font_normal, date) > SW - 2 * LINE_W) t48_text_fit(&ui, LINE_W, y, SW - 2 * LINE_W, &t48_font_normal, C_DIM, date);
-        else t48_text_centre(&ui, SW / 2, y, &t48_font_normal, C_DIM, date);
-        y += t48_font_normal.height + 2;
+        /* The large screen's clock and date, in the same share of the screen (272 / 480 = 17 / 30),
+         * then the accounts on one line and the notices: down the middle, between where the line
+         * keys' labels will go. */
+        int cw = t48_text_width(&t48_font_huge, hm) * 17 / 30;
+        ui_text_scaled(SW / 2 - cw / 2, (several ? 72 : 112) * 17 / 30, &t48_font_huge, C_TEXT, hm, 17, 30);
+        int y = (several ? 200 : 248) * 17 / 30;
+        if (t48_text_width(&t48_font_small, date) > SW - 2 * LINE_W) t48_text_fit(&ui, LINE_W, y, SW - 2 * LINE_W, &t48_font_small, C_DIM, date);
+        else t48_text_centre(&ui, SW / 2, y, &t48_font_small, C_DIM, date);
+        y += t48_font_small.height + 6;
         if (several) { idle_accounts_small(y); y += 22; }
         ny = y + 3;
         y2 = ny + 34;
@@ -312,11 +312,11 @@ static void draw_idle(void)
     }
     /* One row of notices, the most important first: the standing notice from a file
      * (t48-live: nothing is installed, which the owner must not lose sight of), missed
-     * calls, voice messages, do not disturb. What does not fit the row is left out from
-     * the end: do not disturb shows on its button too, and messages on the lamp. A small
-     * screen shows do not disturb in the header instead, so a notice never crowds it out. */
-    char note[4][96], file[2][96];
-    int role[4];
+     * calls, voice messages. What does not fit the row is left out from the end: messages
+     * show on the lamp too. Do not disturb is a tag in the header, so a notice never crowds
+     * it out. */
+    char note[3][96], file[2][96];
+    int role[3];
     int nn = 0, total = 0;
     notice_read(file);
     if (file[0][0]) role[nn++] = B_FIRST;
@@ -326,10 +326,6 @@ static void draw_idle(void)
     }
     if (phone_messages()) {
         snprintf(note[nn], sizeof note[0], "%d new message%s", phone_messages(), phone_messages() == 1 ? "" : "s");
-        role[nn++] = B_LIT;
-    }
-    if (phone_dnd() && !SMALL) {
-        snprintf(note[nn], sizeof note[0], "Do not disturb");
         role[nn++] = B_LIT;
     }
     /* a small screen sets the row in the small face when that is what it takes to show it all */
@@ -357,9 +353,8 @@ static void draw_idle(void)
         else if (file[1][0]) ui_two_lines_centred(SW / 2, y2, SW - 24, &t48_font_small, C_DIM, file[1]);
         return;
     }
-    static const char *const labels[5] = {"Apps", "Calls", "Contacts", "DND", "Settings"};
-    for (int i = 0; i < 5; i++)
-        ui_btn(IDLE_BTN_X(i), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, labels[i], i == IB_DND && phone_dnd() ? B_LIT : B_PLAIN);
+    static const char *const labels[4] = {"Apps", "Calls", "Contacts", "Settings"};
+    for (int i = 0; i < 4; i++) ui_btn(IDLE_BTN_X(i), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, labels[i], B_PLAIN);
     /* the notice's second line (how to go back to Yealink), above the buttons */
     if (file[1][0] && t48_text_width(&t48_font_small, file[1]) > SW - 20) t48_text_fit(&ui, 10, y2, SW - 20, &t48_font_small, C_DIM, file[1]);
     else if (file[1][0]) t48_text_centre(&ui, SW / 2, y2, &t48_font_small, C_DIM, file[1]);
@@ -865,8 +860,6 @@ void shell_touch(int state, int x, int y)
         phone_open_history();
     } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_CONTACTS), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
         contacts_open(NULL);
-    } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_DND), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
-        phone_toggle_dnd();
     } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_SETTINGS), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
         shell_key(T48_KEY_DOWN, 1);
     } else if (scr == SCR_IDLE && phone_accounts() > 1) {

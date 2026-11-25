@@ -186,6 +186,7 @@ void ui_theme_preview(const t48_theme *t, int x, int y, int w, int h, int curren
 void ui_network_status(char *out, size_t n, int *up);
 /* text over up to two lines, broken at spaces: from x, or each line centred on x */
 void ui_two_lines(int x, int y, int w, const t48_font *f, uint32_t c, const char *text);
+int ui_text_scaled(int x, int y, const t48_font *f, uint32_t c, const char *str, int num, int den);
 void ui_two_lines_centred(int cx, int y, int w, const t48_font *f, uint32_t c, const char *text);
 /* Small screens: what the four soft keys do on the screen being drawn, left to right. A label NULL or
  * "": that key does nothing. Shown along the bottom edge after the screen is drawn; with a touch
