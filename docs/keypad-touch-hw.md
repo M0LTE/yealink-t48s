@@ -153,6 +153,14 @@ The driver keeps a 64-bit LED word (`/proc/keypad/led`, ioctl). `led_hw_set`:
 
 `led_flick` (blinking) is pure software timers on top of this.
 
+### Dimming the lamps
+
+Looked into on 2026-11-25 for lamps that fade (issue #67). The hardware offers nothing, so the three key lamps are dimmed in software ([kernel6/README.md](../kernel6/README.md#key-lamps)).
+
+- **The SoC's PWM is one channel.** `pwmHw_DutyCycleSet`, `pwmHw_FreqSet` and `pwmHw_EnableModulation` in Yealink's kernel (0xC0041554 on) all work on the one register at 0x80002040: bit 0 run, bits 1 to 2 one of four frequencies, bits 3 to 7 the duty. Its output is GPIO35, pin function 13: the backlight. There is no second channel and no way to bring it out on GPIO 3 to 5.
+- **The LED matrix block** (0x80002000, pin function 5, columns on GPIO 0 to 9) scans up to 6 rows by 12 columns with one on-time for all (`ledmHw_Init`, `ledmHw_WriteCoords`: a control word at +0x00, the lamps at +0x18 to +0x20). It has no level per lamp. A column pin muxed to it would be low for as many row slots as have its bit set, which is 7 levels at best, on undocumented registers, with a row pin (GPIO18) that is the backlight's enable. Not tried.
+- **The Holtek chip's lamp is on or off.** Its LED command (4) is a 32-bit mask of which only bit 0 means anything here, and the protocol has no blink and no level: Yealink blinks with a kernel timer (`led_flick`). Command 2 (16 bits, "backlight") sets a PWM inside the chip, for the key backlight of other models; whether it does anything to this lamp is **unknown** and was not tried. A change takes 7 ms of bit-banging, so about twenty a second is the sensible limit, far too slow to dim by switching.
+
 ## Holtek MCU: bit-banged serial
 
 Source: `holtek_hw_gpio_init` (0x6788), `holtek_hw_gpio_send` (0x6bc8), `holtek_hw_gpio_recv` (0x68ac), `holtek_hw_gpio_set_freq` (0x6628); controller struct `HT_Controler` at .data 0x314.

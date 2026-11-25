@@ -1,6 +1,6 @@
 # The app protocol
 
-API level 4. This is the contract between the shell (`t48-shell`) and an app. `libt48` wraps it for C programs, but an app in any language can speak it directly. The C definitions are in [`libt48/include/t48_proto.h`](../libt48/include/t48_proto.h). The design reasons are in [architecture.md](architecture.md#screen-and-input).
+API level 5. This is the contract between the shell (`t48-shell`) and an app. `libt48` wraps it for C programs, but an app in any language can speak it directly. The C definitions are in [`libt48/include/t48_proto.h`](../libt48/include/t48_proto.h). The design reasons are in [architecture.md](architecture.md#screen-and-input).
 
 ## What an app is given
 
@@ -58,6 +58,8 @@ App to shell:
 | 0x83 | PAUSED | none. Optional answer to PAUSE: "freeze me now". |
 | 0x84 | | not used |
 | 0x85 | FLIP | level 3: `u16 buffer, u16 0`. Show this flip buffer at the next refresh |
+| 0x86 | LAMPS | level 5: `u8 set, u8 release, u8 level[4]`. See [Lamps](#lamps) |
+| 0x87 | LAMP_PATTERN | level 5: `u8 mask, u8 flags, u16 count`, then `count` keys of `u16 ms, u8 level, u8 0` |
 
 Key codes: digits, `*` and `#` are their ASCII characters; up 0x100, down 0x101, left 0x102, right 0x103, OK 0x104, back 0x105. Level 3: the four soft keys of a phone that has them, left to right, 0x110 to 0x113.
 
@@ -119,6 +121,30 @@ With libt48: `t48_sound_open()`, then `t48_sound_write()` (waits for room) or `t
 
 In the simulator there is no sound: writing keeps the right pace and the samples go nowhere. To hear or measure them, run `t48-audiod --spk out.wav` and give the simulator `--audio` with its control socket.
 
+## Lamps
+
+Level 5, for an app whose manifest has the `lamps` permission, while it is in front.
+
+| Lamp | | |
+|---|---|---|
+| 0 | message | red, top right of the case. On or off: on from level 128. Slow: twenty changes a second at most, each costing the phone 7 ms |
+| 1 | Headset key | green, 255 levels |
+| 2 | Mute key | red, under Headset, 255 levels |
+| 3 | Speaker key | green, under Mute, 255 levels |
+
+A mask has bit `n` for lamp `n`. Levels are 0 to 255 as the eye takes them: equal steps look equal, so a fade is a plain count ([how](../kernel6/README.md#key-lamps)).
+
+- **LAMPS** sets each lamp in `set` to its `level`, now, and gives each lamp in `release` back to the phone. Send it as often as you draw, to keep time with music.
+- **LAMP_PATTERN** hands the shell a fade to run by itself, the same on every lamp in `mask`. From where the lamp is, it goes in a straight line to each key's level over that key's `ms`, one key after another; `ms` 0 is a jump. At the end the lamp stays at the last level, or with `flags` 1 goes round again from the first key. 1 to 32 keys. The shell steps it fifty times a second.
+- A new LAMPS or LAMP_PATTERN for a lamp replaces what it was doing.
+- **A lamp the app has set is the app's** until it is released. The phone keeps track of what it wants on it meanwhile (mute, a missed call, a message waiting) and shows that the moment it has the lamp back.
+- **Calls win.** PAUSE takes every lamp back at once, and that is what a call does to an app. So do QUIT and the app's end. After RESUME the lamps are the phone's: set them again.
+- Without the permission both messages are ignored. A lamp the phone has not got is ignored.
+
+With libt48: `t48_lamp()`, `t48_lamps_set()`, `t48_lamp_pattern()`, `t48_lamp_fade()`, `t48_lamp_pulse()`, `t48_lamps_release()`; `t48_lamps_ok()` is 0 on an older shell, where the rest do nothing. [`libt48/examples/lamps`](../libt48/examples/lamps/lamps.c) uses all of them. The simulator has no lamps and says what would be lit: `lamp.headset` and so on ([shell.md](shell.md#the-simulator)).
+
+What it costs on the T48S: a lamp at a level between off and full takes 0.5% of the processor, three at different levels 1%, 2% at worst. A pattern on three lamps takes the shell 1% more; fifty LAMPS a second, 2%.
+
 ## The theme
 
 The owner picks one of three themes (Settings, Screen, Theme, or the web setup page: [design](design/README.md)). The shell tells each app which in a THEME message before START, and again at once when it changes; an app that is frozen finds the message waiting ahead of RESUME. An app that takes its colours from it looks like the rest of the phone. With libt48 that is `t48_theme_now()`, the event `T48_EV_THEME` (draw everything again), and nothing else: the fonts, the keyboard and the `t48_ui_*` parts follow by themselves.
@@ -162,13 +188,13 @@ then for each family:
 
 The faces are, in order: 12 px fixed width, 15 px, 19 px, 19 px bold, 15 px fixed width, 26 px bold, 40 px bold, 104 px bold (digits, colon, dot, minus and space only). `glyphs` is the offset of 95 records, for ASCII 32 to 126: `i16 adv, w, h, xoff, yoff, u16 0, u32 off`. A glyph is `w` x `h` bytes of coverage (0 to 255), row by row, at `coverage + off`; draw it `xoff`, `yoff` from the pen and the top of the line, then move the pen `adv`.
 
-An app written for level 1 skips THEME and never looks at the font file: it keeps its own colours and B612. An app built with a level 2 libt48 runs on a level 1 shell as Switchboard. So `"api": 1` in the manifest is still right for an app that only follows the theme; ask for 2 only if the app cannot do without it. The same goes for level 3: an app that flips when it can and draws by DAMAGE when it cannot (`t48_flip_start()` gives NULL) may still say 1 or 2. And for level 4: an app that is content to be silent on an older phone (`t48_sound_open()` gives -1) need not ask for 4.
+An app written for level 1 skips THEME and never looks at the font file: it keeps its own colours and B612. An app built with a level 2 libt48 runs on a level 1 shell as Switchboard. So `"api": 1` in the manifest is still right for an app that only follows the theme; ask for 2 only if the app cannot do without it. The same goes for level 3: an app that flips when it can and draws by DAMAGE when it cannot (`t48_flip_start()` gives NULL) may still say 1 or 2. And for level 4: an app that is content to be silent on an older phone (`t48_sound_open()` gives -1) need not ask for 4. Nor for 5, if it can do without lamps.
 
 ## Life of an app
 
 1. The shell sends HELLO, the settings, THEME, START. The app answers READY and sends its first DAMAGE. An app that has not answered within 5 seconds is killed.
 2. While in front it gets KEY and TOUCH, each press and each release, as the kernel reports them (it reads the keys every 20 ms and the touchscreen every 10 ms). Apps get digits, `*`, `#`, arrows, OK and back, and at level 3 the soft keys. Back is a short press on X, sent when X is released. **A long press on X is Home.** It is never sent, the shell acts on it whatever the app is doing, flipping or not, and it is the one way out that an app cannot take away. The phone keys (hook, Speakerphone, Headset, Mute, Volume, Hold, Transfer, Redial, Message) are never sent.
-3. PAUSE arrives when the owner goes Home or a call takes the screen. Its sound stops at that moment. The app should stop drawing, close network connections and forget any keys it thinks are held. One second later (or at once if it sends PAUSED) it is frozen with SIGSTOP. RESUME follows a SIGCONT; the shell repaints the whole screen from the buffer at that moment, so an app whose picture is still right has nothing to send.
+3. PAUSE arrives when the owner goes Home or a call takes the screen. Its sound stops at that moment, and its [lamps](#lamps) go back to the phone. The app should stop drawing, close network connections and forget any keys it thinks are held. One second later (or at once if it sends PAUSED) it is frozen with SIGSTOP. RESUME follows a SIGCONT; the shell repaints the whole screen from the buffer at that moment, so an app whose picture is still right has nothing to send.
 4. QUIT means go. An app still there after one second is killed. An app may also just exit when it is finished: exit status 0 returns to the launcher quietly, anything else (or a crash) shows the owner a message.
 5. An app that stops reading its socket for so long that the shell cannot queue more events is killed.
 
@@ -197,5 +223,5 @@ An installed app is a folder holding `manifest.json`, the program and an icon. T
 - `id` (a-z, 0-9, `-`, `.`, `_`), `exec` (a path inside the folder) and `api` are required. An app asking for a higher API level than the shell speaks is not listed.
 - `name`, `version` and `description` are shown to the owner; `t48-pack` (in the SDK) needs `name` and `version`, and copies `description` into the feed.
 - `icon` is a binary PPM (P6) up to 96 x 96 for now; without one the launcher shows the name's first letter. PNG will follow when libt48 can read it.
-- `permissions` is shown to the owner by the app manager ([apps.md](apps.md)). `audio-out` is enforced: without it the app is given no [sound](#sound). `network` is not enforced yet.
+- `permissions` is shown to the owner by the app manager ([apps.md](apps.md)). `audio-out` is enforced: without it the app is given no [sound](#sound). `lamps` is enforced: without it the app cannot set a [lamp](#lamps). `network` is not enforced yet.
 - `settings`: each has a `key`, a `label`, a `type` (`text`, `number`, `bool` or `password`) and a `default`, and reaches the app as a SETTING message. The value is the manifest's default unless the owner has changed it in Settings, App settings ([settings.md](settings.md#an-apps-settings)), which keeps it in `/data/config/apps/<id>.conf`.

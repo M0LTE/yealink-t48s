@@ -77,7 +77,7 @@ The same machine has the phone's kind of LCD controller, so its device tree carr
 | Page flipping | `drivers/t48s_flip.c`, `/dev/t48flip`: the three spare frames the boot loader reserved, mapped cached, and shown whole by pointing the PL111 (0x30500000, interrupt 30) at one. Timing is never written | yes (2026-11-24): 300 flips on 300 consecutive frames, 14.746 ms apart; the shell and a test app at 67.8 a second with none missed |
 | Serial port after a start from U-Boot | `drivers/t48s_secure.c`: U-Boot leaves UART A a secure device, whose interrupt never reaches Linux; one bit in the TrustZone block register makes it an ordinary one (issue 59) | the same write from user space brought a dead serial shell back on the installed phone, 2026-11-24 |
 | Watchdog, reset | the kernel's SP805 driver with `patches/0002`; `t48-watchdog` uses `/dev/watchdog` | yes: fed by `t48-watchdog`; off for 50 s without a reset; a frozen feeder resets the phone within the 30 s; `back-to-yealink` and `reboot` reset |
-| Key lamps | the kernel's `gpio-leds`, same names | by reading the pins back, not by eye |
+| Key lamps | `drivers/t48s_lamps.c`: 255 levels, switched from one timer; same names ([Key lamps](#key-lamps)) | yes (2026-11-25): levels, timing and cost measured; nobody has judged the fades by eye yet |
 | Holtek chip, message lamp | `drivers/t48s_holtek.c` | the chip answers and its watchdog is turned off; the lamp not by eye |
 | Backlight | `drivers/t48s_backlight.c` | yes, by reading the register back |
 | Keypad, hook switch | `drivers/t48s_keypad.c` | found running; test presses reach the shell; no real key pressed yet. From cold: its test hook (2026-11-24) |
@@ -92,6 +92,29 @@ Two more things were tried and work: the kernel's own `spi-pl022` and `ads7846` 
 DMA: both users (Ethernet on controller 1, audio on controller 0) program their channels directly, as on 3.6. The kernel's `dw_dmac` driver was not needed, and nothing else touches either controller now, so the 3.6 patches that kept the old platform code off controller 0 have no counterpart here.
 
 Size: 2,147,794 bytes compressed with the first stage, every driver above, UBI and UBIFS, against the 2,621,440 of the kernel slot: 0.45 MB to spare. (1.60 MB for the kernel alone.)
+
+## Key lamps
+
+The Headset, Mute and Speaker lamps are plain pins (GPIO 3, 4, 5, low is lit), and the SoC has nothing better to drive them with ([docs/keypad-touch-hw.md](../docs/keypad-touch-hw.md#dimming-the-lamps)). `drivers/t48s_lamps.c` switches them itself and shows them as ordinary LED devices with `brightness` 0 to 255, so the timer trigger and everything else that knows LEDs works as before.
+
+- **One timer for all three.** 200 frames a second. Each frame the lit lamps go on together and each goes off when its share is over. A lamp fully on or off costs nothing; with none in between, no timer runs.
+- **255 levels as the eye takes them.** The share of the frame is the CIE lightness curve of the number: 1 is 2 us of the 5 ms, 128 is 22%, 255 is all of it. A fade is a plain count.
+- **Exact edges.** Anything under 50 us is waited out in the handler with interrupts off. A longer pulse ends on an interrupt asked for 12 us early, and the rest is waited out.
+- **The message lamp** stays on or off: it is on the Holtek chip, 7 ms a change ([`t48s_holtek.c`](drivers/t48s_holtek.c)).
+
+Measured on the phone (2026-11-25), 5 s each, against a fixed piece of work timed with the lamps dark:
+
+| Lamps at | Interrupts a second | Processor | Latest off edge |
+|---|---|---|---|
+| one at 128 | 400 | 0.5% | 8 us |
+| 60, 128, 200 | 800 | 1.2% | 36 us (once; 11 us otherwise) |
+| 3, 10, 20 | 200 | 1.0% (waits) | 0 |
+| 30, 40, 50 | 400 | 2.2% (waits) | 3 us |
+| 128, 128, 128 | 400 | 0.5% | 11 us |
+
+The counters are in `/sys/module/t48s_lamps/parameters` (`frames`, `irqs`, `busy_ns`, `late_us`, `off_late_us`; write 0 to clear), and `frame_us` there changes the frame, 2000 to 20000. A shell that writes `1` for on, as ours did before API level 5, gets the dimmest level from this driver: this kernel wants the shell that goes with it. The new shell writes 255, which an older kernel takes as on.
+
+`qemu-test.sh` runs the driver on three pins of a PL061: frames at the right rate, and none once the lamps are dark.
 
 ## Flash
 

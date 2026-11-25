@@ -11,6 +11,8 @@ make CC=$HOME/src-build/t48s/bin/armcc O=build-arm # the phone
 
 **Sound.** `t48_sound_open()` and `t48_sound_write()` play 16 kHz mono through the phone's audio service, for an app with the `audio-out` permission; `t48_resample()` brings other rates and stereo to that. [`examples/tones`](examples/tones) is the smallest program that makes a sound. The simulator makes none and keeps the same time. `make check` tests the resampler and the queue.
 
+**Lamps.** `t48_lamp()` sets one of the four lamps to a level, `t48_lamp_pattern()` hands the shell a fade to run, for an app with the `lamps` permission. [`examples/lamps`](examples/lamps) tries each.
+
 Run an app on a PC with the simulator: see [docs/shell.md](../docs/shell.md#the-simulator).
 
 The WebSocket client (plain `ws://`) came from the old `native/waterfall.c`; `wss://` will follow with mbedTLS. The on-screen keyboard (`t48_kbd_*`) is the one the shell's settings use ([docs/settings.md](../docs/settings.md#the-keyboard)). Not written yet: PNG reading.

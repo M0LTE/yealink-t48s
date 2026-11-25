@@ -100,7 +100,7 @@ Until #6 reports, a null backend and a file backend let SIP and the phone UI go 
 
 **Decision: a folder with a `manifest.json`, an icon and one static program that speaks the app protocol. Any language.** Issues [#20](https://github.com/M0LTE/yealink-t48s/issues/20), [#22](https://github.com/M0LTE/yealink-t48s/issues/22).
 
-The manifest gives: id, name, version, API level, what to run, permissions (`network`, `audio-out`), and a list of settings (key, label, type, default) that the shell shows with its normal settings screens. A package is that folder as a tar.gz with the extension `.t48app`.
+The manifest gives: id, name, version, API level, what to run, permissions (`network`, `audio-out`, `lamps`), and a list of settings (key, label, type, default) that the shell shows with its normal settings screens. A package is that folder as a tar.gz with the extension `.t48app`.
 
 ### Screen and input
 

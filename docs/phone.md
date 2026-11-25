@@ -113,6 +113,8 @@ The phone decides what each lamp should do, and [`shell/leds.c`](../shell/leds.c
 | speaker, headset (in those keys) | on while the sound is there |
 | mute (in the Mute key) | on while muted |
 
+The app in front may borrow lamps ([app-protocol.md](app-protocol.md#lamps)). What the phone wants is kept meanwhile and goes back on the lamp when the app lets go, is paused or closes; a call pauses the app, so a call always has its lamps.
+
 The message lamp was called "power" here until 2026-11-23 (Yealink's own files call it that). The kernel driver now names it `t48s:red:message`; the shell also accepts the old name, so it works with a kernel built before the change.
 
 ## How it fits together
