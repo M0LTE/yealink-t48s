@@ -70,6 +70,19 @@ expect call
 waitscreen keys 6000
 expectstate phone idle
 scanup 57 2 1
+# a phone key held at the idle screen does not open it: volume is held to change the level
+scandown 45 115 volup
+wait 5500
+expect idle
+scanup 45 115 volup
+# two keys the table does not hold, overlapping: the second has no key event of its own, its release ends
+# the first's, and the first's release then comes as a place alone. Nothing is held: the test does not open
+scandown 30 240
+scandown 31
+scanup 31 240
+scandown 30
+wait 5500
+expect idle
 # a call comes first: the handset takes the screen, and the test is over
 hook off
 expect call
@@ -91,9 +104,12 @@ expectstate settings.row About
 key ok
 expectstate settings.page about
 expectstate settings.row Key_test
-key ok
+# the release of the OK that opens it is not the test's first key
+scandown 35 28 ok
 expect keys
+scanup 35 28 ok
 expectstate keys.seen 0
+expectstate keys.last -
 scandown 1 240
 scanup 1 240
 expectstate keys.seen 1

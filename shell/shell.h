@@ -191,7 +191,7 @@ int phone_account_line(int k, char *out, size_t n, uint32_t *colour, int *is_def
 
 /* ---------- the key test (keytest.c): every key's place in the matrix, on the screen ---------- */
 
-#define KEYTEST_OPEN_MS 5000    /* any key held this long from the idle screen opens it */
+#define KEYTEST_OPEN_MS 5000    /* a key held this long from the idle screen opens it (not a phone key: SK_VOLDOWN and up) */
 #define KEYTEST_LEAVE_MS 3000   /* and any key held this long leaves it */
 void keytest_open(void);
 void keytest_event(int scan, int key, int value);
@@ -200,7 +200,7 @@ int keytest_timeout(long long now);
 int keytest_tick(long long now, int *scan, int *key);   /* 1: time to leave, and the key that is still held */
 const char *keytest_state(const char *key);
 void shell_show_keytest(void);               /* from Settings, About */
-int phone_stand_down(void);                  /* a dialler with nothing dialled yet goes away; 1 if the phone is idle */
+int phone_stand_down(void);                  /* a dialler goes away, whatever is typed in it, if the handset is down; 1 if the phone is idle */
 
 /* ---------- contacts (contacts.c): a list of names and numbers ---------- */
 

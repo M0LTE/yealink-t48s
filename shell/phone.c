@@ -1161,8 +1161,8 @@ void phone_key(int code, int down)
     changed();
 }
 
-/* The key test wants the screen. A dialler goes (a key held at the idle screen may have opened it); a
- * call stays. */
+/* The key test wants the screen. A dialler goes, with whatever has been typed in it, if the handset is
+ * down (a key held at the idle screen may have opened it); a lifted handset's dialler and a call stay. */
 int phone_stand_down(void)
 {
     if (P.st == PH_DIAL && !P.hook_off) go_idle();

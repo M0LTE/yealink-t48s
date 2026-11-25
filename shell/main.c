@@ -64,6 +64,7 @@ static long long x_deadline;         /* in an app: when a held X becomes Home; 0
  * key, and when it has been held long enough (0: none is). And the key still held when the test was left,
  * whose release is nobody's. */
 static int hold_scan, hold_key, left_scan, left_key, left_held;
+static int down_scan, down_key, down_held;   /* the key that went down last, and whether it is still down */
 static long long hold_deadline;
 static int idle_notices;             /* how many notices the idle screen's row had room for */
 static char idle_shown[900];         /* time, date, network, accounts and notices as last drawn, to redraw only on a change */
@@ -557,10 +558,34 @@ static void open_keytest(void)
     show(SCR_KEYS);
 }
 
-void shell_show_keytest(void) { open_keytest(); }
+/* From Settings: the key that chose the row is still down, and its release is not the test's first key */
+void shell_show_keytest(void)
+{
+    open_keytest();
+    if (scr != SCR_KEYS || !down_held) return;
+    left_scan = down_scan;
+    left_key = down_key;
+    left_held = 1;
+}
+
+/* Is this the release of that key? Two keys the table does not hold share one Linux key, so the release of
+ * the one held longer comes as its place alone, with no key event. */
+static int released(int scan, int key, int value, int was_scan, int was_key)
+{
+    if (value < 0) return scan && scan == was_scan;
+    return !value && scan == was_scan && key == was_key;
+}
 
 void shell_scan(int scan, int key, int code, int value)
 {
+    if (value > 0) { down_scan = scan; down_key = key; down_held = 1; }
+    else if (released(scan, key, value, down_scan, down_key)) down_held = 0;
+    if (hold_deadline && released(scan, key, value, hold_scan, hold_key)) hold_deadline = 0;
+    if (left_held && released(scan, key, value, left_scan, left_key)) {
+        left_held = 0;
+        if (code) backlight_key(code, 0);
+        return;
+    }
     if (scr == SCR_KEYS) {
         /* every key is the test's, and does nothing else */
         if (code) backlight_key(code, value > 0);
@@ -570,13 +595,11 @@ void shell_scan(int scan, int key, int code, int value)
         return;
     }
     if (value < 0) return;
-    if (!value && left_held && scan == left_scan && key == left_key) { left_held = 0; return; }
-    if (value && scr == SCR_IDLE && !hold_deadline) {
+    /* not the phone keys, which act on any screen and may well be held: volume, Speaker, Mute and the rest */
+    if (value && scr == SCR_IDLE && !hold_deadline && code < SK_VOLDOWN) {
         hold_scan = scan;
         hold_key = key;
         hold_deadline = t48_now_ms() + KEYTEST_OPEN_MS;
-    } else if (!value && scan == hold_scan && key == hold_key) {
-        hold_deadline = 0;
     }
     if (code) shell_key(code, value);
     else if (value) logmsg("key code %d has no meaning yet", key);
@@ -641,6 +664,8 @@ void shell_key(int code, int down)
         break;
     case SCR_CONTACTS:
         contacts_key(code, down);
+        break;
+    case SCR_KEYS:   /* its keys come by shell_scan() */
         break;
     }
 }

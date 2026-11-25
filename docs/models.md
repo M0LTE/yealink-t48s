@@ -62,7 +62,7 @@ Code = row x 8 + column + 1, as Yealink's driver numbers the matrix.
 
 Which soft key is leftmost and which line key is at the top are guesses.
 
-**To check it on a phone:** hold any key for 5 seconds at the clock. The key test opens: press each key and photograph the screen, which shows the key's row, column and code and what the table makes of it. Hold any key for 3 seconds to leave.
+**To check it on a phone:** hold X (or any key that is not a phone key such as volume or Speakerphone) for 5 seconds at the clock. The key test opens: press each key and photograph the screen, which shows the key's row, column and code and what the table makes of it. Hold any key for 3 seconds to leave.
 
 ### The lamp matrix (not driven yet)
 
@@ -145,7 +145,7 @@ Do not use the T48S's stick or its Install page on a T46S: the kernel it writes 
 | # | Do | Expect |
 |---|---|---|
 | 1 | look | the clock screen, the right way up, five buttons along the bottom. Top left: a green square and the phone's address. Top right: a red square and "No service" (if that square is blue, the colours are swapped: tell us). A note says it was started in recovery mode and that nothing is installed |
-| 2 | press each key once: digits (a digit opens the dialler; X rubs out), arrows, OK, X | Up: Calls. Left: Contacts. Down: Settings. OK: Apps. X: back. If any is wrong: hold any key for 5 seconds at the clock, press every key in the key test and photograph the screen |
+| 2 | press each key once: digits (a digit opens the dialler; X rubs out), arrows, OK, X | Up: Calls. Left: Contacts. Down: Settings. OK: Apps. X: back. If any is wrong: hold X for 5 seconds at the clock, press every key in the key test and photograph the screen |
 | 3 | lift the handset, put it back | the call screen appears and goes |
 | 4 | Left (Contacts), then the four soft keys under the screen, one at a time | soft key 2 opens "Add": type a name on the dial keys, OK, a number, OK |
 | 5 | Down (Settings), Screen, change the brightness with Left and Right | the screen gets dimmer and brighter, no flicker |

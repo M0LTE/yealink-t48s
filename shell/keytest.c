@@ -9,7 +9,8 @@
  * first pressed. A table can be put right from those photos alone.
  *
  * Nothing here trusts the table. It opens from Settings, About, or by holding
- * any key for KEYTEST_OPEN_MS at the idle screen (main.c); it is left by
+ * any key but a phone key (volume, Speaker, Mute and so on, which act on any
+ * screen) for KEYTEST_OPEN_MS at the idle screen (main.c); it is left by
  * holding any key for KEYTEST_LEAVE_MS. While it shows, no key does anything
  * else.
  */
@@ -70,8 +71,8 @@ void keytest_event(int scan, int key, int value)
         held_scan = scan;
         held_key = key;
         leave_at = t48_now_ms() + KEYTEST_LEAVE_MS;
-    } else if (!value && scan == held_scan && key == held_key) {
-        leave_at = 0;
+    } else if (value < 0 ? scan && scan == held_scan : scan == held_scan && key == held_key) {
+        leave_at = 0;   /* its release; with no key event when another key the table does not hold was down too */
     }
     for (i = 0; i < nseen; i++)
         if (seen[i].scan == scan && (scan || seen[i].mapped == key)) break;

@@ -65,7 +65,7 @@ The key and the touch that woke it did nothing else (the touch was on the Settin
 
 For a phone whose key table is in doubt and which has no console (the T46S, [models.md](models.md)). It shows each press and release with its row, column and code in the key matrix (the keypad driver's `MSC_SCAN`) and the Linux key the table gives it, in type large enough to read in a photo, above the codes seen so far in the order they were first pressed. A place the table does not hold reads "Not mapped" and its code is in red: the driver sends those as `KEY_UNKNOWN`. A table can be put right from the photos.
 
-- **Open:** hold any key for 5 seconds at the clock (the key may do its usual thing first; a dialler it opened goes away), or Settings, About, Key test. Neither needs the table to be right. It does not open over an app or a call.
+- **Open:** hold any key for 5 seconds at the clock, other than volume, Speaker, Headset, Mute, Message, Hold, Redial and Transfer (the key may do its usual thing first; a dialler it opened goes away), or Settings, About, Key test. Neither needs the table to be right. It does not open over an app or a call.
 - **Leave:** hold any key for 3 seconds. A call or the handset also ends it.
 - While it shows, no key does anything else.
 
