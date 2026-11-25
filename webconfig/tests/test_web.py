@@ -469,6 +469,7 @@ class Paired(unittest.TestCase):
         self.assertIn("<h2>Advanced</h2>", page)
         self.assertIn("<span>Dial plan</span>", page)
         self.assertIn("<code>%s</code>" % default, page)
+        self.assertIn("999 and 112 always dial at once", page)
         self.assertIn("name='dialplan' value=''", page)
         # an owner's own map, kept with its spaces inside
         text = self.ok("/accounts/advanced", {"dialplan": " [2-9]xxxxxxxxx | 07xxxxxxxxx|999|112|00x.T2 "}, "/accounts")
@@ -476,7 +477,7 @@ class Paired(unittest.TestCase):
         self.assertEqual(p.get("phone", "dialplan"), "[2-9]xxxxxxxxx | 07xxxxxxxxx|999|112|00x.T2")
         self.assertIn("value='[2-9]xxxxxxxxx | 07xxxxxxxxx|999|112|00x.T2'", b.get("/accounts").body)
         # what is not a digit map is refused, and says where; the map set stays
-        for bad, at in (("07xxxxxxxxx|", 13), ("x.T5x", 5), ("[9-2]", 2), ("0e7", 2), ("x" * 161, None)):
+        for bad, at in (("07xxxxxxxxx|", 13), ("xT0", 3), ("x.T5x", 5), ("[9-2]", 2), ("0e7", 2), ("x" * 161, None)):
             text = self.bad("/accounts/advanced", {"dialplan": bad}, "/accounts")
             self.assertIn("Dial plan not saved", text)
             if at: self.assertIn("character %d" % at, text)

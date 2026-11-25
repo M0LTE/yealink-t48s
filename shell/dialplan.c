@@ -11,7 +11,7 @@
  * 0-9 * # + and A-D are themselves; x is any digit; [2-9], [*#x] or [0158]
  * is one of a set; a dot after an element means any number of it, none
  * included; T at the end means "when the owner stops typing", after 4 s, or
- * T2 for 2 s. Spaces are ignored, and x and T may be in either case.
+ * T2 for 2 s (1 to 99). Spaces are ignored, and x and T may be in either case.
  *
  * What the dialler does with a number, from all the patterns at once:
  *   - one without T matches it whole, and no pattern without T could take
@@ -73,6 +73,7 @@ static int parse(const char *s, const char *end, struct tok *t, const char *map,
             s++;
             while (s < end && *s >= '0' && *s <= '9' && digits < 2) { secs = secs * 10 + (*s++ - '0'); digits++; }
             if (s < end && *s >= '0' && *s <= '9') FAIL(s);
+            if (digits && secs < 1) FAIL(s - digits);   /* T0 would dial the first digit typed */
             t[n].is_timer = 1;
             t[n].timer_ms = digits ? secs * 1000 : DP_TIMER_MS;
             n++;
@@ -194,7 +195,7 @@ enum dp_result dp_match(const char *map, const char *number, int *ms)
     if (exact && (timer < 0 || DP_TIMER_MS < timer)) timer = DP_TIMER_MS;
     if (timer >= 0) {
         if (ms) *ms = timer;
-        return timer ? DP_TIMER : DP_NOW;
+        return DP_TIMER;
     }
     return partial ? DP_PARTIAL : DP_NONE;
 }

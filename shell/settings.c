@@ -790,7 +790,8 @@ static void build_advanced(void)
     snprintf(title, sizeof title, "Advanced");
     /* the digit map that says when a number is complete (docs/phone.md#dial-plan); emptied, the default again */
     add_stored(R_TEXT, "Dial plan", "phone", "dialplan", DP_DEFAULT, 0);
-    if (cfg_str("phone", "dialplan", "")[0]) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Empty for the default");
+    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%s999 and 112 always dial at once",
+             cfg_str("phone", "dialplan", "")[0] ? "Empty for the default. " : "");
 }
 
 static void build_sip(const char *arg)

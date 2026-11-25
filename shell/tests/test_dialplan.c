@@ -43,7 +43,10 @@ int main(void)
     GOOD("XxX.t");
     GOOD("xxxT2");
     GOOD("xxxT10");
-    GOOD("xT0");
+    BAD("xT0", 2);            /* would dial the first digit typed */
+    BAD("xT00", 2);
+    GOOD("xT1");
+    GOOD("xT99");
     GOOD("[*#x]");
     GOOD("[0158]x");
     GOOD("[x*]x.");
@@ -174,7 +177,7 @@ int main(void)
     IS("x.T10|x.T3", "5", "timer3000");
     IS("x.T", "", "timer4000");       /* x. takes nothing too */
     IS("xx.T", "", "partial");
-    IS("xT0", "5", "now");
+    IS("xT1", "5", "timer1000");
     IS("101|1011", "101", "timer4000");
     IS("101|1011", "1011", "now");
     IS("101|101x.T9", "101", "now");  /* patterns with T do not hold up one without */

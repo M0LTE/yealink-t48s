@@ -91,8 +91,10 @@ With the handset lifted, or Speaker or Headset on, the dialler calls a number by
 - **`#`** is Call, and is not sent, unless the map has a place for it there (a code such as `*21*number#`).
 - **Call, OK, the handset or Speaker** still call whatever has been typed, complete or not.
 - **On the hook** nothing goes by itself: the number waits for Call or the handset, as before.
+- **999 and 112** always dial at once, whatever the map, even one that allows longer numbers starting with them.
+- **After X** nothing dials at once: the countdown starts again at most.
 
-The syntax is the MGCP one (RFC 3435) that Polycom, Cisco and others take, so a provider's map can be pasted in. Patterns are separated by `|`; in a pattern `0`-`9 * # +` are themselves, `x` is any digit, `[2-9]` or `[*#x]` one of a set, `.` after an element any number of it (none included), and `T` at the end "when typing stops", 4 s, or `T2` for 2 s. A number matched by a pattern without `T`, which no other such pattern could make longer, is complete; patterns with `T` never hold one up, so `x.T` can be the catch-all.
+The syntax is the MGCP one (RFC 3435) that Polycom, Cisco and others take, so a provider's map can be pasted in. Patterns are separated by `|`; in a pattern `0`-`9 * # +` are themselves, `x` is any digit, `[2-9]` or `[*#x]` one of a set, `.` after an element any number of it (none included), and `T` at the end "when typing stops", 4 s, or `T2` for 2 s (1 to 99). A number matched by a pattern without `T`, which no other such pattern could make longer, is complete; patterns with `T` never hold one up, so `x.T` can be the catch-all.
 
 The default suits the UK; anything it does not know waits for the pause:
 
@@ -188,7 +190,7 @@ Result on 2026-11-23, all passing, both as PC builds and with `ARM=1`:
 | 14 do not disturb | the caller gets 480, nothing rings, the call is listed as missed; calls out still work; off again and the next call rings |
 | 15 message waiting | the server says two messages: the idle screen and the slow lamp; the Message key calls voicemail; a ringing call takes the lamp and gives it back; the server says none and the lamp shows the missed call alone |
 | 16 contact names | a contact added on the phone names the caller in place of what the caller sends, in the call, the history and when dialled from the list; a stranger keeps their own name |
-| 22 dial plan | 1002 with the handset lifted goes out 4 s after the last digit and the far end rings; with a map of `1002\|x.T` it goes on the fourth digit; `#` calls 1003 at once without sending the # |
+| 22 dial plan | 1002 with the handset lifted goes out 4 s after the last digit and the far end rings; with a map of `1002\|x.T` it goes on the fourth digit; 999 goes at once under a map of `9999\|x.T`; `#` calls 1003 at once without sending the # |
 | 20 several accounts | a second account is typed in on the Settings screens and the phone service restarts with both registered; a call out from the chosen account arrives from 1004, Redial uses it again, a plain call still goes from 1001; calls in to each say which was called; the history has the account; the usual account is changed and changed back; the account is removed and one is left |
 
 `make -C shell check` also runs `tests/test_dialplan.c` (the matcher: the syntax refused and taken, and what the default and other maps say of some 170 numbers), `19-dialplan.script` and `small/05-dialplan.script` (the dialler and the Advanced page on both models, with no services), and `08-contacts.script`: the contact list, the history's buttons and do not disturb with no services behind them.

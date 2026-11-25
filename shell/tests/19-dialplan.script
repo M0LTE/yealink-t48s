@@ -40,6 +40,19 @@ key 3
 expectstate phone ended
 expectstate last o:07700900123
 hook on
+# a rub-out never calls at once: back to 999 from 9991, the time starts again
+hook off
+key 9
+key 9
+key 9
+key 1
+key x
+expectstate number 999
+expectstate phone dial
+expectstate autodial 4
+waitstate phone ended 5000
+expectstate last o:999
+hook on
 # a number no pattern completes: called 4 s after the last digit
 hook off
 key 1
@@ -149,6 +162,14 @@ key 2
 expectstate autodial 1
 waitstate phone ended 2000
 expectstate last o:12
+hook on
+# 999 and 112 go at once whatever the map: here none of its patterns takes them
+hook off
+key 1
+key 1
+key 2
+expectstate phone ended
+expectstate last o:112
 hook on
 # a map broken by hand is not used: the default is
 run ./t48-config --config simdata/config set phone dialplan "55|"

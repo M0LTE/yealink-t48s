@@ -34,6 +34,16 @@ expectstate phone outgoing
 run $FAR waitlog $BOBLOG CALL_INCOMING 8
 hook on
 waitstate phone idle 5000
+# 999 goes at once even where the map has longer numbers starting with it (this server only refuses it)
+run $CONFIG set phone dialplan "9999|x.T"
+hook off
+key 9
+key 9
+key 9
+expectstate phone outgoing
+expectstate peer 999
+hook on
+waitstate phone idle 5000
 # # is Call: 1003 goes at once, without the #
 run : > $BOBLOG
 key speaker

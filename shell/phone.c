@@ -493,6 +493,7 @@ static void finish(const char *text, const char *detail, int tone)
 static void start_dialler(int route)
 {
     P.number[0] = 0;
+    P.auto_at = 0;
     clear_call();
     set_route(route);
     set_tone(route != T48AC_ROUTE_NONE ? T48AC_TONE_DIAL : T48AC_TONE_OFF);
@@ -1091,7 +1092,7 @@ static void dial_now(void)
 static const char *dial_map(void)
 {
     const char *m = cfg_str("phone", "dialplan", DP_DEFAULT);
-    static char warned[DP_MAX + 1];
+    static char warned[256];   /* as long as cfg_str gives, so a map too long is warned of once */
     if (dp_check(m, NULL) < 0) {
         if (strcmp(warned, m)) logmsg("phone: the dial plan in the settings is not a digit map; using the default");
         snprintf(warned, sizeof warned, "%s", m);
@@ -1101,14 +1102,25 @@ static const char *dial_map(void)
 }
 
 /* After a key in the dialler: call now if the number is complete, or set the time to call it if nothing more is
- * typed. Only while the sound has somewhere to go: a number typed on the hook waits for the handset or Call. */
-static void auto_check(void)
+ * typed. Only while the sound has somewhere to go: a number typed on the hook waits for the handset or Call.
+ * later: after a rub-out or a change of account, which never call at once; the time starts again at most. */
+static void auto_check(int later)
 {
     int ms = 0;
     P.auto_at = 0;
     if (P.st != PH_DIAL || !P.number[0] || P.route == T48AC_ROUTE_NONE) return;
+    /* emergency numbers go at once whatever the map says, even if it allows longer numbers that start with them */
+    if (!later && (!strcmp(P.number, "999") || !strcmp(P.number, "112"))) {
+        logmsg("phone: emergency number %s", P.number);
+        dial_now();
+        return;
+    }
     switch (dp_match(dial_map(), P.number, &ms)) {
-    case DP_NOW: logmsg("phone: the dial plan says %s is complete", P.number); dial_now(); break;
+    case DP_NOW:
+        if (later) { P.auto_at = t48_now_ms() + DP_TIMER_MS; break; }
+        logmsg("phone: the dial plan says %s is complete", P.number);
+        dial_now();
+        break;
     case DP_TIMER: P.auto_at = t48_now_ms() + ms; break;
     default: break;
     }
@@ -1153,16 +1165,16 @@ void phone_key(int code, int down)
             } else if (digit) {
                 if (!P.number[0]) set_tone(T48AC_TONE_OFF);
                 type_char(code);
-                auto_check();
+                auto_check(0);
             } else if (code == T48_KEY_OK) {
                 dial_now();
             } else if (code == T48_KEY_LEFT || code == T48_KEY_RIGHT) {
                 next_account(code == T48_KEY_LEFT ? -1 : 1);
-                if (P.auto_at) auto_check();   /* the owner is still at it: the time starts again */
+                if (P.auto_at) auto_check(1);   /* the owner is still at it: the time starts again */
             } else if (code == T48_KEY_BACK) {
                 if (P.number[0]) {
                     delete_char();
-                    auto_check();
+                    auto_check(1);
                     if (!P.number[0] && P.route != T48AC_ROUTE_NONE) set_tone(T48AC_TONE_DIAL);
                 } else {
                     go_idle();
@@ -1198,7 +1210,7 @@ void phone_key(int code, int down)
             }
             break;
         case PH_ENDED:
-            if (digit) { start_dialler(P.hook_off ? T48AC_ROUTE_HANDSET : T48AC_ROUTE_NONE); set_tone(T48AC_TONE_OFF); type_char(code); auto_check(); }
+            if (digit) { start_dialler(P.hook_off ? T48AC_ROUTE_HANDSET : T48AC_ROUTE_NONE); set_tone(T48AC_TONE_OFF); type_char(code); auto_check(0); }
             else if (code == T48_KEY_OK || code == T48_KEY_BACK) go_idle();
             break;
         }
@@ -1305,6 +1317,7 @@ int phone_timeout(long long now)
         /* the dialler counts down: the next whole second, or the call */
         long long left = P.auto_at - now, next = left % 1000 ? left % 1000 : 1000;
         if (left < next) next = left;
+        if (next < 0) next = 0;   /* already due */
         if (t < 0 || next < t) t = next;
     }
     return t < 0 ? -1 : t > 0 ? (int)t : 0;

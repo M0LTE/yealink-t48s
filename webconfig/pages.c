@@ -334,7 +334,7 @@ static void page_accounts(struct req *r)
     H("<details class='card' id='advanced'%r><summary><h2>Advanced</h2></summary>", dp[0] ? " open" : "");
     form_begin(r, "/accounts/advanced", NULL);
     H("<label class='field'><span>Dial plan</span><input name='dialplan' value='%s' maxlength='%d' "
-      "autocomplete='off' autocapitalize='none' spellcheck='false' placeholder='%s'><small>Empty for the default: <code>%s</code></small></label>"
+      "autocomplete='off' autocapitalize='none' spellcheck='false' placeholder='%s'><small>Empty for the default: <code>%s</code>. 999 and 112 always dial at once.</small></label>"
       "<div class='actions'><button class='primary' type='submit'>Save</button></div></form></details>",
       dp, DP_MAX, DP_DEFAULT, DP_DEFAULT);
     page_end(r);
