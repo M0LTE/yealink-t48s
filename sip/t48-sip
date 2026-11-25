@@ -84,11 +84,11 @@ account() {
     [ -n "$user" ] || { echo "t48-sip: $f: user is missing" >&2; return 1; }
     [ -n "$domain" ] || { echo "t48-sip: $f: domain is missing" >&2; return 1; }
     case "$transport" in udp|tcp|tls) ;; *) echo "t48-sip: $f: transport must be udp, tcp or tls" >&2; return 1 ;; esac
-    # the registration expiry asked for; empty is baresip's own, 3600 s
+    # the registration expiry asked for: 60 s to a day, 600 s if not set
     case "$regint" in
-        '') ;;
-        *[!0-9]*|??????*) echo "t48-sip: $f: register_seconds must be 60 to 86400, using 3600" >&2; regint= ;;
-        *) [ "$regint" -ge 60 ] && [ "$regint" -le 86400 ] || { echo "t48-sip: $f: register_seconds must be 60 to 86400, using 3600" >&2; regint=; } ;;
+        '') regint=600 ;;
+        *[!0-9]*|??????*) echo "t48-sip: $f: register_seconds must be 60 to 86400, using 600" >&2; regint=600 ;;
+        *) [ "$regint" -ge 60 ] && [ "$regint" -le 86400 ] || { echo "t48-sip: $f: register_seconds must be 60 to 86400, using 600" >&2; regint=600; } ;;
     esac
     # DTMF: RFC 2833 events, SIP INFO, or tones in the audio. In-band tones
     # are made by t48audio when the shell asks (t48inband), so baresip itself
@@ -102,8 +102,13 @@ account() {
     # Not set: all of them, in the config's order (Opus, G.722, PCMU, PCMA).
     # The shell writes all four, an off one with a - in front: opus,-g722,pcmu,pcma
     aucodecs=
-    for c in $(echo "$codecs" | tr ',' ' '); do
+    # case and spaces do not matter: "Opus, -G722" is "opus,-g722"
+    codecs=$(printf '%s' "$codecs" | tr 'A-Z' 'a-z' | tr -d ' \t')
+    set -f
+    oldifs=$IFS; IFS=,
+    for c in $codecs; do
         case "$c" in
+            '') continue ;;
             opus) c=opus/48000/2 ;;
             g722) c=G722/16000/1 ;;
             pcmu) c=PCMU/8000/1 ;;
@@ -114,6 +119,8 @@ account() {
         case ",$aucodecs," in *",$c,"*) continue ;; esac
         aucodecs=${aucodecs:+$aucodecs,}$c
     done
+    IFS=$oldifs
+    set +f
     [ -n "$aucodecs" ] || [ -z "$codecs" ] || echo "t48-sip: $f: every codec is off, offering all" >&2
     # baresip's accounts line has no quoting for these
     for v in "$user" "$domain" "$auth_user" "$password" "$proxy"; do
@@ -138,8 +145,7 @@ account() {
     # the proxy is reached on the account's transport
     [ -n "$proxy" ] && line="$line;outbound=\"$scheme:$proxy;transport=$transport\""
     case "$mwi" in off|no|false|0) mwi=no ;; *) mwi=yes ;; esac
-    [ -n "$regint" ] && line="$line;regint=$regint"
-    line="$line;answermode=manual;mwi=$mwi;dtmfmode=$dtmfmode"
+    line="$line;regint=$regint;answermode=manual;mwi=$mwi;dtmfmode=$dtmfmode"
     [ -n "$aucodecs" ] && line="$line;audio_codecs=$aucodecs"
     case "$keepalive" in off|no|false|0) line="$line;keepalive=no" ;; esac
     return 0

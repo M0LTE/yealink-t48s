@@ -281,7 +281,7 @@ int cfg_save_text(const char *file, const char *text);                     /* th
 int cfg_secret(const char *key);                                           /* a password: never shown */
 int sip_host_ok(const char *h, int scheme);   /* host, host:port, [IPv6]:port or empty; scheme: a sip: or sips: in front allowed */
 #define T48_ACCOUNTS 16                       /* sip, sip2 ... sip16, as the stock firmware's 16 lines (issue #77) */
-#define T48_REG_DEFAULT 3600                  /* register_seconds when not set: baresip's own */
+#define T48_REG_DEFAULT 600                   /* register_seconds when not set, as t48-sip has always had it */
 int sip_regint_ok(const char *v);             /* register_seconds: empty, or 60 to 86400 */
 #define T48_CODECS 4
 extern const char *const sip_codec_keys[T48_CODECS], *const sip_codec_names[T48_CODECS];

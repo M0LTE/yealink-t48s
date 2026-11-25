@@ -111,7 +111,17 @@ static int def_acct;
 
 static void update_lamps(void);
 
-static void changed(void) { shell_phone_changed(); }
+/* In-band DTMF: tones still waiting in t48audio are for the call that was in
+ * front; when another call comes to the front, or none, they are dropped. */
+static void inband_follow(void)
+{
+    static char was[160];
+    if (!strcmp(was, P.c.id)) return;
+    snprintf(was, sizeof was, "%s", P.c.id);
+    if (sipc_connected()) sipc_cmd("t48inband", NULL);
+}
+
+static void changed(void) { inband_follow(); shell_phone_changed(); }
 
 int phone_messages(void);
 static void set_tone(int t) { P.tone = t; audioc_tone(t); }

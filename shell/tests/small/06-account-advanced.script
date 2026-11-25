@@ -70,7 +70,7 @@ expectstate soft1 Open
 key soft1
 expectstate settings.page sipadvanced
 expectstate settings.row Registration_expiry
-expectstate settings.value 3600
+expectstate settings.value 600
 shot shots/t46s-settings-account-advanced.png
 key down
 expectstate settings.row DTMF

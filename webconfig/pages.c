@@ -280,6 +280,13 @@ void page_overview(struct req *r)
 
 /* ---------- phone accounts ---------- */
 
+/* keepalive=off, as t48-sip reads it: off, no, false or 0 */
+static int keepalive_on(const char *f)
+{
+    const char *v = val(f, "keepalive", "on");
+    return strcmp(v, "off") && strcmp(v, "no") && strcmp(v, "false") && strcmp(v, "0");
+}
+
 /* An account's Advanced part (issue #77): registration expiry, DTMF, the
  * codecs in the order offered, NAT keepalive. Open when any is not the default. */
 static void account_advanced(const char *f)
@@ -291,12 +298,17 @@ static void account_advanced(const char *f)
     sip_codecs(val(f, "codecs", ""), order, on);
     sip_codecs_str(order, on, usual, sizeof usual);
     int changed = val(f, "register_seconds", "")[0] || strcmp(d, "rfc2833") || strcmp(usual, "opus,g722,pcmu,pcma") ||
-                  !strcmp(val(f, "keepalive", "on"), "off");
+                  !keepalive_on(f);
+    int known = 0;
     H("<details class='sub'%r><summary>Advanced</summary><div class='fields'>", changed ? " open" : "");
     field("Registration expiry", "register_seconds", val(f, "register_seconds", ""),
-          "inputmode='numeric' pattern='[0-9]*' placeholder='3600'", "Seconds, 60 to 86400");
+          "inputmode='numeric' pattern='[0-9]*' placeholder='600'", "Seconds, 60 to 86400");
     H("<label class='field'><span>DTMF</span><select name='dtmf'>");
-    for (int i = 0; i < 3; i++) H("<option value='%s'%r>%s</option>", dtmf[i][0], !strcmp(d, dtmf[i][0]) ? " selected" : "", dtmf[i][1]);
+    for (int i = 0; i < 3; i++) {
+        known |= !strcmp(d, dtmf[i][0]);
+        H("<option value='%s'%r>%s</option>", dtmf[i][0], !strcmp(d, dtmf[i][0]) ? " selected" : "", dtmf[i][1]);
+    }
+    if (!known) H("<option value='%s' selected>%s</option>", d, d);   /* written by hand: kept as it is */
     H("</select></label></div><div class='field'><span>Codecs</span><ol class='codecs'>");
     for (int i = 0; i < T48_CODECS; i++) {
         const char *k = sip_codec_keys[order[i]];
@@ -310,7 +322,7 @@ static void account_advanced(const char *f)
     }
     H("</ol><input type='hidden' name='codec_order' value='%s'></div>", keys);
     H("<label class='check'><input type='checkbox' name='keepalive' value='on'%r> NAT keepalive</label></details>",
-      strcmp(val(f, "keepalive", "on"), "off") ? " checked" : "");
+      keepalive_on(f) ? " checked" : "");
 }
 
 /* The Advanced part of a saved form, checked; 0 and the reason if it will not do */
@@ -474,7 +486,8 @@ static void post_account_save(struct req *r)
         redirect(r, where);
         return;
     }
-    if (strcmp(dtmf, "inband") && strcmp(dtmf, "info")) dtmf = "";   /* RFC 2833, the usual: not written */
+    /* RFC 2833, the usual, is not written; a value written by hand that the page showed is kept */
+    if (strcmp(dtmf, "inband") && strcmp(dtmf, "info") && (!strcmp(dtmf, "rfc2833") || strcmp(dtmf, val(f, "dtmf", "")))) dtmf = "";
     for (int i = 0; i < 7 && ok; i++) ok = set(f, keys[i], v[i]) == 0;
     if (ok && adv) ok = set(f, "register_seconds", regint) == 0 && set(f, "dtmf", dtmf) == 0 && set(f, "codecs", codecs) == 0 &&
                         set(f, "keepalive", !strcmp(form(r, "keepalive"), "on") ? NULL : "off") == 0;

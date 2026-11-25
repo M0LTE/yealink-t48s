@@ -72,25 +72,25 @@ expectstate settings.row Advanced
 key ok
 expectstate settings.page sipadvanced
 expectstate settings.row Registration_expiry
-expectstate settings.value 3600
+expectstate settings.value 600
 expectstate cfg.sip.register_seconds (unset)
 shot shots/settings-account-advanced.png
 # the expiry: digits, 60 to 86400; emptied, it is not set again
 key ok
-expectstate kbd.text 3600
+expectstate kbd.text 600
 key 0
 key ok
-expectstate cfg.sip.register_seconds 36000
+expectstate cfg.sip.register_seconds 6000
 key ok
 key 0
-expectstate kbd.text 360000
+key 0
+expectstate kbd.text 600000
 key ok
 expectstate overlay message
 expectstate overlay.title Out_of_range
 key ok
-expectstate cfg.sip.register_seconds 36000
+expectstate cfg.sip.register_seconds 6000
 key ok
-key x
 key x
 key x
 key x
@@ -98,7 +98,7 @@ key x
 expectstate kbd.text -
 key ok
 expectstate cfg.sip.register_seconds (unset)
-expectstate settings.value 3600
+expectstate settings.value 600
 # DTMF: RFC 2833, in-band, SIP INFO
 key down
 expectstate settings.row DTMF

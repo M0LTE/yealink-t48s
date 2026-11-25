@@ -17,6 +17,7 @@
  *
  * Also the command line: t48-config get | set | unset | list.
  */
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -235,7 +236,7 @@ int sip_host_ok(const char *h, int scheme)
     return v >= 1 && v <= 65535;
 }
 
-/* an account's register_seconds: not set (baresip's 3600), or 60 s to a day */
+/* an account's register_seconds: not set (600), or 60 s to a day */
 int sip_regint_ok(const char *v)
 {
     size_t n = strlen(v);
@@ -246,28 +247,35 @@ int sip_regint_ok(const char *v)
 
 /* An account's codecs, as the codecs key holds them (issue #77): all four,
  * in the order offered, an off one with a - in front: "opus,g722,-pcmu,pcma".
- * Not set: all on, in the usual order. A codec missing from it is off, as
- * t48-sip takes it, and follows the others. */
+ * Not set, or nothing in it known, or every one off: all on, in the usual
+ * order, as t48-sip offers them then. Otherwise a codec missing from it is off
+ * and follows the others. Case and spaces do not matter, as in t48-sip. */
 const char *const sip_codec_keys[T48_CODECS] = {"opus", "g722", "pcmu", "pcma"};
 const char *const sip_codec_names[T48_CODECS] = {"Opus", "G.722", "PCMU", "PCMA"};
 
 void sip_codecs(const char *stored, int order[T48_CODECS], int on[T48_CODECS])
 {
-    int n = 0, seen[T48_CODECS] = {0};
-    const char *p = stored = stored ? stored : "";
-    while (*p && n < T48_CODECS) {
+    int n = 0, any = 0, seen[T48_CODECS] = {0};
+    char v[80], *w = v;
+    /* lower case, no spaces: "Opus, -G722" is "opus,-g722" */
+    for (const char *p = stored ? stored : ""; *p && w < v + sizeof v - 1; p++)
+        if (*p != ' ' && *p != '\t') *w++ = (char)tolower((unsigned char)*p);
+    *w = 0;
+    for (const char *p = v; *p && n < T48_CODECS;) {
         size_t k = strcspn(p, ",");
         int off = *p == '-';
         for (int c = 0; c < T48_CODECS; c++)
             if (!seen[c] && k - off == strlen(sip_codec_keys[c]) && !strncmp(p + off, sip_codec_keys[c], k - off)) {
                 seen[c] = 1;
                 order[n] = c;
-                on[n++] = !off;
+                any |= on[n++] = !off;
             }
         p += k + (p[k] == ',');
     }
     for (int c = 0; c < T48_CODECS; c++)
-        if (!seen[c]) { order[n] = c; on[n++] = !*stored; }
+        if (!seen[c]) { order[n] = c; on[n++] = 0; }
+    if (!any)
+        for (int i = 0; i < T48_CODECS; i++) { order[i] = i; on[i] = 1; }
 }
 
 void sip_codecs_str(const int order[T48_CODECS], const int on[T48_CODECS], char *out, size_t n)

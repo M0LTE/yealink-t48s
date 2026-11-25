@@ -786,7 +786,18 @@ static void build_accounts(void)
         snprintf(v, sizeof v, "%d", atoi(phone_state("acct.default")));
         r = add_stored(R_CHOICE, "Default account", "phone", "default_account", v, 0);
         r->choices = keep;
-        if (!strstr(keep, r->value)) snprintf(r->value, sizeof r->value, "%s", v);
+        /* a whole item of 1|2|...: 1 is not in 10|11 */
+        char item[8];
+        snprintf(item, sizeof item, "%s", r->value);
+        size_t il = strlen(item);
+        const char *at = keep;
+        int found = 0;
+        while (!found && *at) {
+            size_t k = strcspn(at, "|");
+            found = il && k == il && !strncmp(at, item, k);
+            at += k + (at[k] == '|');
+        }
+        if (!found) snprintf(r->value, sizeof r->value, "%s", v);
     }
     add_menu("Advanced", P_ADVANCED, "");
 }
@@ -1693,7 +1704,7 @@ static void kbd_done(void)
         return;
     }
     if ((kbd_row.flags & F_REGINT) && !sip_regint_ok(text)) {
-        message("Out of range", "Use 60 to 86400, or empty for 3600");
+        message("Out of range", "Use 60 to 86400, or empty for 600");
         return;
     }
     if (!strcmp(kbd_row.file, "phone") && !strcmp(kbd_row.key, "dialplan") && text[0] && dp_check(text, NULL) < 0) {

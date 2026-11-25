@@ -20,8 +20,11 @@
  *  - In-band DTMF (issue #77): for an account whose DTMF is "inband" the
  *    shell sends the command t48inband with the digits, and each becomes
  *    100 ms of its two tones in place of the microphone, then 60 ms of
- *    the microphone again, before the next. baresip has no in-band mode of
- *    its own; RFC 2833 and SIP INFO are its dtmfmode.
+ *    the microphone again, before the next. t48inband with no digits
+ *    empties the queue (the shell sends it when the call in front
+ *    changes), as does a source opening or closing, so a tone never
+ *    reaches another call. baresip has no in-band mode of its own; RFC
+ *    2833 and SIP INFO are its dtmfmode.
  *  - If the service is not there (not started, or restarting), a call still
  *    works: this module keeps its own 20 ms clock, feeds silence as the
  *    microphone, drops the loudspeaker audio, and tries the socket again
@@ -88,6 +91,7 @@ enum {
 	DTMF_QUEUE = 32,
 	DTMF_ON = T48A_SRATE * 100 / 1000,    /* samples of tone */
 	DTMF_GAP = T48A_SRATE * 60 / 1000,    /* then of the microphone */
+	DTMF_RAMP = T48A_SRATE * 25 / 10000,  /* 2.5 ms up and down: no click */
 };
 static struct {
 	char q[DTMF_QUEUE];
@@ -98,6 +102,14 @@ static struct {
 /* one sine cycle in 1024 steps, made once: the phone has no FPU, so a
  * tone is a table lookup a sample, not a sin() */
 static int16_t sine[1024];
+
+
+/* with the lock held: no tone left for whatever call comes next */
+static void dtmf_clear(void)
+{
+	dtmf.n = 0;
+	dtmf.pos = 0;
+}
 
 
 /* the two frequencies of a key, or false if it is not one */
@@ -131,10 +143,17 @@ static void dtmf_frame(int16_t *frame)
 
 			if (t >= DTMF_ON)
 				break;
-			/* the phase, in 1024ths of a cycle; high group 2 dB
-			 * over the low, about -9 dBFS together */
-			frame[k] = (int16_t)((7000 * sine[(lo * t * 1024 / T48A_SRATE) & 1023] +
-					      8800 * sine[(hi * t * 1024 / T48A_SRATE) & 1023]) >> 15);
+			uint32_t edge = t < DTMF_ON - 1 - t ? t : DTMF_ON - 1 - t;
+			int32_t v;
+
+			/* The phase in 1024ths of a cycle. The low tone at
+			 * -11 dBm0 and the high at -9 (a full-scale sine is
+			 * +3.14 dBm0, G.711), faded in and out. */
+			v = (6500 * sine[(lo * t * 1024 / T48A_SRATE) & 1023] +
+			     8200 * sine[(hi * t * 1024 / T48A_SRATE) & 1023]) >> 15;
+			if (edge < DTMF_RAMP)
+				v = v * (int32_t)edge / DTMF_RAMP;
+			frame[k] = (int16_t)v;
 		}
 	}
 	dtmf.pos += T48A_FRAME;
@@ -411,8 +430,7 @@ static int stream_open(void)
 	cs.frames = 0;
 	cs.said_missing = false;
 	mtx_lock(&cs.lock);
-	dtmf.n = 0;           /* nothing left over from the last call */
-	dtmf.pos = 0;
+	dtmf_clear();         /* nothing left over from the last call */
 	mtx_unlock(&cs.lock);
 	re_atomic_rlx_set(&cs.run, true);
 
@@ -461,6 +479,7 @@ static void src_destructor(void *arg)
 	for (i = 0; i < MAX_CALLS; i++)
 		if (cs.src[i] == st)
 			cs.src[i] = NULL;
+	dtmf_clear();
 	last = stream_idle();
 	mtx_unlock(&cs.lock);
 
@@ -523,6 +542,7 @@ static int src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 		return EBUSY;
 	}
 	cs.src[i] = st;
+	dtmf_clear();
 	mtx_unlock(&cs.lock);
 
 	err = stream_open();
@@ -583,7 +603,8 @@ static int play_alloc(struct auplay_st **stp, const struct auplay *ap,
 }
 
 
-/* t48inband DIGITS: queue them as tones in the call's audio */
+/* t48inband DIGITS: queue them as tones in the call's audio. With no
+ * digits: drop any still waiting. */
 static int cmd_inband(struct re_printf *pf, void *arg)
 {
 	const struct cmd_arg *carg = arg;
@@ -591,10 +612,10 @@ static int cmd_inband(struct re_printf *pf, void *arg)
 	uint32_t lo, hi;
 	(void)pf;
 
-	if (!carg->prm || !*carg->prm)
-		return EINVAL;
 	mtx_lock(&cs.lock);
-	for (p = carg->prm; *p; p++) {
+	if (!carg->prm || !*carg->prm)
+		dtmf_clear();
+	for (p = carg->prm ? carg->prm : ""; *p; p++) {
 		if (!dtmf_freqs(*p, &lo, &hi) || dtmf.n >= DTMF_QUEUE)
 			continue;
 		dtmf.q[dtmf.n++] = *p;

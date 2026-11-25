@@ -444,6 +444,24 @@ class Paired(unittest.TestCase):
             self.assertEqual(p.get("sip", "codecs"), "g722,opus,pcma,pcmu")
         self.ok("/accounts/save", dict(adv, register_seconds="86400", dtmf="info", codec_order="g722,opus,pcma,pcmu"), "/accounts")
         self.assertEqual(p.get("sip", "register_seconds"), "86400")
+        # values written by hand: read as t48-sip reads them
+        p.set("sip", "codecs", " Opus, -G722,PCMA")
+        p.set("sip", "keepalive", "no")
+        p.set("sip", "dtmf", "rtpevent")
+        page = b.get("/accounts").body
+        self.assertIn("name='codec_opus' value='on' checked> Opus", page)
+        self.assertIn("name='codec_g722' value='on'> G.722", page)
+        self.assertIn("name='codec_pcmu' value='on'> PCMU", page)    # missing: off
+        self.assertIn("name='keepalive' value='on'> NAT keepalive", page)
+        self.assertIn("<option value='rtpevent' selected>rtpevent</option>", page)
+        self.ok("/accounts/save", dict(adv, dtmf="rtpevent", register_seconds="86400"), "/accounts")
+        self.assertEqual(p.get("sip", "dtmf"), "rtpevent")            # kept, not rewritten
+        p.set("sip", "codecs", "g729")
+        page = b.get("/accounts").body
+        for k in ("opus", "g722", "pcmu", "pcma"):
+            self.assertIn("name='codec_%s' value='on' checked>" % k, page)   # nothing known: all on, as t48-sip offers
+        p.set("sip", "codecs", "g722,opus,pcma,pcmu")
+        p.set("sip", "dtmf", "info")
         # a form without the Advanced part (an older page, a script) leaves it alone
         self.ok("/accounts/save", base, "/accounts")
         self.assertEqual(p.get("sip", "register_seconds"), "86400")

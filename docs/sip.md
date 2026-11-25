@@ -72,18 +72,18 @@ The rest are under Advanced on the account's page, on the phone and the web setu
 
 | Setting | Key | Default | To baresip |
 |---|---|---|---|
-| Registration expiry | `register_seconds`: 60 to 86400 | not set: 3600 s, baresip's own (it adds up to 255 s so phones do not all refresh at once) | `;regint=` |
+| Registration expiry | `register_seconds`: 60 to 86400 | not set: 600 s, as before | `;regint=` |
 | DTMF | `dtmf`: `rfc2833`, `inband`, `info` | RFC 2833 | `;dtmfmode=rtpevent` or `info` |
 | Codecs | `codecs`: all four in the order offered, an off one with `-` in front: `g722,opus,-pcmu,pcma` | not set: Opus, G.722, PCMU, PCMA, all on | `;audio_codecs=` |
 | NAT keepalive | `keepalive`: `off` | on | `;keepalive=no` from us ([below](#nat-keepalives)) |
 
-A value `t48-sip` cannot use is logged and the default used. A `codecs` that names only some leaves the others off; one with all off offers all.
+A value `t48-sip` cannot use is logged and the default used; that includes a `register_seconds` outside 60 to 86400, which before #77 was passed to baresip as it was. A `codecs` that names only some leaves the others off; one with all off offers all.
 
-**DTMF.** RFC 2833 sends each key as a telephone-event in the RTP stream, which nearly every server takes. SIP INFO sends an INFO request (`application/dtmf-relay`) for each key. In-band puts the key's two tones into the call's audio: baresip has no such mode, so for an account set to it the shell sends `t48inband` with the digit, and `t48audio` replaces the microphone with the tones for 100 ms, then 60 ms of microphone before the next digit (about -9 dBFS, the high tone 2 dB over the low). In-band suits a far end that listens for tones only; a lossy codec can blur them, so G.711 is safest for it. The phone keeps offering telephone-event in its SDP in every mode, as baresip always does.
+**DTMF.** RFC 2833 sends each key as a telephone-event in the RTP stream, which nearly every server takes. SIP INFO sends an INFO request (`application/dtmf-relay`) for each key. In-band puts the key's two tones into the call's audio: baresip has no such mode, so for an account set to it the shell sends `t48inband` with the digit, and `t48audio` replaces the microphone with the tones for 100 ms, then 60 ms of microphone before the next digit: the low tone at -11 dBm0 and the high at -9, faded in and out over 2.5 ms. The queue is emptied whenever the call in front changes, so a tone never reaches another call. In-band suits a far end that listens for tones only; a lossy codec can blur them, so G.711 is safest for it. The phone keeps offering telephone-event in its SDP in every mode, as baresip always does.
 
 ### NAT keepalives
 
-Behind a home router, the router's UDP binding for the phone's SIP port lasts from 30 s to a few minutes without traffic. Registrations are refreshed every half hour or so (half the expiry, 3600 s unless set), so between them the server's INVITE would hit a closed binding and the call would be lost.
+Behind a home router, the router's UDP binding for the phone's SIP port lasts from 30 s to a few minutes without traffic. Registrations are about 9 minutes apart (600 s unless set), so between them the server's INVITE would hit a closed binding and the call would be lost.
 
 While an account is registered, our module `t48keepalive` sends its server an OPTIONS request on the account's own transport and route (through the outbound proxy, if set): every **23 to 29 s over UDP**, every **96 to 120 s over TCP and TLS**. These are RFC 5626's intervals, spread the way libre spreads its own. Every SIP server answers OPTIONS (200, 401, 404 or 405); any answer will do.
 
