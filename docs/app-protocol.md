@@ -69,6 +69,7 @@ Level 3, for games and anything else that draws the whole screen many times a se
 - On the T48S the screen is pointed at the buffer itself. Nothing is copied, and the buffers are ordinary cached memory, quick to read back.
 - Do not draw in a buffer between its FLIP and the FLIPPED of the next one: it is on the screen, or about to be. With three buffers there is always one free, so the next picture can be started at once.
 - One FLIP at a time. A FLIP sent before the last one's FLIPPED replaces it; both are answered.
+- While an app is flipping, the screen stays bright.
 - `frame` counts the screen's refreshes. A step of more than one between two FLIPPEDs is a refresh the app missed. `period` in FLIPINFO is one refresh in microseconds: 14746 on the T48S (67.8 a second), 16667 in the simulator. The rate an app can hold is that, or a half or a third of it.
 - A buffer holds what was last drawn in it, two or three pictures ago, not the last picture.
 - DAMAGE goes back to the shared buffer: the shell shows all of it and stops flipping. FLIP starts again.

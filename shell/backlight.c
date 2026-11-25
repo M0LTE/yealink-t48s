@@ -15,7 +15,8 @@
  * for a line whatever the screen shows, so they wake it and work as well. A
  * dimmed screen can still be read, so there nothing is swallowed.
  *
- * The screen stays on during a call, and it dims but never goes off while an
+ * The screen stays on during a call, and while an app is showing flipped
+ * frames (a game, a demo, video). It dims but never goes off while any other
  * app is showing (an app is often something to watch, not to touch).
  *
  * Where there is no backlight device (the simulator on a PC) nothing is
@@ -186,7 +187,9 @@ static int held_on(void)
 {
     /* a call, ringing or dialling: the phone is in use */
     const char *ph = phone_state("phone");
-    return ph && strcmp(ph, "idle");
+    if (ph && strcmp(ph, "idle")) return 1;
+    /* an app in full-screen flipping is being watched */
+    return !strcmp(shell_screen_name(), "app") && app_flip() >= 0;
 }
 
 int backlight_timeout(long long now)
@@ -203,7 +206,7 @@ int backlight_timeout(long long now)
 void backlight_tick(long long now)
 {
     if (now >= next_reload) { next_reload = now + RELOAD_MS; reload(); }
-    if (held_on()) { backlight_wake("the phone"); return; }
+    if (held_on()) { backlight_wake("in use"); return; }
     long long idle = now - last_touched;
     int app_showing = !strcmp(shell_screen_name(), "app");
     if (off_ms > 0 && idle >= off_ms && !app_showing) {
