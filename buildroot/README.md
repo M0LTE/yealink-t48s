@@ -22,7 +22,7 @@ musl, ARM1176 soft-float, Linux 3.6 headers, everything static. The phone's kern
 - `t48-web`, the web setup page (package `t48-web`, from `webconfig/`; [docs/web.md](../docs/web.md)): a runit service that stays down until the owner turns it on at the screen.
 - Our tools from `native/` (package `t48s-tools`): keytest, touchtest, membanner, cpubench, t48rec, t48play, t48mix, nandread (read-only flash dumps, `docs/nand.md`). The waterfall is an app now ([M0LTE/yealink-t48s-apps](https://github.com/M0LTE/yealink-t48s-apps)).
 - `t48-audiod` and `t48-audioctl` (package `t48-audiod`), started at boot under runit.
-- baresip with `t48-sip`, the config and the `sip.example` settings template in `/usr/share/t48/sip` (packages `libre`, `libg722`, `baresip`, built as `sip/build.sh` builds them). Started at boot under runit once there is an account.
+- baresip with `t48-sip`, the config and the `sip.example` settings template in `/usr/share/t48/sip` (packages `libre`, `libg722`, `opus`, `baresip`, built as `sip/build.sh` builds them). Started at boot under runit once there is an account.
 
 ## Files
 

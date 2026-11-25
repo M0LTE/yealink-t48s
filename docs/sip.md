@@ -171,7 +171,7 @@ Result on 2026-11-23, all passing (Opus rows 2026-11-25):
 | G.722 call with **alice as the ARM binary under qemu-arm** | bob heard 440 Hz, alice heard 1000 Hz |
 | Opus call with alice as the ARM binary under qemu-arm | the same |
 
-`sip/test/audiod-test.sh` adds an Opus call through two audio services, and one with alice's side as the ARM binaries under qemu; both pass. Two of its checks fail on main as well, whatever the codec, so they are not about codecs: bob's ringer (in every call) and, on the speakerphone, bob's loudspeaker playing alice.
+`sip/test/audiod-test.sh` adds an Opus call through two audio services, and one with alice's side as the ARM binaries under qemu; both pass.
 
 ## What's left for the phone
 
