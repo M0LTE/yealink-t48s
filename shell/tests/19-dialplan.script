@@ -1,0 +1,202 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The dial plan (issue #77): a number that is complete by the digit map is called without the Call key, a number
+# that could go on is called a few seconds after the last digit, # is Call where the map has no place for it, and
+# nothing goes by itself with the phone on the hook. With no SIP service each call ends at once as No service,
+# which is enough to see that it was placed. Then the map on Settings, Accounts, Advanced.
+wait 300
+expect idle
+expectstate cfg.phone.dialplan (unset)
+
+# ---- the default map ----
+# 999 goes as soon as it is typed
+hook off
+expectstate phone dial
+key 9
+expectstate autodial 4
+key 9
+key 9
+expectstate phone ended
+expectstate last o:999
+hook on
+expect idle
+# a UK mobile: the countdown while it could still be anything, then at once on the eleventh digit
+hook off
+key 0
+key 7
+key 7
+key 0
+key 0
+key 9
+key 0
+key 0
+key 1
+key 2
+expectstate phone dial
+expectstate autodial 4
+shot shots/dialplan-countdown.png
+wait 1200
+expectstate autodial 3
+key 3
+expectstate phone ended
+expectstate last o:07700900123
+hook on
+# a rub-out never calls at once, even back to a number the map calls complete (changed while typing here)
+hook off
+key 5
+key 5
+key 5
+run ./t48-config --config simdata/config set phone dialplan "55|x.T"
+key x
+expectstate number 55
+expectstate phone dial
+expectstate autodial 4
+waitstate phone ended 5000
+expectstate last o:55
+run ./t48-config --config simdata/config unset phone dialplan
+hook on
+# a number no pattern completes: called 4 s after the last digit
+hook off
+key 1
+key 2
+key 3
+key 4
+expectstate autodial 4
+wait 2500
+expectstate phone dial
+key 5
+expectstate autodial 4
+waitstate phone ended 5000
+expectstate last o:12345
+hook on
+# X rubs out and starts the time again; # is Call, and is not dialled
+hook off
+key 0
+key 1
+key 1
+key x
+expectstate number 01
+expectstate autodial 4
+key hash
+expectstate phone ended
+expectstate last o:01
+hook on
+# a star code keeps its hash: the map has a place for it
+key speaker
+key star
+expectstate autodial off
+key 2
+key 1
+key hash
+expectstate phone dial
+expectstate autodial 4
+key speaker
+expect idle
+# on the hook nothing goes by itself: 999 waits for Call or the handset
+key 9
+key 9
+key 9
+expectstate phone dial
+expectstate route none
+expectstate autodial off
+wait 4500
+expectstate phone dial
+shot shots/dialplan-onhook.png
+hook off
+expectstate phone ended
+expectstate last o:999
+hook on
+expect idle
+
+# ---- Settings, Accounts, Advanced ----
+key down
+expect settings
+key ok
+expectstate settings.page accounts
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Advanced
+key ok
+expectstate settings.page advanced
+expectstate settings.row Dial_plan
+shot shots/settings-advanced.png
+# Done on the default as it is stores nothing
+key ok
+expectstate kbd open
+shot shots/settings-dialplan-keyboard.png
+key ok
+expectstate kbd closed
+expectstate cfg.phone.dialplan (unset)
+# something that is not a digit map is refused: e after the T
+key ok
+key 3
+key 3
+key ok
+expectstate overlay message
+expectstate overlay.title Not_a_dial_plan
+shot shots/settings-dialplan-refused.png
+key ok
+expectstate cfg.phone.dialplan (unset)
+# an owner's own map, from t48-config or the web setup page, shows here and is used at once
+run ./t48-config --config simdata/config set phone dialplan "555|1x.T1"
+wait 1500
+expectstate settings.value 555|1x.T1
+shot shots/settings-dialplan-own.png
+key x
+key x
+key x
+expect idle
+hook off
+key 5
+key 5
+expectstate autodial off
+key 5
+expectstate phone ended
+expectstate last o:555
+hook on
+hook off
+key 1
+key 2
+expectstate autodial 1
+waitstate phone ended 2000
+expectstate last o:12
+hook on
+# 999 and 112 go at once whatever the map: here none of its patterns takes them
+hook off
+key 1
+key 1
+key 2
+expectstate phone ended
+expectstate last o:112
+hook on
+# a map broken by hand is not used: the default is
+run ./t48-config --config simdata/config set phone dialplan "55|"
+hook off
+key 9
+key 9
+key 9
+expectstate phone ended
+expectstate last o:999
+hook on
+# emptied on the phone, it is the default again
+run ./t48-config --config simdata/config set phone dialplan "5"
+key down
+expect settings
+key ok
+key down
+key down
+key down
+key down
+key down
+key down
+key ok
+expectstate settings.value 5
+key ok
+key x
+key ok
+expectstate cfg.phone.dialplan (unset)
+shot shots/settings-dialplan-default.png
+quit
