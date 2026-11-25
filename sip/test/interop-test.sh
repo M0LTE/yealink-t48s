@@ -15,13 +15,14 @@
 #      that requires it, early media in a reliable 183, a phone that
 #      requires it
 #   5. session timers (RFC 4028, sip/modules/t48timer): either side the
-#      refresher, by UPDATE or re-INVITE; a caller that requires timers; a
-#      caller without them; the setting off
+#      refresher, by UPDATE (one answered 100 then 200) or re-INVITE; a
+#      caller that requires timers; a caller without them; one asking for
+#      too little (422); the setting off, as by default
 #   6. a proxy that ends calls nobody refreshes (Kamailio's sst): calls the
 #      phones refresh stay up, one nobody refreshes is ended
 #
 #   sip/test/interop-test.sh    in the sip/Dockerfile container, after
-#                               TARGET=host sip/build.sh. About 8 minutes.
+#                               TARGET=host sip/build.sh. About 10 minutes.
 set -e
 SIP=$(cd "$(dirname "$0")/.." && pwd)
 T=${T:-$HOME/src-build/t48s}
@@ -202,7 +203,7 @@ stop 100rel-phone-requires
 
 echo "== 5. session timers"
 proxy
-instance bob 5072 udp
+instance bob 5072 udp session_timer=1800
 sleep 2
 uac call sip:bob@127.0.0.1:5060 5080 hdr=Supported:timer hdr=Session-Expires:90 answer-after=$W/bob/run/ctrl.sock \
     refresh=update refresh=reinvite refresh=reinvite-nosdp hold=8
@@ -212,45 +213,56 @@ check "refresh by re-INVITE" 'said "refresh reinvite 200"'
 check "refresh by re-INVITE without SDP" 'said "refresh reinvite-nosdp 200"'
 check "call still up after the refreshes" 'said "bye 200"'
 stop timer-caller-refreshes
-instance bob 5072 udp
+instance bob 5072 udp session_timer=1800
 sleep 2
 uac call sip:bob@127.0.0.1:5060 5080 hdr=Supported:timer hdr=Require:timer hdr=Session-Expires:90 \
     answer-after=$W/bob/run/ctrl.sock
 check "caller requires timer: answered" 'said "got 200 se=90;refresher=uac"'
 stop timer-required
-instance bob 5072 udp
+instance bob 5072 udp session_timer=1800
 sleep 2
 uac call sip:bob@127.0.0.1:5060 5080 hdr=Supported:timer "hdr=Session-Expires:90;refresher=uas" \
     answer-after=$W/bob/run/ctrl.sock hold=50
 check "caller makes the phone refresher: UPDATE within 50 s" 'said "got UPDATE se=90;refresher=uac"'
 stop timer-phone-refreshes
-instance bob 5072 udp
+instance bob 5072 udp session_timer=1800
 sleep 2
 uac call sip:bob@127.0.0.1:5060 5080 hdr=Supported:timer "hdr=Session-Expires:90;refresher=uas" no-update \
     answer-after=$W/bob/run/ctrl.sock hold=50
 check "the same, caller without UPDATE: re-INVITE within 50 s" 'said "got INVITE sdp"'
 stop timer-phone-reinvites
-instance bob 5072 udp
+instance bob 5072 udp session_timer=1800
 sleep 2
 uac call sip:bob@127.0.0.1:5060 5080 answer-after=$W/bob/run/ctrl.sock
 check "caller without timers: answered without one" 'said "got 200 se=- "'
 stop timer-caller-without
-instance alice 5071 udp
+instance alice 5071 udp session_timer=1800
 sleep 2
-uac answer 5080 "hdr=Session-Expires:90;refresher=uac" hdr=Require:timer hold=50 > $W/uac.out & UPID=$!
+uac answer 5080 "hdr=Session-Expires:90;refresher=uac" hdr=Require:timer slow-update hold=100 > $W/uac.out & UPID=$!
 sleep 0.5
-alice_calls_uac 50 || true
+alice_calls_uac 100 || true
 wait $UPID || true
 sed 's/^/  uac: /' $W/uac.out
 check "phone calls: asks for 1800 s" 'said "got INVITE se=1800 supported=.*timer"'
-check "callee makes the phone refresher at 90 s: UPDATE within 50 s" 'said "got UPDATE se=90;refresher=uac"'
+check "callee makes the phone refresher at 90 s, answers UPDATE with 100 then 200: two UPDATEs in 100 s" \
+    '[ "$(grep -c "got UPDATE se=90;refresher=uac" $W/uac.out)" -ge 2 ]'
 stop timer-phone-calls
-instance bob 5072 udp session_timer=off
+instance bob 5072 udp
 sleep 2
 uac call sip:bob@127.0.0.1:5060 5080 hdr=Supported:timer hdr=Require:timer hdr=Session-Expires:90 \
     answer-after=$W/bob/run/ctrl.sock
-check "session_timer=off, caller requires timer: 420" 'said "got 420"'
+check "session timer off (default), caller requires timer: 420" 'said "got 420"'
 stop timer-off
+instance bob 5072 udp
+sleep 2
+uac call sip:bob@127.0.0.1:5060 5080 hdr=Supported:timer hdr=Session-Expires:90 answer-after=$W/bob/run/ctrl.sock
+check "session timer off (default), caller asks for one: answered without" 'said "got 200 se=- "'
+stop timer-off-offered
+instance bob 5072 udp session_timer=1800
+sleep 2
+uac call sip:bob@127.0.0.1:5060 5080 hdr=Supported:timer hdr=Session-Expires:60 answer-after=$W/bob/run/ctrl.sock
+check "caller asks for 60 s: 422 with Min-SE: 90" 'said "got 422" && grep -q "^Min-SE: 90" $W/bob/log'
+stop timer-too-small
 
 echo "== 6. a proxy that ends calls without refreshes (sst, 90 s)"
 proxy WITH_SST

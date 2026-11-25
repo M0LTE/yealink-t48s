@@ -5,13 +5,14 @@
  * the call's request now and then, so that proxies and B2BUAs keeping state
  * for it know it is still up; a call that is not refreshed in time is ended.
  *
- * An account with ;timer=N (seconds, 90 or more; t48-sip writes it):
+ * Off unless an account has ;timer=N (seconds, 90 or more; t48-sip writes
+ * it for session_timer=N):
  *  - says Supported: timer, so a caller that requires timers is answered
  *    rather than refused with 420;
  *  - asks for Session-Expires: N on the calls it makes;
  *  - on a call it is offered with Session-Expires, answers with the same
  *    interval and a refresher: the one the caller named, else the caller if
- *    it supports timers, else us;
+ *    it supports timers, else us; one below 90 s gets 422 and Min-SE: 90;
  *  - when it is the refresher, sends UPDATE with Session-Expires every half
  *    interval, or a re-INVITE if the other side does not allow UPDATE or
  *    refuses one. A refresh that times out or gets 408 or 481 ends the call,
@@ -29,7 +30,10 @@
 #include <re.h>
 #include <baresip.h>
 
-enum { MIN_SE = 90 };
+enum {
+	MIN_SE = 90,          /* RFC 4028's floor */
+	BUSY_MS = 3000,       /* refresh again when the call is mid-request */
+};
 
 struct st {
 	struct le le;
@@ -40,6 +44,8 @@ struct st {
 	bool refresher;          /* we refresh */
 	bool update;             /* the other side allows UPDATE */
 };
+
+static void refresh(void *arg);
 
 static struct list stl;
 
@@ -104,9 +110,6 @@ static bool allows_update(const struct sip_msg *msg)
 }
 
 
-static void refresh(void *arg);
-
-
 static void schedule(struct st *st)
 {
 	tmr_start(&st->tmr, st->se * 1000 / 2, refresh, st);
@@ -143,15 +146,18 @@ static void resp_handler(int err, const struct sip_msg *msg, void *arg)
 	uint32_t se;
 	char r;
 
+	/* a provisional answer: the request goes on */
+	if (!err && msg->scode < 200)
+		return;
 	st->req = mem_deref(st->req);
 	if (err || msg->scode == 408 || msg->scode == 481) {
 		info("t48timer: refresh failed (%m %u), call ended\n", err,
 		     msg ? msg->scode : 0);
-		ua_hangup(call_get_ua(st->call), st->call, 0, NULL);
+		/* closes the call, and with it this st */
+		ua_hangup(call_get_ua(st->call), st->call, 0,
+			  "Session expired");
 		return;
 	}
-	if (msg->scode < 200)
-		return;
 	if (msg->scode >= 300) {
 		/* no UPDATE here after all, or a clash: a re-INVITE instead */
 		info("t48timer: UPDATE refused (%u), re-INVITE instead\n",
@@ -179,6 +185,11 @@ static void refresh(void *arg)
 	struct sipsess *sess = call_sipsess(st->call);
 	int err;
 
+	/* a re-INVITE or UPDATE of the call's own is under way: soon */
+	if (!call_refresh_allowed(st->call)) {
+		tmr_start(&st->tmr, BUSY_MS, refresh, st);
+		return;
+	}
 	if (!st->update || !sess) {
 		reinvite(st);
 		return;
@@ -215,6 +226,18 @@ static struct st *st_new(struct call *call, uint32_t se, bool refresher,
 }
 
 
+static void too_small(void *arg)
+{
+	struct st *st = arg;
+
+	info("t48timer: %s: Session-Expires %u below %u, refused\n",
+	     call_id(st->call), st->se, MIN_SE);
+	/* closes the call, and with it this st */
+	ua_hangupf(call_get_ua(st->call), st->call, 422,
+		   "Session Interval Too Small", "Min-SE: %u\r\n", MIN_SE);
+}
+
+
 /* an incoming call offered with Session-Expires: answer with it */
 static void incoming(struct call *call)
 {
@@ -232,6 +255,14 @@ static void incoming(struct call *call)
 		/* baresip gave the call the account's own Session-Expires,
 		 * which is for the calls it makes */
 		call_set_custom_hdrs(call, &hdrs);
+		return;
+	}
+	if (se < MIN_SE) {
+		/* RFC 4028: 422 with our floor, and the caller tries again.
+		 * Not from inside this event: others still get the call. */
+		struct st *st = st_new(call, se, false, false);
+		if (st)
+			tmr_start(&st->tmr, 0, too_small, st);
 		return;
 	}
 	supports = sip_msg_hdr_has_value(msg, SIP_HDR_SUPPORTED, "timer") ||
@@ -283,6 +314,10 @@ static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 	struct call *call = bevent_get_call(event);
 	(void)arg;
 
+	if (ev == BEVENT_SHUTDOWN) {
+		list_flush(&stl);
+		return;
+	}
 	if (!call)
 		return;
 	switch (ev) {
@@ -301,7 +336,11 @@ static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 }
 
 
-/* every account with a timer offers it, and asks for it on its calls */
+/* every account with a timer offers it, and asks for it on its calls. The
+ * header goes in the account's custom headers, which baresip copies into
+ * each call it makes (and each it is offered: incoming() takes it out
+ * again). REGISTER does not get it: its copy was taken when the account
+ * was loaded, before this module starts (config: after account.so). */
 static bool ua_setup(struct le *le, void *arg)
 {
 	struct ua *ua = le->data;

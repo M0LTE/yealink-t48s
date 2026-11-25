@@ -23,11 +23,11 @@ expectstate soft1 Open
 key soft1
 expectstate settings.page sipadvanced
 expectstate settings.row Session_timer
-expectstate settings.value 1800
+expectstate settings.value off
 expectstate soft1 Change
 shot shots/t46s-settings-account-interop.png
 key soft1
-expectstate cfg.sip.session_timer 3600
+expectstate cfg.sip.session_timer 300
 key down
 expectstate settings.row 100rel
 key soft1

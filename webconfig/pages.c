@@ -281,23 +281,28 @@ void page_overview(struct req *r)
 /* ---------- phone accounts ---------- */
 
 /* An account's Advanced part (issue #77, docs/sip.md#interoperability): session timer and 100rel.
- * Open when either is not the default. */
-static const char *const session_timers[][2] = {{"off", "Off"}, {"90", "90 s"}, {"600", "10 min"}, {"1800", "30 min"}, {"3600", "1 h"}};
+ * Open when either is not the default (off). */
+static const char *const session_timers[][2] = {{"off", "Off"}, {"300", "5 min"}, {"600", "10 min"}, {"1800", "30 min"}, {"3600", "1 h"}};
 #define NTIMERS ((int)(sizeof session_timers / sizeof session_timers[0]))
+/* required is listed only for a file that already says it */
+static const char *const rel100s[][2] = {{"off", "Off"}, {"on", "On"}, {"required", "Required"}};
 
 static void account_advanced(const char *f)
 {
-    const char *st = val(f, "session_timer", "1800");
-    int rel = !strcmp(val(f, "100rel", "off"), "on"), known = 0;
-    H("<details class='sub'%r><summary>Advanced</summary><div class='fields'>", strcmp(st, "1800") || rel ? " open" : "");
+    const char *st = val(f, "session_timer", "off"), *rel = val(f, "100rel", "off");
+    int known = 0;
+    H("<details class='sub'%r><summary>Advanced</summary><div class='fields'>", strcmp(st, "off") || strcmp(rel, "off") ? " open" : "");
     H("<label class='field'><span>Session timer</span><select name='session_timer'>");
     for (int i = 0; i < NTIMERS; i++) {
         known |= !strcmp(st, session_timers[i][0]);
         H("<option value='%s'%r>%s</option>", session_timers[i][0], !strcmp(st, session_timers[i][0]) ? " selected" : "", session_timers[i][1]);
     }
     if (!known) H("<option value='%s' selected>%s s</option>", st, st);   /* set by hand in the file: kept */
-    H("</select></label></div><label class='check'><input type='checkbox' name='100rel' value='on'%r> 100rel</label></details>",
-      rel ? " checked" : "");
+    H("</select></label><label class='field'><span>100rel</span><select name='100rel'>");
+    for (int i = 0; i < 3; i++)
+        if (i < 2 || !strcmp(rel, "required"))
+            H("<option value='%s'%r>%s</option>", rel100s[i][0], !strcmp(rel, rel100s[i][0]) ? " selected" : "", rel100s[i][1]);
+    H("</select></label></div></details>");
 }
 
 static void page_accounts(struct req *r)
@@ -403,14 +408,17 @@ static void post_account_save(struct req *r)
         return;
     }
     if (strcmp(tr, "udp") && strcmp(tr, "tcp") && strcmp(tr, "tls")) tr = "udp";
-    /* the Advanced part: the defaults are not written; an interval set by hand in the file comes back as it was */
-    const char *st = form(r, "session_timer");
-    int st_ok = !strcmp(st, val(f, "session_timer", "1800"));
+    /* the Advanced part: off, the default, is not written; a value set by hand in the file comes back as it was;
+     * anything else (or a form without the part) leaves the file alone */
+    const char *st = form(r, "session_timer"), *rel = form(r, "100rel");
+    int st_ok = !strcmp(st, val(f, "session_timer", "off")), rel_ok = !strcmp(rel, val(f, "100rel", "off"));
     for (int i = 0; i < NTIMERS; i++) st_ok |= !strcmp(st, session_timers[i][0]);
-    if (!st_ok || !strcmp(st, "1800")) st = st_ok ? "" : NULL;
+    rel_ok |= !strcmp(rel, "off") || !strcmp(rel, "on");
+    st = !st_ok ? NULL : !strcmp(st, "off") ? "" : st;
+    rel = !rel_ok ? NULL : !strcmp(rel, "off") ? "" : rel;
     for (int i = 0; i < 7 && ok; i++) ok = set(f, keys[i], v[i]) == 0;
     if (ok && st) ok = set(f, "session_timer", st) == 0;
-    if (ok) ok = set(f, "100rel", !strcmp(form(r, "100rel"), "on") ? "on" : NULL) == 0;
+    if (ok && rel) ok = set(f, "100rel", rel) == 0;
     if (ok) ok = cfg_set(f, "transport", tr) == 0 && cfg_set(f, "enabled", !strcmp(form(r, "enabled"), "on") ? "on" : "off") == 0;
     if (ok && pw[0]) ok = cfg_set(f, "password", pw) == 0;
     memset(pw, 0, sizeof pw);

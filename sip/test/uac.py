@@ -22,6 +22,7 @@ the audio.
   uac.py answer PORT [OPTION...]        answer one INVITE on 127.0.0.1:PORT
     hdr=NAME:VALUE      add a header to the 200 (repeatable)
     rel100              send 183 reliably first (needs the caller's support)
+    slow-update         answer UPDATE with 100 Trying, then 200 half a second later
     hold=SECONDS        how long to wait for refreshes and the BYE (default 10)
 """
 import random, re, socket, sys, time
@@ -59,6 +60,7 @@ class Peer:
         self.cseq = 1
         self.tag = "%08x" % random.getrandbits(32)
         self.rtp = port + 1000
+        self.slow_update = False
 
     def send(self, text, dest):
         self.s.sendto(text.encode(), dest)
@@ -88,6 +90,9 @@ class Peer:
         method = first.split()[0]
         if method == "ACK":
             return method
+        if method == "UPDATE" and self.slow_update:
+            self.reply(first, h, src, 100, "Trying")
+            time.sleep(0.5)
         if method == "INVITE":
             self.reply(first, h, src, 200, "OK", body=SDP % self.rtp)
         else:
@@ -98,12 +103,12 @@ class Peer:
 
 
 def opts(args):
-    o = {"hdr": [], "refresh": [], "hold": None, "answer-after": None, "expect-bye": False, "rel100": False, "no-update": False}
+    o = {"hdr": [], "refresh": [], "hold": None, "answer-after": None, "expect-bye": False, "rel100": False, "no-update": False, "slow-update": False}
     for a in args:
         k, _, v = a.partition("=")
         if k in ("hdr", "refresh"):
             o[k].append(v)
-        elif k in ("expect-bye", "rel100", "no-update"):
+        elif k in ("expect-bye", "rel100", "no-update", "slow-update"):
             o[k] = True
         else:
             o[k] = v
@@ -245,6 +250,7 @@ def call(target, port, o):
 
 def answer(port, o):
     p = Peer(port)
+    p.slow_update = o["slow-update"]
     hold = float(o["hold"] or 10)
     end = None
     extra = "".join("%s\r\n" % x.replace(":", ": ", 1) for x in o["hdr"])

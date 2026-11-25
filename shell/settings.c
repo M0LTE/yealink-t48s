@@ -826,8 +826,10 @@ static void build_sipadv(const char *arg)
 {
     const char *f = sip_file(atoi(arg) < 1 ? 1 : atoi(arg));
     snprintf(title, sizeof title, "Advanced");
-    add_stored(R_CHOICE, "Session timer", f, "session_timer", "1800", 0)->choices = "off|90|600|1800|3600";
-    add_stored(R_TOGGLE, "100rel", f, "100rel", "off", 0);
+    add_stored(R_CHOICE, "Session timer", f, "session_timer", "off", 0)->choices = "off|300|600|1800|3600";
+    /* required is offered only to a file that already says it */
+    struct row *r = add_stored(R_CHOICE, "100rel", f, "100rel", "off", 0);
+    r->choices = !strcmp(r->value, "required") ? "off|on|required" : "off|on";
 }
 
 static void build_net(void)
@@ -1870,7 +1872,8 @@ static const char *choice_text(const char *v)
 {
     static const char *const map[][2] = {{"dhcp", "DHCP"}, {"static", "Static"}, {"udp", "UDP"}, {"tcp", "TCP"}, {"tls", "TLS"},
                                              {"stable", "Stable"}, {"testing", "Testing"}, {"off", "Off"},
-                                             {"90", "90 s"}, {"600", "10 min"}, {"1800", "30 min"}, {"3600", "1 h"}};
+                                             {"on", "On"}, {"required", "Required"}, {"300", "5 min"}, {"600", "10 min"},
+                                             {"1800", "30 min"}, {"3600", "1 h"}};
     for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
         if (!strcmp(v, map[i][0])) return map[i][1];
     return v;
