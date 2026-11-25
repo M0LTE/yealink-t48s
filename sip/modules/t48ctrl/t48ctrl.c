@@ -24,6 +24,9 @@
  *    are talking to with each other and takes us out: an attended transfer.
  *    The first call is the one sent away (it must be on hold), the second
  *    the one it is sent to.
+ *  - "accept" while the caller has yet to acknowledge our reliable 180
+ *    (100rel, RFC 3262) is refused by baresip with EAGAIN. It is tried again
+ *    here every 100 ms for up to 10 s, and the client is told it is done.
  *
  * Who may connect: the socket is made mode 0600 inside t48-sip's run
  * directory (0700), and each connection's peer is checked: only root, or the
@@ -66,6 +69,52 @@ static struct {
 	struct list clients;
 	char path[108];
 } ctl = { .fd = -1 };
+
+/* an accept waiting for the caller's PRACK */
+static struct {
+	struct tmr tmr;
+	char line[256];
+	struct ua *ua;
+	unsigned tries;
+} later;
+
+enum { LATER_MS = 100, LATER_TRIES = 100 };
+
+static int print_handler(const char *p, size_t size, void *arg);
+
+
+static bool ua_alive(const struct ua *ua)
+{
+	struct le *le;
+
+	for (le = list_head(uag_list()); le; le = le->next)
+		if (le->data == ua)
+			return true;
+	return false;
+}
+
+
+static void accept_later(void *arg)
+{
+	struct re_printf pf = {print_handler, NULL};
+	struct mbuf *mb = mbuf_alloc(128);
+	int err;
+	(void)arg;
+
+	if (!mb)
+		return;
+	pf.arg = mb;
+	/* the account may have gone in the meantime */
+	if (later.ua && !ua_alive(later.ua))
+		later.ua = NULL;
+	err = cmd_process_long(baresip_commands(), later.line,
+			       str_len(later.line), &pf, later.ua);
+	if (err == EAGAIN && ++later.tries < LATER_TRIES)
+		tmr_start(&later.tmr, LATER_MS, accept_later, NULL);
+	else if (err)
+		warning("t48ctrl: %s: %m\n", later.line, err);
+	mem_deref(mb);
+}
 
 
 static void client_destructor(void *arg)
@@ -246,6 +295,14 @@ static bool handle_command(struct client *c, const char *json, size_t len)
 			    prm ? " " : "", prm ? prm : "");
 		cerr = cmd_process_long(baresip_commands(), line,
 					str_len(line), &pf, ua);
+		if (cerr == EAGAIN && !strcmp(cmd, "accept")) {
+			str_ncpy(later.line, line, sizeof(later.line));
+			later.ua = ua;
+			later.tries = 0;
+			tmr_start(&later.tmr, LATER_MS, accept_later, NULL);
+			mbuf_rewind(resp);
+			cerr = 0;
+		}
 	}
 
 	resp->pos = 0;
@@ -465,6 +522,7 @@ static int module_init(void)
 static int module_close(void)
 {
 	bevent_unregister(event_handler);
+	tmr_cancel(&later.tmr);
 	cmd_unregister(baresip_commands(), cmdv);
 	list_flush(&ctl.clients);
 	ctl.fhs = fd_close(ctl.fhs);

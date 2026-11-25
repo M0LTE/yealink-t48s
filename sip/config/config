@@ -85,6 +85,9 @@ module			ausine.so
 module_app		t48keepalive.so
 module_app		account.so
 module_app		menu.so
+# session timers (RFC 4028, docs/sip.md). After account.so: it sets up each
+# account's offer, and after menu.so, which creates incoming calls.
+module_app		t48timer.so
 # message waiting (voicemail): the shell lights the message lamp from its events
 module_app		t48mwi.so
 module_app		t48ctrl.so

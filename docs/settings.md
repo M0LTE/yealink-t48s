@@ -43,7 +43,7 @@ Plain text in `/data/config`, one file per subject, `key=value` a line, `#` for 
 
 | File | Keys |
 |---|---|
-| `sip` | account 1: `user`, `password`, `domain`, `outbound_proxy`, `auth_user`, `display_name`, `transport` (udp, tcp, tls), `register_seconds`: the file `t48-sip` has always read ([sip.md](sip.md#running-it)). Also `enabled` (on or off), `label` (the name on this phone's screens), `voicemail` (the number the Message key calls), `mwi` (off: do not ask the server about waiting messages) |
+| `sip` | account 1: `user`, `password`, `domain`, `outbound_proxy`, `auth_user`, `display_name`, `transport` (udp, tcp, tls), `register_seconds`: the file `t48-sip` has always read ([sip.md](sip.md#running-it)). Also `enabled` (on or off), `label` (the name on this phone's screens), `voicemail` (the number the Message key calls), `mwi` (off: do not ask the server about waiting messages), `session_timer` (seconds or off, default 1800), `100rel` (off, on or required, default off) ([sip.md](sip.md#interoperability)) |
 | `sip2` to `sip6` | accounts 2 to 6, the same keys |
 | `phone` | `default_account`: 1 to 6, the account calls go out from unless another is chosen. `dnd`: on or off |
 | `network` | `mode` (dhcp or static), `address`, `netmask`, `gateway`, `dns` |

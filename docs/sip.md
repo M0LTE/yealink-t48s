@@ -17,6 +17,7 @@ Issue [#25](https://github.com/M0LTE/yealink-t48s/issues/25). Design: [architect
 | `account` | reads the accounts file that `t48-sip` writes |
 | `menu` | the call commands (`dial`, `accept`, `hangup`, `reginfo`, ...) that t48ctrl runs |
 | `t48keepalive` | ours: NAT keepalives while an account is registered ([NAT keepalives](#nat-keepalives)) |
+| `t48timer` | ours: session timers, RFC 4028 ([Interoperability](#interoperability)) |
 | `t48mwi` | ours: asks each account's server about waiting voicemail (RFC 3842) and passes the answer on as an event, for the message lamp. baresip's own `mwi` module is not built: it can spin for ever at start when an account registers before its start-up timer runs (seen against a server on the same machine), and it delays shutdown by half a second |
 | `opus`, `g711`, `libg722` | codecs: Opus, G.711 (PCMU, PCMA) and G.722 ([Codecs](#codecs)). Neither Opus nor G.722 is inside baresip: `opus` wraps [libopus](https://opus-codec.org) 1.6.1 (BSD-3-Clause), built fixed point; `libg722` wraps sippy's [libg722](https://github.com/sippy/libg722) (two C files, BSD-2-Clause and public domain) |
 | `auresamp` | converts the 16 kHz device audio to and from 8 kHz for G.711 |
@@ -35,7 +36,7 @@ libre is built without BFCP, PCP, RTMP, zlib and backtraces. It needs a crypto l
 
 Opus costs 300 KB. TLS costs about 2.4 MB of flash and RAM. Plain UDP and TCP first, as the design says; TLS is one build switch away when wanted.
 
-One patch to libre ([`sip/patches`](../sip/patches)): it reads an address flag (`IFA_FLAGS`) that arrived in Linux 3.14, and we build against our 3.6.11 kernel's headers, whose kernel never sends it.
+Two patches ([`sip/patches`](../sip/patches)). libre reads an address flag (`IFA_FLAGS`) that arrived in Linux 3.14, and we build against our 3.6.11 kernel's headers, whose kernel never sends it. baresip gets four small hooks for `t48timer`: a call's setup message, its SIP session, a way to set its custom headers, and those headers on the 2xx that answers it.
 
 ## Building
 
@@ -62,7 +63,8 @@ user=1001
 password=...
 domain=sip.example.com
 # optional: auth_user, display_name, transport (udp, tcp, tls), outbound_proxy, register_seconds,
-#           enabled (off), mwi (off), keepalive (off); label and voicemail are for the shell
+#           enabled (off), mwi (off), keepalive (off), session_timer (seconds, off), 100rel (on, required);
+#           label and voicemail are for the shell
 ```
 
 `domain` is the server host, shown as Server host in Settings and on the web setup page; the key keeps its old name so existing files work. With no port the server is found by DNS SRV records for the account's transport, then the plain address on 5060 (5061 for TLS). With a port (`sip.example.com:5070`, `[2001:db8::1]:5070`) that host and port are used, without SRV. `outbound_proxy` (Outbound proxy) takes a host, `host:port` or a `sip:` URI, and is reached on the account's transport.
@@ -84,6 +86,26 @@ On by default for every account. `keepalive=off` in an account's settings file t
 When an account is changed in Settings, `t48-apply sip` kills baresip and starts `t48-sip` again a second later. `t48-sip` keeps its process number in the run directory and waits (up to five seconds) for an old baresip to let go of the SIP port before starting the new one.
 
 The config is [`sip/config/config`](../sip/config/config), installed as `/usr/share/t48/sip/config`; `/data/local/sip/config` replaces it. No credentials are in the repository; the test's passwords are made up for the throwaway registrar.
+
+## Interoperability
+
+Issue #77. What baresip 4.13 and libre 4.13 do on their own, what we changed, and how each was tested: `sip/test/interop-test.sh`, in the build container, about 8 minutes. It runs calls through the test Kamailio in several shapes (variants of [`kamailio.cfg`](../sip/test/kamailio.cfg) chosen with `-A`) and against a scripted far end, [`uac.py`](../sip/test/uac.py), where a second baresip cannot play the part.
+
+| Feature | Default | Tested how | Result |
+|---|---|---|---|
+| Loose routing (Record-Route with `;lr`) | always | Kamailio record-routes, twice as it moves the call from UDP to TCP; hold, resume and hang up | both entries honoured; re-INVITEs and BYE go through the proxy |
+| Transparent proxy (no Record-Route) | always | Kamailio without `record_route()`, both phones on UDP | the same requests go straight between the phones |
+| Stateful proxy | always | every test: Kamailio is transaction stateful (`tm`) | passes |
+| B2BUA-like topology hiding | always | Kamailio's `topos`: each side sees only the proxy in Via, Contact and Record-Route | call, hold, resume, hang up pass |
+| Session timers (RFC 4028) | **on, 1800 s**, per account | far end as caller and as callee, either side the refresher, by UPDATE and by re-INVITE (with and without SDP); a caller that requires timers; a caller without them; the setting off | all pass; the phone refreshes every half interval |
+| Session timers through a proxy that enforces them | as above | Kamailio's `sst` at 90 s, which ends calls that are not refreshed | refreshed calls stay up past 130 s; a call nobody refreshes is ended (61 s) |
+| 100rel and PRACK (RFC 3262) | **off**, per account | two phones with it on; a caller that requires it; early media in a reliable 183; a phone that requires it | all pass (with the setting on where it must be) |
+
+**Session timers.** baresip has none, so a caller that required them got 420 and nothing ever refreshed a call. Our module `t48timer` adds them: the phone says `Supported: timer` and asks for `Session-Expires: 1800` on calls it makes; offered a call with Session-Expires it answers with that interval and a refresher (the one the caller named, else the caller if it supports timers, else the phone). When the phone is the refresher it sends UPDATE every half interval, or re-INVITE if the far end does not allow UPDATE or refuses it. A refresh that times out or gets 408 or 481 ends the call, as RFC 4028 says. Settings: `session_timer=SECONDS` (90 or more) or `off`. Off is plain baresip: no timers offered, the far end refreshes if it wants to (RFC 4028 makes it), a caller that requires them gets 420. Limits: the phone's 2xx to the far end's own refresh has no Session-Expires, which by the RFC turns the timer off after it (the far end may stop refreshing, nothing is ended); and the phone does not end a call itself when the far end, as refresher, stops refreshing: the RTP timeout (60 s) does that.
+
+**100rel.** baresip's default, kept: off. A caller that requires it gets 420, which RFC 3261 says it should answer by calling again without; one that only supports it gets an ordinary 180, and early media in an ordinary 183 plays. `100rel=on` adds `Supported: 100rel` and PRACK, sends 180 reliably to callers that support it and acknowledges reliable 18x. On, libre sends the reliable 180 without SDP, which some strict callers may reject: hence off by default. `100rel=required` refuses callers without it (421). One fix: answering before the caller's PRACK came in was refused by baresip; `t48ctrl` now tries the answer again every 100 ms for up to 10 s.
+
+**TCP and TLS.** The phone's Contact on a TCP or TLS account is its end of the connection to the server, so a far end cannot open a new connection to it. A server on TCP or TLS has to Record-Route, which every provider does; a transparent proxy works over UDP only.
 
 ## Control interface
 

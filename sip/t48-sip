@@ -55,7 +55,7 @@ host_ok() {
 # $line. Returns 1 (and says why) if the file does not make an account.
 account() {
     f=$1
-    user= password= domain= auth_user= display_name= transport=udp proxy= regint=600 enabled=on mwi=on keepalive=on
+    user= password= domain= auth_user= display_name= transport=udp proxy= regint=600 enabled=on mwi=on keepalive=on rel100=off timer=1800
     while IFS= read -r l || [ -n "$l" ]; do
         case "$l" in ''|'#'*) continue ;; esac
         key=${l%%=*}
@@ -72,6 +72,8 @@ account() {
             enabled) enabled=$val ;;
             mwi) mwi=$val ;;
             keepalive) keepalive=$val ;;
+            100rel) rel100=$val ;;
+            session_timer) timer=$val ;;
             label|voicemail) ;;    # the shell's business
             *) echo "t48-sip: $f: ignoring unknown setting '$key'" >&2 ;;
         esac
@@ -107,6 +109,20 @@ account() {
     case "$mwi" in off|no|false|0) mwi=no ;; *) mwi=yes ;; esac
     line="$line;regint=$regint;answermode=manual;mwi=$mwi"
     case "$keepalive" in off|no|false|0) line="$line;keepalive=no" ;; esac
+    # reliable provisional responses (RFC 3262): off, on or required
+    case "$rel100" in
+        off|no|false|0) ;;
+        on|yes|true|1) line="$line;100rel=yes" ;;
+        required) line="$line;100rel=required" ;;
+        *) echo "t48-sip: $f: 100rel: off, on or required; using off" >&2 ;;
+    esac
+    # session timer (RFC 4028, the t48timer module): seconds, at least 90, or off
+    case "$timer" in
+        off|no|false|0) ;;
+        on|yes|true) line="$line;timer=1800" ;;
+        ''|*[!0-9]*) echo "t48-sip: $f: session_timer: off or seconds; using 1800" >&2; line="$line;timer=1800" ;;
+        *) [ ${#timer} -le 5 ] || timer=86400; [ "$timer" -ge 90 ] || timer=90; line="$line;timer=$timer" ;;
+    esac
     return 0
 }
 

@@ -20,3 +20,5 @@ domain=sip.example.com
 # mwi=off                 do not ask the server about waiting messages
 # keepalive=off           no NAT keepalives (OPTIONS to the server every 23 to 29 s,
 #                         96 to 120 s over TCP and TLS)
+# session_timer=1800      session timer interval in seconds (90 or more), or off
+# 100rel=off              reliable provisional responses (PRACK): off, on or required
