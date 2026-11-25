@@ -6,7 +6,7 @@ the shell. Nothing is played: the "loudspeaker" is a WAV file.
 
   socket_test.py BUILD_DIR      (run by make check)
 """
-import math, os, shutil, socket, struct, subprocess, sys, tempfile, threading, time, wave
+import fcntl, math, mmap, os, shutil, socket, struct, subprocess, sys, tempfile, threading, time, wave
 
 BUILD = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "build")
 FRAME = 320
@@ -150,7 +150,139 @@ class Call:
         self.s.close()
 
 
+class App:
+    """The shell and an app with sound, in one: the ring (a sealed memfd, as
+    the shell makes it), handed to the service on the control socket, and the
+    app's side of it."""
+    FRAMES, DATA = 4096, 4096
+
+    def __init__(self, d, sealed=True, size=None):
+        self.fd = os.memfd_create("t48-sound", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        os.ftruncate(self.fd, size or self.DATA + self.FRAMES * 2)
+        if sealed:
+            fcntl.fcntl(self.fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SEAL)
+        self.m = mmap.mmap(self.fd, size or self.DATA + self.FRAMES * 2)
+        self.m[0:16] = struct.pack("<IIII", 0x53383454, 16000, self.FRAMES, self.DATA)
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.s.connect(os.path.join(d.dir, "ctl.sock"))
+        self.s.sendall(struct.pack("<HHH", 1, 2, 1))   # HELLO
+        self.wr = self.n = 0
+
+    def tell(self, what, with_ring=False):
+        msg = struct.pack("<HHB", 9, 1, what)   # APP
+        if with_ring:
+            socket.send_fds(self.s, [msg], [self.fd])
+        else:
+            self.s.sendall(msg)
+
+    def field(self, k):
+        """rd, state, delay, dry"""
+        return struct.unpack_from("<I", self.m, 16 + 4 * k)[0]
+
+    def write(self, samples):
+        for i in range(0, len(samples), 256):
+            part = samples[i:i + 256]
+            at = self.wr % self.FRAMES
+            first = min(len(part), self.FRAMES - at)
+            self.m[self.DATA + 2 * at:self.DATA + 2 * (at + first)] = struct.pack("<%dh" % first, *part[:first])
+            if first < len(part):
+                self.m[self.DATA:self.DATA + 2 * (len(part) - first)] = struct.pack("<%dh" % (len(part) - first), *part[first:])
+            self.wr = (self.wr + len(part)) & 0xffffffff
+            self.m[32:36] = struct.pack("<I", self.wr)
+
+    def play(self, hz, level, seconds, ahead=960):
+        """Feed a tone as an app does: keep about `ahead` samples waiting."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            room = ahead - ((self.wr - self.field(0)) & 0xffffffff)
+            if room >= 160:
+                self.write(sine(hz, level, room, self.n))
+                self.n += room
+            time.sleep(0.004)
+        self.dry = self.field(3)   # before the ring drains
+
+    def close(self):
+        self.s.close()
+
+
+def app_tests():
+    print("== an app's sound")
+    d = Daemon("app")
+    d.ctl("volume", "app", "15", "volume", "ringer", "15")
+    bad = App(d, sealed=False)
+    bad.tell(2, with_ring=True)
+    time.sleep(0.1)
+    check("app=none" in d.ctl(), "a ring that is not sealed is refused")
+    bad.close()
+    a = App(d)
+    a.tell(2, with_ring=True)
+    time.sleep(0.1)
+    st = d.ctl()
+    check("app=front" in st and "idle" in st, "the ring is taken; nothing written yet, so no clock runs")
+    check(a.field(1) == 1, "the app is told its sound will be played")
+    t0, rd0 = time.monotonic(), a.field(0)
+    a.play(500, 32767, 1.5)
+    t1, rd1 = time.monotonic(), a.field(0)
+    st = d.ctl()
+    check("app=front,sounding" in st and "running" in st, "writing starts the hardware; the shell is told an app is sounding")
+    rate = (rd1 - rd0) / (t1 - t0)
+    check(15000 < rate < 17000, "taken at %.0f samples a second (want 16000)" % rate)
+    check(a.dry == 0, "never ran dry while it was fed")
+    # calls win: the phone rings, the app goes on writing
+    d.ctl("ring", "1")
+    time.sleep(0.1)
+    check(a.field(1) == 2, "ringing: the app is told its sound is held")
+    rd0 = a.field(0)
+    a.play(500, 32767, 1.0)
+    check(a.field(0) - rd0 > 14000, "held, it is still taken at the same rate")
+    d.ctl("ring", "0")
+    a.play(500, 32767, 1.0)
+    check(a.field(1) == 1, "ringing over: played again")
+    # off the screen with samples waiting: dropped, and nothing more is taken
+    a.write(sine(500, 32767, 3000))
+    a.tell(1)
+    time.sleep(0.2)
+    rd0 = a.field(0)
+    check(a.field(1) == 0 and rd0 == a.wr and "app=paused" in d.ctl(), "paused: told so, and what was waiting is dropped")
+    a.write(sine(500, 32767, 2000))
+    time.sleep(0.3)
+    check(a.field(0) == rd0, "paused: nothing is taken")
+    time.sleep(2.2)
+    check("idle" in d.ctl(), "2 s after an app's last sound the hardware is idle")
+    # back in front: a short sound from idle
+    a.tell(2)
+    time.sleep(0.1)
+    a.write(sine(2000, 16000, 1600))
+    time.sleep(0.5)
+    check(a.field(0) == a.wr and a.field(3) >= 1, "a 100 ms sound from idle is played out, then the ring is dry")
+    # the shell goes: the ring is let go
+    a.close()
+    time.sleep(0.2)
+    check("app=none" in d.ctl() and a.field(1) == 0, "the shell's connection closes: the app's sound is closed")
+    time.sleep(2.2)
+    log, played = d.stop()
+    line = [l for l in log.splitlines() if "app sound closed" in l]
+    print("  log: " + (line[0] if line else "(no summary line)"))
+    check(bool(line), "the log has the app's figures")
+    check(max(abs(x) for x in played) <= 1800, "nothing on the loudspeaker above its limit (1800)")
+    first = next(i for i in range(0, len(played), FRAME) if max(abs(x) for x in played[i:i + FRAME]) > 0)
+    tone = played[first + 2 * FRAME:first + 60 * FRAME]
+    lvl = amp(tone, 500)
+    check(1700 < lvl < 1810, "a full-scale tone at app volume 15 is on the limit (500 Hz at %.0f, want 1800)" % lvl)
+    # the ring: the ringer is there and the app is not
+    ring_at = next((i for i in range(first + 70 * FRAME, len(played) - 4096, 160) if amp(played[i:i + 256], 1000) > 1500), None)
+    check(ring_at is not None, "the ringer rang")
+    if ring_at is not None:
+        during = played[ring_at + 1600:ring_at + 12800]
+        check(amp(during, 500) < 30, "while it rang none of the app's sound was played (500 Hz at %.0f)" % amp(during, 500))
+    short = max(amp(played[i:i + 800], 2000) for i in range(len(played) - 16000 * 3, len(played) - 800, 400))
+    check(850 < short < 900, "the short sound: 2000 Hz at %.0f (want 879: half scale at volume 15)" % short)
+
+
 def main():
+    app_tests()
+    if fails:
+        return 1
     tmp = tempfile.mkdtemp(prefix="audiod-mic-")
     mic_wav = os.path.join(tmp, "mic.wav")
     write_wav(mic_wav, sine(440, 6000, 16000))   # one second, looped by the daemon

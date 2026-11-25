@@ -43,6 +43,8 @@ static struct {
     long long deadline;       /* for STARTING, PAUSING and QUITTING */
     const char *kill_reason;  /* set when the shell kills it for misbehaving */
     int flip_late;            /* the screen has failed to report a flip, and the log says so */
+    int sound_fd;             /* its sound ring (level 4), ours to hand to the audio service; -1: it has no sound */
+    int sound_told;           /* what the audio service was last told: T48AC_APP_*, -1: nothing, it has not got the ring */
     int api;                  /* the level it answered READY with */
     uint32_t *flip_map;       /* the flip buffers, where the shell copies them; NULL: the screen shows them itself */
     int flip_count;
@@ -54,7 +56,7 @@ static struct {
     unsigned flip_frame;
     unsigned char rx[1024];
     size_t rx_n;
-} app = {.sock = -1};
+} app = {.sock = -1, .sound_fd = -1};
 
 static char errbuf[200];
 
@@ -112,6 +114,46 @@ static int make_fonts(void)
     if (fd >= 0 && pwrite(fd, b, n, 0) != (ssize_t)n) { close(fd); fd = -1; }
     free(b);
     return fd;
+}
+
+/* ---------- sound (level 4) ---------- */
+
+/* The ring an app writes its sound into and the audio service plays from
+ * (struct t48_sound_ring, docs/app-protocol.md). A memfd sealed against
+ * changing size: the audio service maps it too, and must not be at the mercy
+ * of an app that cuts the file short. -1 where the kernel has no memfd (3.6):
+ * the app then has no sound. */
+static int make_sound(void)
+{
+    struct t48_sound_ring r = {T48_SOUND_MAGIC, T48_SOUND_RATE, T48AC_APP_FRAMES, T48AC_APP_DATA, 0, T48_SOUND_OFF, 0, 0, 0, 0};
+    int fd = memfd_create("t48-sound", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (fd < 0) return -1;
+    if (ftruncate(fd, T48AC_APP_BYTES) < 0 || pwrite(fd, &r, sizeof r, 0) != (ssize_t)sizeof r ||
+        fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) < 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+int app_sound(void) { return app.state == APP_RUNNING && app.sound_fd >= 0; }
+
+/* Tell the audio service where the app is: in front (played), off the screen
+ * (silent, at once), or gone. Only when that changes. */
+static void sound_sync(void)
+{
+    int want = app.state == APP_NONE ? T48AC_APP_GONE
+             : app.state == APP_STARTING || app.state == APP_RUNNING ? T48AC_APP_FRONT : T48AC_APP_PAUSED;
+    if (app.sound_fd < 0 || want == app.sound_told || !audioc_connected()) return;
+    if (app.sound_told < 0 && want == T48AC_APP_GONE) return;
+    audioc_app(want, app.sound_told < 0 ? app.sound_fd : -1);
+    app.sound_told = want;
+}
+
+void app_sound_link(void)
+{
+    app.sound_told = -1;
+    sound_sync();
 }
 
 static void kill_app(int sig)
@@ -194,7 +236,7 @@ void app_flipped(int n, unsigned frame, long long time_us)
 
 int app_launch(const struct manifest *m)
 {
-    int sv[2], buf_fd, fonts_fd, flip_fd = -1, flip_count = 0, flip_ours = 0;
+    int sv[2], buf_fd, fonts_fd, flip_fd = -1, flip_count = 0, flip_ours = 0, sound_fd = -1;
     size_t flip_size = 0;
     unsigned flip_period = 0;
     uint32_t *flip_map = NULL;
@@ -229,6 +271,7 @@ int app_launch(const struct manifest *m)
         else { flip_ours = 1; flip_count = COPY_BUFFERS; flip_size = BUF_BYTES; flip_period = COPY_PERIOD_US; }
     }
     if (flip_fd < 0) flip_count = 0;
+    if (manifest_may(m, "audio-out") && (sound_fd = make_sound()) < 0) logmsg("app %s: no sound: %s", m->id, strerror(errno));
 
     /* the app's own folder */
     uid_t uid = uid_for(m->id);
@@ -248,19 +291,22 @@ int app_launch(const struct manifest *m)
         if (fonts_fd >= 0) close(fonts_fd);
         if (flip_ours) munmap(flip_map, COPY_BUFFERS * (size_t)BUF_BYTES);
         if (flip_fd >= 0) close(flip_fd);
+        if (sound_fd >= 0) close(sound_fd);
         return -1;
     }
     if (pid == 0) {
         char num[16];
         setpgid(0, 0);
-        /* socket on 3, buffer on 4, fonts on 5, flip buffers on 6, nothing else of ours */
+        /* socket on 3, buffer on 4, fonts on 5, flip buffers on 6, the sound ring on 7, nothing else of ours */
         int s = fcntl(sv[1], F_DUPFD, 10), b = fcntl(buf_fd, F_DUPFD, 10), f = fonts_fd < 0 ? -1 : fcntl(fonts_fd, F_DUPFD, 10);
         int fl = flip_fd < 0 ? -1 : fcntl(flip_fd, F_DUPFD, 10);
+        int sn = sound_fd < 0 ? -1 : fcntl(sound_fd, F_DUPFD, 10);
         dup2(s, 3);
         dup2(b, 4);
         if (f >= 0) dup2(f, 5); else close(5);
         if (fl >= 0) dup2(fl, 6); else close(6);
-        for (int fd = 7; fd < 256; fd++) close(fd);
+        if (sn >= 0) dup2(sn, 7); else close(7);
+        for (int fd = 8; fd < 256; fd++) close(fd);
         if (geteuid() == 0 && (setgroups(0, NULL) < 0 || setgid(uid) < 0 || setuid(uid) < 0)) _exit(126);
         prctl(PR_SET_PDEATHSIG, SIGKILL);  /* an app is no use without its shell (set after the change of user, which clears it) */
         if (chdir(m->dir) < 0) _exit(126);
@@ -270,6 +316,7 @@ int app_launch(const struct manifest *m)
         setenv(T48_ENV_BUFFER, num, 1);
         if (f >= 0) setenv(T48_ENV_FONTS, "5", 1);
         if (fl >= 0) setenv(T48_ENV_FLIP, "6", 1);
+        if (sn >= 0) setenv(T48_ENV_SOUND, "7", 1);
         setenv(T48_ENV_APP_ID, m->id, 1);
         setenv(T48_ENV_APP_DATA, data, 1);
         setenv("HOME", data, 1);
@@ -290,6 +337,8 @@ int app_launch(const struct manifest *m)
     app.flip_size = flip_size;
     app.flip_period = flip_period;
     app.flip_now = app.flip_wait = -1;
+    app.sound_fd = sound_fd;   /* ours stays open: the audio service may need it again */
+    app.sound_told = -1;
     app.state = APP_STARTING;
     app.pid = pid;
     app.sock = sv[0];
@@ -320,6 +369,7 @@ int app_launch(const struct manifest *m)
     }
     app_theme();
     send_msg(T48_MSG_START, NULL, 0);
+    sound_sync();
     return 0;
 }
 
@@ -337,6 +387,7 @@ void app_pause(void)
     send_msg(T48_MSG_PAUSE, NULL, 0);
     app.state = APP_PAUSING;
     app.deadline = t48_now_ms() + GRACE_MS;
+    sound_sync();   /* silent now, not when it is frozen */
 }
 
 static void freeze(void)
@@ -351,6 +402,7 @@ void app_resume(void)
     if (app.state == APP_STOPPED) kill_app(SIGCONT);
     else if (app.state != APP_PAUSING) return;
     app.state = APP_RUNNING;
+    sound_sync();
     send_msg(T48_MSG_RESUME, NULL, 0);
     logmsg("app %s resumed", app.id);
 }
@@ -362,12 +414,14 @@ void app_quit(void)
     send_msg(T48_MSG_QUIT, NULL, 0);
     app.state = APP_QUITTING;
     app.deadline = t48_now_ms() + GRACE_MS;
+    sound_sync();
 }
 
 void app_kill_now(void)
 {
     if (app.state == APP_NONE) return;
     app.state = APP_QUITTING;
+    sound_sync();
     kill_app(SIGKILL);
 }
 
@@ -518,7 +572,13 @@ void app_reaped(pid_t pid, int status)
     if (app.sock >= 0) close(app.sock);
     munmap(app.buf, BUF_BYTES);
     if (app.flip_map) munmap(app.flip_map, COPY_BUFFERS * (size_t)BUF_BYTES);
+    if (app.sound_fd >= 0) {
+        app.state = APP_NONE;
+        sound_sync();
+        close(app.sound_fd);
+    }
     memset(&app, 0, sizeof app);
     app.sock = -1;
+    app.sound_fd = -1;
     shell_app_gone(name, reason);
 }

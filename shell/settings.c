@@ -844,10 +844,10 @@ static void build_tz(void)
 
 static void build_sound(void)
 {
-    static const char *const names[] = {"", "Handset", "Speaker", "Headset", "Ringer"};
-    static const int order[] = {T48AC_VOL_RINGER, T48AC_VOL_HANDSET, T48AC_VOL_SPEAKER, T48AC_VOL_HEADSET};
+    static const char *const names[] = {"", "Handset", "Speaker", "Headset", "Ringer", "Apps"};
+    static const int order[] = {T48AC_VOL_RINGER, T48AC_VOL_HANDSET, T48AC_VOL_SPEAKER, T48AC_VOL_HEADSET, T48AC_VOL_APP};
     snprintf(title, sizeof title, "Sound");
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         struct row *r = add(R_LEVEL, names[order[i]]);
         r->target = order[i];
         r->level = phone_volume(order[i]);
@@ -1155,7 +1155,7 @@ static void build_storeapp(const char *id)
         for (char *p = strtok_r(perms, " ", &save); p; p = strtok_r(NULL, " ", &save)) {
             size_t at = strlen(v);
             snprintf(v + at, sizeof v - at, "%s%s", at ? ", " : "",
-                     !strcmp(p, "network") ? "Network" : !strcmp(p, "audio-out") ? "Audio out" : p);
+                     !strcmp(p, "network") ? "Network" : !strcmp(p, "audio-out") ? "Sound" : p);
         }
     }
     add_info("Permissions", v);

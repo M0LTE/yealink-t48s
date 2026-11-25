@@ -22,6 +22,16 @@ int dsp_alert_q15(int level)
 	return tab[level < 0 ? 0 : level > 15 ? 15 : level];
 }
 
+int dsp_app_q15(int level)
+{
+	/* SPK_LIMIT * 10^(-2 * (15 - level) / 20) */
+	static const int16_t tab[16] = {
+		0, 72, 90, 114, 143, 180, 227, 285,
+		359, 452, 569, 717, 902, 1136, 1430, 1800
+	};
+	return tab[level < 0 ? 0 : level > 15 ? 15 : level];
+}
+
 void dsp_limit(struct limiter *st, int16_t *x, int n, int ceiling)
 {
 	int32_t env = st->env;
@@ -56,6 +66,17 @@ void dsp_mix(int16_t *out, const int16_t *a, const int16_t *b, int g, int n)
 	int i;
 	for (i = 0; i < n; i++)
 		out[i] = sat16(a[i] + (((int32_t)b[i] * g) >> 15));
+}
+
+void dsp_mix_ramp(int16_t *out, const int16_t *b, int g0, int g1, int n)
+{
+	int32_t g = (int32_t)g0 << 8, step = (((int32_t)g1 - g0) << 8) / n;
+	int i;
+
+	for (i = 0; i < n; i++) {
+		g += step;
+		out[i] = sat16(out[i] + (((int32_t)b[i] * (g >> 8) + (1 << 14)) >> 15));
+	}
 }
 
 int dsp_level(const int16_t *x, int n)

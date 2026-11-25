@@ -45,6 +45,7 @@ struct hw_alsa {
 	char warned[MAX_WARNED][44];
 	unsigned nwarned;
 	int play_warned;
+	int silent, measure;
 };
 
 static void set_mask(struct snd_pcm_hw_params *p, int n, unsigned bit)
@@ -152,6 +153,10 @@ static void ctl_set(struct hw_alsa *a, const char *name, int value)
 		fprintf(stderr, "t48-audiod: the kernel has no control \"%s\": skipped\n", name);
 		return;
 	}
+	/* --silent: nothing that lets sound out is ever switched on */
+	if (a->silent && value && (!strcmp(name, "Speaker Amp Switch") || strstr(name, "Playback Switch") ||
+				   strstr(name, "Sidetone Switch")))
+		value = 0;
 	memset(&info, 0, sizeof(info));
 	memset(&val, 0, sizeof(val));
 	info.id = val.id = a->ids[i];
@@ -281,8 +286,19 @@ static void alsa_playback(struct hw *hw, const int16_t *spk)
 	if (a->play_fd < 0)
 		return;
 	n = write(a->play_fd, spk, FRAME * sizeof(int16_t));
-	if (n == (ssize_t)(FRAME * sizeof(int16_t)))
+	if (n == (ssize_t)(FRAME * sizeof(int16_t))) {
+		snd_pcm_sframes_t d;
+
+		if (a->measure && ioctl(a->play_fd, SNDRV_PCM_IOCTL_DELAY, &d) == 0 && d >= 0) {
+			if (!hw->depth_n || (unsigned long)d < hw->depth_min)
+				hw->depth_min = (unsigned long)d;
+			if ((unsigned long)d > hw->depth_max)
+				hw->depth_max = (unsigned long)d;
+			hw->depth_sum += (unsigned long)d;
+			hw->depth_n++;
+		}
 		return;
+	}
 	if (n < 0 && errno == EPIPE) {
 		/* ran dry: start again with the same 40 ms */
 		hw->play_xruns++;
@@ -304,15 +320,20 @@ static void alsa_destroy(struct hw *hw)
 	free(a);
 }
 
-struct hw *hw_alsa_new(int card)
+struct hw *hw_alsa_new(int card, int silent, int measure)
 {
 	struct hw_alsa *a = calloc(1, sizeof(*a));
 
 	if (!a)
 		return 0;
 	a->card = card;
+	a->silent = silent;
+	a->measure = measure;
 	a->ctl_fd = a->cap_fd = a->play_fd = -1;
 	a->hw.name = "alsa";
+	/* a frame is written behind one already queued, and the driver moves
+	 * 5 ms at a time */
+	a->hw.play_delay = PLAY_START - FRAME + 80;
 	a->hw.start = alsa_start;
 	a->hw.stop = alsa_stop;
 	a->hw.tick_fd = alsa_tick_fd;

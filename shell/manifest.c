@@ -20,6 +20,15 @@ int manifest_id_ok(const char *id)
     return 1;
 }
 
+/* does the manifest ask for this permission? */
+int manifest_may(const struct manifest *m, const char *perm)
+{
+    size_t n = strlen(perm);
+    for (const char *p = m->perms; (p = strstr(p, perm)); p += n)
+        if ((p == m->perms || p[-1] == ' ') && (!p[n] || p[n] == ' ')) return 1;
+    return 0;
+}
+
 void manifest_free(struct manifest *m)
 {
     free(m->icon.px);

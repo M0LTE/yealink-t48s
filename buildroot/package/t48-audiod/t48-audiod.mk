@@ -15,7 +15,8 @@ T48_AUDIOD_LICENSE_FILES = third_party/speexdsp/COPYING
 define T48_AUDIOD_BUILD_CMDS
 	$(TARGET_MAKE_ENV) CFLAGS="$(TARGET_CFLAGS)" $(MAKE) -B -C $(@D) \
 		CC="$(TARGET_CC)" O=build-br \
-		T48AUDIO=$(BR2_EXTERNAL_T48S_PATH)/../sip/modules/t48audio all
+		T48AUDIO=$(BR2_EXTERNAL_T48S_PATH)/../sip/modules/t48audio \
+		LIBT48_INCLUDE=$(BR2_EXTERNAL_T48S_PATH)/../libt48/include all
 endef
 
 define T48_AUDIOD_INSTALL_TARGET_CMDS

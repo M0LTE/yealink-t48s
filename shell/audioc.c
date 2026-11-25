@@ -51,6 +51,28 @@ void audioc_mute(int on) { send1(T48AC_MUTE, on); }
 void audioc_tone(int tone) { send1(T48AC_TONE, tone); }
 void audioc_ring(int on) { send1(T48AC_RING, on); }
 void audioc_key(int ch) { send1(T48AC_KEY, ch); }
+/* An app's sound: whether it is in front, and with ring_fd its ring, which
+ * travels as a descriptor beside the message. */
+void audioc_app(int what, int ring_fd)
+{
+    unsigned char m[5] = {T48AC_APP, 0, 1, 0, (unsigned char)what};
+    union { struct cmsghdr h; char space[CMSG_SPACE(sizeof(int))]; } cm;
+    struct iovec iov = {m, sizeof m};
+    struct msghdr mh = {.msg_iov = &iov, .msg_iovlen = 1};
+
+    if (fd < 0) return;
+    if (ring_fd >= 0) {
+        memset(&cm, 0, sizeof cm);
+        mh.msg_control = &cm;
+        mh.msg_controllen = sizeof cm;
+        cm.h.cmsg_level = SOL_SOCKET;
+        cm.h.cmsg_type = SCM_RIGHTS;
+        cm.h.cmsg_len = CMSG_LEN(sizeof(int));
+        memcpy(CMSG_DATA(&cm.h), &ring_fd, sizeof(int));
+    }
+    if (sendmsg(fd, &mh, MSG_NOSIGNAL) != (ssize_t)sizeof m) drop("cannot send");
+}
+
 void audioc_volume(int which, int level)
 {
     unsigned char b[2] = {(unsigned char)which, (unsigned char)level};

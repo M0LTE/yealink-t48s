@@ -9,6 +9,15 @@
 
 int msg_fill(int fd, struct msgbuf *b)
 {
+	return msg_fill_fd(fd, b, 0);
+}
+
+int msg_fill_fd(int fd, struct msgbuf *b, int *passed)
+{
+	union { struct cmsghdr h; char space[CMSG_SPACE(sizeof(int))]; } cm;
+	struct iovec iov;
+	struct msghdr mh;
+	struct cmsghdr *c;
 	ssize_t n;
 
 	if (b->used) {
@@ -18,9 +27,29 @@ int msg_fill(int fd, struct msgbuf *b)
 	}
 	if (b->len == sizeof(b->buf))
 		return 1;	/* full: the caller has messages to take first */
+	memset(&mh, 0, sizeof(mh));
+	iov.iov_base = b->buf + b->len;
+	iov.iov_len = sizeof(b->buf) - b->len;
+	mh.msg_iov = &iov;
+	mh.msg_iovlen = 1;
+	mh.msg_control = &cm;
+	mh.msg_controllen = sizeof(cm);
 	do
-		n = read(fd, b->buf + b->len, sizeof(b->buf) - b->len);
+		n = recvmsg(fd, &mh, MSG_CMSG_CLOEXEC);
 	while (n < 0 && errno == EINTR);
+	/* there is room for one descriptor, so one header is all there can be */
+	c = n >= 0 ? CMSG_FIRSTHDR(&mh) : 0;
+	if (c && c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
+		int got;
+
+		memcpy(&got, CMSG_DATA(c), sizeof(got));
+		if (passed && *passed >= 0)
+			close(*passed);
+		if (passed)
+			*passed = got;
+		else
+			close(got);
+	}
 	if (n > 0) {
 		b->len += (size_t)n;
 		return 1;

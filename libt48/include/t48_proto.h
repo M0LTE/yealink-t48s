@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /*
- * The T48 app protocol, API level 3: what goes over the socket between the
+ * The T48 app protocol, API level 4: what goes over the socket between the
  * shell and an app. The written description is docs/app-protocol.md; this
  * header is the same thing for C programs.
  *
@@ -15,8 +15,9 @@
 
 /* 2 added THEME and the font file; a level 1 app or shell skips both.
  * 3 added flipping (FLIPINFO, FLIP, FLIPPED, the flip buffers), times on KEY
- * and TOUCH, and the soft keys; an older app or shell sees none of it. */
-#define T48_API_LEVEL 3
+ * and TOUCH, and the soft keys; an older app or shell sees none of it.
+ * 4 added sound (the sound ring); nothing on the socket changed. */
+#define T48_API_LEVEL 4
 
 /* The shell starts the app with these in its environment. */
 #define T48_ENV_SOCKET "T48_SOCKET_FD"   /* number of the socket file descriptor */
@@ -25,6 +26,8 @@
 #define T48_ENV_APP_DATA "T48_APP_DATA"  /* the app's own writable folder */
 #define T48_ENV_FONTS "T48_FONTS_FD"     /* level 2: number of the font file's descriptor (struct t48_fonts_hdr) */
 #define T48_ENV_FLIP "T48_FLIP_FD"       /* level 3: number of the flip buffers' descriptor (struct t48_msg_flipinfo) */
+#define T48_ENV_SOUND "T48_SOUND_FD"     /* level 4: number of the sound ring's descriptor (struct t48_sound_ring);
+                                          * only for an app whose manifest has the "audio-out" permission */
 
 struct t48_msg_hdr {
     uint16_t type;
@@ -48,7 +51,7 @@ struct t48_msg_hdr {
 #define T48_MSG_READY 0x81   /* struct t48_msg_ready; the answer to START */
 #define T48_MSG_DAMAGE 0x82  /* struct t48_msg_rect: this part of the buffer changed */
 #define T48_MSG_PAUSED 0x83  /* no payload: optional answer to PAUSE, "freeze me now" */
-/* 0x84 is kept for asking for an audio stream (a later API level) */
+/* 0x84 is not used */
 #define T48_MSG_FLIP 0x85    /* level 3: struct t48_msg_flip: show this flip buffer at the next refresh */
 
 #define T48_FORMAT_XRGB8888 0  /* one 32-bit word per pixel, 0x00RRGGBB */
@@ -178,6 +181,39 @@ struct t48_fonts_glyph {
     int16_t adv, w, h, xoff, yoff;  /* advance; the box of coverage and where it sits from the pen and the top */
     uint16_t pad;
     uint32_t off;                   /* into the face's coverage */
+};
+
+/* Sound (level 4). T48_ENV_SOUND names a descriptor to map shared and
+ * writable: this header, then at `data` a ring of `frames` samples, signed
+ * 16-bit, one channel, `rate` a second. The app is the only writer of the
+ * samples and of `wr`; the audio service takes them 20 ms at a time and is the
+ * only writer of the rest. Nothing is copied on the way and no message is
+ * sent. `wr` and `rd` count samples and wrap at 2^32; sample k is at
+ * data[k % frames]; wr - rd are waiting and must never pass `frames`.
+ *
+ * To wait for room: set `waiting` to 1 and sleep in futex(FUTEX_WAIT) on `rd`
+ * with a timeout. The service wakes it after each take. While `state` is
+ * T48_SOUND_OFF nothing is taken: throw the samples away at the rate they
+ * would have played. */
+#define T48_SOUND_MAGIC 0x53383454u   /* "T48S" */
+#define T48_SOUND_RATE 16000
+#define T48_SOUND_OFF 0       /* nobody is taking: the app is off the screen, or there is no audio service */
+#define T48_SOUND_PLAYING 1   /* what is written is played */
+#define T48_SOUND_HELD 2      /* taken at the same rate and not played: a call is ringing or up */
+
+struct t48_sound_ring {
+    uint32_t magic;       /* T48_SOUND_MAGIC */
+    uint32_t rate;        /* samples a second: 16000 */
+    uint32_t frames;      /* samples the ring holds: a power of two */
+    uint32_t data;        /* where the samples start, in bytes from the start of the file */
+    /* the audio service's */
+    uint32_t rd;          /* samples taken */
+    uint32_t state;       /* T48_SOUND_* */
+    uint32_t delay;       /* samples between leaving the ring and reaching the loudspeaker */
+    uint32_t dry;         /* times the ring ran empty while it was being played */
+    /* the app's */
+    uint32_t wr;          /* samples written */
+    uint32_t waiting;     /* not 0: wake me when rd moves */
 };
 
 struct t48_msg_rect {

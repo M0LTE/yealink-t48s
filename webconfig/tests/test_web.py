@@ -470,10 +470,10 @@ class Paired(unittest.TestCase):
 
     def test_40_sound_and_screen(self):
         p = self.p
-        self.ok("/sound", {"ringer": "3", "handset": "9", "speaker": "12", "headset": "0"}, "/sound")
-        self.assertEqual([p.get("audio", k) for k in ("ringer", "handset", "speaker", "headset")], ["3", "9", "12", "0"])
-        self.bad("/sound", {"ringer": "16", "handset": "9", "speaker": "12", "headset": "0"}, "/sound")
-        self.bad("/sound", {"ringer": "loud", "handset": "9", "speaker": "12", "headset": "0"}, "/sound")
+        self.ok("/sound", {"ringer": "3", "handset": "9", "speaker": "12", "headset": "0", "apps": "7"}, "/sound")
+        self.assertEqual([p.get("audio", k) for k in ("ringer", "handset", "speaker", "headset", "apps")], ["3", "9", "12", "0", "7"])
+        self.bad("/sound", {"ringer": "16", "handset": "9", "speaker": "12", "headset": "0", "apps": "7"}, "/sound")
+        self.bad("/sound", {"ringer": "loud", "handset": "9", "speaker": "12", "headset": "0", "apps": "7"}, "/sound")
         self.assertEqual(p.get("audio", "ringer"), "3")
         self.ok("/screen", {"brightness": "4", "dim_seconds": "60", "off_seconds": "0"}, "/sound")
         self.assertEqual([p.get("screen", k) for k in ("brightness", "dim_seconds", "off_seconds")], ["4", "60", "0"])
@@ -750,7 +750,7 @@ class Paired(unittest.TestCase):
             self.ok("/accounts/save", {"n": "1", "user": "9999", "domain": "wrong.example", "password": "changed-pw", "transport": "tcp", "enabled": "on"}, "/accounts")
             self.ok("/accounts/remove", {"n": "2", "sure": "yes"}, "/accounts")
             self.ok("/time", {"zone": "Asia/Tokyo"}, "/time")
-            self.ok("/sound", {"ringer": "15", "handset": "15", "speaker": "15", "headset": "15"}, "/sound")
+            self.ok("/sound", {"ringer": "15", "handset": "15", "speaker": "15", "headset": "15", "apps": "15"}, "/sound")
             self.ok("/network", {"mode": "static", "address": "10.9.9.9", "netmask": "255.0.0.0"}, "/network")
             self.ok("/contacts/save", {"name": "Intruder", "number": "666"}, "/contacts")
             p.set("apps/demo", "title", "Wrecked")

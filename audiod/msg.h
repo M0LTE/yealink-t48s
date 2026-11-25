@@ -18,6 +18,9 @@ struct msgbuf {
 /* Read what the socket has. 1 if anything arrived, 0 if nothing yet, -1 if
  * the other end closed or failed. */
 int msg_fill(int fd, struct msgbuf *b);
+/* The same, and a descriptor that came with the bytes (SCM_RIGHTS) is put in
+ * *passed, closing any that was there. One at a time is all that is kept. */
+int msg_fill_fd(int fd, struct msgbuf *b, int *passed);
 /* Next whole message: 1 (payload is valid until the next msg_fill), 0 if
  * there is not a whole one yet, -1 if the length is over MSG_MAX. */
 int msg_next(struct msgbuf *b, unsigned *type, const unsigned char **payload, unsigned *len);

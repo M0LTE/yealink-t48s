@@ -26,6 +26,10 @@ struct engine {
 	struct dcblock dc;
 	struct limiter lim;	/* on whatever goes to the loudspeaker's amplifier */
 	int settle;		/* frames of microphone still to hold back after a route change */
+	int call;		/* baresip's call stream is up */
+	const int16_t *app;	/* an app's frame for the next tick, or NULL */
+	int app_gain;		/* what the app's sound was last mixed at, Q15 */
+	int app_heard;		/* the last tick played some of it */
 };
 
 void engine_init(struct engine *e);
@@ -35,6 +39,21 @@ void engine_set_mute(struct engine *e, int on);
 void engine_set_tone(struct engine *e, int tone);
 void engine_set_ring(struct engine *e, int on);
 void engine_key(struct engine *e, int key);
+
+/* Whether baresip's call stream is up: with a route set, that is a call */
+void engine_set_call(struct engine *e, int up);
+/* An app's frame (FRAME samples) for the next tick only */
+static inline void engine_app_frame(struct engine *e, const int16_t *frame)
+{
+	e->app = frame;
+}
+
+/* Calls win: an app's sound is not played while the phone rings, a tone
+ * plays, or a call is up on a route */
+static inline int engine_app_held(const struct engine *e)
+{
+	return e->ring || tone_active(&e->alert) || (e->route && e->call);
+}
 
 /* Row of the route table the hardware should be set up for */
 static inline int engine_hw_row(const struct engine *e)

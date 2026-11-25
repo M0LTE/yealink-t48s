@@ -6,7 +6,7 @@
  *
  *   t48-audioctl [-s SOCKET] COMMAND...
  *     route none|handset|speaker|headset
- *     volume handset|speaker|headset|ringer 0..15
+ *     volume handset|speaker|headset|ringer|app 0..15
  *     mute 0|1        tone off|dial|ringback|busy|error|waiting
  *     ring 0|1        key CHAR
  *     state           (the default) print the state
@@ -25,7 +25,8 @@
 #include "msg.h"
 
 static const char *const route_names[] = { "none", "handset", "speaker", "headset" };
-static const char *const vol_names[] = { "", "handset", "speaker", "headset", "ringer" };
+static const char *const vol_names[] = { "", "handset", "speaker", "headset", "ringer", "app" };
+static const char *const app_names[] = { "none", "paused", "front" };
 static const char *const tone_names[] = { "off", "dial", "ringback", "busy", "error", "waiting" };
 
 static int lookup(const char *const *names, int n, const char *s)
@@ -69,7 +70,7 @@ int main(int argc, char **argv)
 			b[0] = (unsigned char)lookup(route_names, 4, a1);
 			msg_send(fd, T48AC_ROUTE, b, 1);
 		} else if (!strcmp(c, "volume")) {
-			b[0] = (unsigned char)lookup(vol_names, 5, a1);
+			b[0] = (unsigned char)lookup(vol_names, 6, a1);
 			b[1] = (unsigned char)atoi(a2);
 			msg_send(fd, T48AC_VOLUME, b, 2);
 			i++;
@@ -105,8 +106,10 @@ int main(int argc, char **argv)
 		if (msg_fill(fd, &mb) < 0)
 			break;
 		while (msg_next(&mb, &type, &pl, &len) == 1) {
-			if (type == T48AC_STATE && len >= sizeof(s)) {
-				memcpy(&s, pl, sizeof(s));
+			if (type == T48AC_STATE && len >= 8) {
+				/* an older service sends fewer bytes */
+				memset(&s, 0, sizeof(s));
+				memcpy(&s, pl, len < sizeof(s) ? len : sizeof(s));
 				got = 1;
 			} else if (type == T48AC_ERROR && len >= 4) {
 				fprintf(stderr, "t48-audioctl: message type %u refused, reason %u\n",
@@ -119,10 +122,12 @@ int main(int argc, char **argv)
 		fprintf(stderr, "t48-audioctl: no answer\n");
 		return 1;
 	}
-	printf("route=%s mute=%u tone=%s ring=%u call=%u vol=handset:%u,speaker:%u,headset:%u,ringer:%u hw=%s%s%s\n",
+	printf("route=%s mute=%u tone=%s ring=%u call=%u vol=handset:%u,speaker:%u,headset:%u,ringer:%u,app:%u "
+	       "app=%s%s hw=%s%s%s\n",
 	       s.route < 4 ? route_names[s.route] : "?", s.mute,
 	       s.tone < 6 ? tone_names[s.tone] : "?", s.ring, s.call,
-	       s.vol[1], s.vol[2], s.vol[3], s.vol[4],
+	       s.vol[1], s.vol[2], s.vol[3], s.vol[4], s.vol_app,
+	       s.app < 3 ? app_names[s.app] : "?", s.app_sound ? ",sounding" : "",
 	       s.hw & T48AC_HW_CAPTURE ? "capture," : "", s.hw & T48AC_HW_PLAYBACK ? "playback," : "",
 	       s.hw & T48AC_HW_RUNNING ? "running" : "idle");
 	return failed;
