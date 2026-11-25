@@ -86,7 +86,7 @@ Every account follows a 3xx answer to a call it makes (`sip_autoredirect`): call
 
 ### Block direct calls
 
-Issue [#77](https://github.com/M0LTE/yealink-t48s/issues/77). Off by default, for the whole phone: `block_direct=on` in `/data/config/phone` (Settings, Accounts, Block direct calls; or the web setup page) turns it on. Then a call, or an OPTIONS or REFER, that does not come from the account's server is refused with **403 Forbidden** and never rings.
+Issue [#77](https://github.com/M0LTE/yealink-t48s/issues/77). Off by default, for the whole phone: `block_direct=on` in `/data/config/phone` (Settings, Accounts, Advanced; or Advanced on the web setup page's Accounts) turns it on. Then a call, or an OPTIONS or REFER, that does not come from the account's server is refused with **403 Forbidden** and never rings.
 
 - **Which addresses.** baresip's own check (`check_origin`, on for every account; the config line `filter_registrar udp,tcp,tls`, which `t48-sip` adds when the setting is on): the request's source address must be the one address that answered the account's last successful registration. That is the server host, or the outbound proxy when one is set, as DNS (SRV, then A or AAAA) gave it for that registration. It is renewed with every registration, so it follows the server when its address changes, and the NAT keepalives register again when the phone's own public address changes. Port is not compared.
 - **Which providers it suits.** Those that send calls from the same server the phone registers with, as most do for a phone behind NAT. Not those that send calls from several addresses (a pool of edge servers, or a media gateway apart from the registrar): their calls would be refused. Leave it off for them.

@@ -19,6 +19,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "web.h"
+#include "dialplan.h"
 #include "zones.h"
 
 #ifndef T48_VERSION
@@ -342,13 +343,6 @@ static void page_accounts(struct req *r)
                 H("<option value='%d'%r>%d: %s@%s</option>", n, n == def ? " selected" : "", n, val(sip_file(n), "user", ""), val(sip_file(n), "domain", ""));
         H("</select></label><button type='submit'>Save</button></form></div>");
     }
-    /* issue #77: calls only through the accounts' servers */
-    H("<div class='card'>");
-    form_begin(r, "/accounts/block", "class='row'");
-    H("<label class='check'><input type='checkbox' name='block_direct' value='on'%r> Block direct calls</label>"
-      "<button type='submit'>Save</button></form>"
-      "<p class='dim'>Only calls through an account's server or outbound proxy ring.</p></div>",
-      !strcmp(val("phone", "block_direct", "off"), "on") ? " checked" : "");
     for (int n = 1; n <= MAX_ACCTS; n++) {
         const char *f = sip_file(n);
         int has = val(f, "user", "")[0] || val(f, "domain", "")[0];
@@ -386,7 +380,43 @@ static void page_accounts(struct req *r)
         }
         H("</details>");
     }
+    /* what is set for all the accounts and seldom changed */
+    const char *dp = val("phone", "dialplan", "");
+    int block = !strcmp(val("phone", "block_direct", "off"), "on");
+    H("<details class='card' id='advanced'%r><summary><h2>Advanced</h2></summary>", dp[0] || block ? " open" : "");
+    form_begin(r, "/accounts/advanced", NULL);
+    H("<label class='field'><span>Dial plan</span><input name='dialplan' value='%s' maxlength='%d' "
+      "autocomplete='off' autocapitalize='none' spellcheck='false' placeholder='%s'><small>Empty for the default: <code>%s</code>. 999 and 112 always dial at once.</small></label>"
+      "<div class='actions'><button class='primary' type='submit'>Save</button></div></form>",
+      dp, DP_MAX, DP_DEFAULT, DP_DEFAULT);
+    /* issue #77: calls only through the accounts' servers */
+    form_begin(r, "/accounts/block", "class='sub'");
+    H("<label class='check'><input type='checkbox' name='block_direct' value='on'%r> Block direct calls</label>"
+      "<small class='dim'>Only calls through an account's server or outbound proxy ring.</small>"
+      "<div class='actions'><button type='submit'>Save</button></div></form></details>", block ? " checked" : "");
     page_end(r);
+}
+
+/* the digit map that says when a number is complete (docs/phone.md#dial-plan) */
+static void post_account_advanced(struct req *r)
+{
+    char v[DP_MAX + 1];
+    int at;
+    if (!line(r, "dialplan", v, sizeof v)) { flash(r, 1, "Dial plan not saved: longer than %d characters.", DP_MAX); redirect(r, "/accounts#advanced"); return; }
+    if (v[0] && dp_check(v, &at) < 0) {
+        flash(r, 1, "Dial plan not saved: not a digit map at character %d.", at + 1);
+        redirect(r, "/accounts#advanced");
+        return;
+    }
+    /* the default as it stands is not stored, so a better one in a later release reaches this phone */
+    if (set("phone", "dialplan", strcmp(v, DP_DEFAULT) ? v : NULL) < 0) {
+        flash(r, 1, "Dial plan not saved: %s.", errno == EINVAL ? "invalid characters" : strerror(errno));
+        redirect(r, "/accounts#advanced");
+        return;
+    }
+    logmsg("dial plan saved");
+    flash(r, 0, "Dial plan saved.");
+    redirect(r, "/accounts#advanced");
 }
 
 static void post_account_save(struct req *r)
@@ -478,7 +508,7 @@ static void post_account_block(struct req *r)
         run_apply("sip", 0, 0);
         flash(r, 0, "Direct calls %s.", on ? "blocked" : "allowed");
     }
-    redirect(r, "/accounts");
+    redirect(r, "/accounts#advanced");
 }
 
 /* a WAV for an account's custom ringtone, made into the phone's format and kept */
@@ -1806,6 +1836,7 @@ const struct route routes[] = {
     {"POST", "/accounts/save", post_account_save},
     {"POST", "/accounts/remove", post_account_remove},
     {"POST", "/accounts/default", post_account_default},
+    {"POST", "/accounts/advanced", post_account_advanced},
     {"POST", "/accounts/block", post_account_block},
     {"POST", "/accounts/ringtone", post_account_ringtone},
     {"POST", "/accounts/ringtone-remove", post_account_ringtone_remove},

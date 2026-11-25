@@ -12,8 +12,8 @@ T48_WEB_LICENSE = AGPL-3.0-or-later
 T48_WEB_DEPENDENCIES = libt48
 T48_WEB_GIT_VERSION = $(if $(T48_VERSION),$(T48_VERSION),$(shell git -C $(BR2_EXTERNAL_T48S_PATH) describe --always --dirty 2>/dev/null))
 
-# the settings store and the manifest reader are the shell's own source files
-# (shell/config.c, shell/manifest.c), so there is one implementation of each;
+# the settings store, the manifest reader and the dial plan are the shell's own source files
+# (shell/config.c, shell/manifest.c, shell/dialplan.c), so there is one implementation of each;
 # libt48 comes from staging
 define T48_WEB_BUILD_CMDS
 	$(TARGET_MAKE_ENV) CFLAGS="$(TARGET_CFLAGS)" $(MAKE) -B -C $(@D) \

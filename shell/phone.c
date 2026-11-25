@@ -17,6 +17,8 @@
  * Issue #77 added each account's ringtone and call forwarding: Always, Busy
  * and No answer, each to its own number, done by answering the caller with
  * 302 (t48ctrl's redirect) so the caller's phone or server calls on.
+ * Issue #77 added the dial plan: a number that is complete by the owner's
+ * digit map (dialplan.c) is called without the Call key.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +26,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "shell.h"
+#include "dialplan.h"
 
 enum ph { PH_IDLE, PH_DIAL, PH_OUTGOING, PH_INCOMING, PH_INCALL, PH_ENDED };
 static const char *const ph_names[] = {"idle", "dial", "outgoing", "incoming", "incall", "ended"};
@@ -74,6 +77,7 @@ static struct {
     int joining;               /* the two calls have been told to talk to each other */
     int parked;                /* the call is on hold because the handset went down with nowhere for the sound to go */
     int dial_acct;             /* the account the next call goes out from */
+    long long auto_at;         /* the dialler calls the number by itself at this time; 0: it will not */
     int dnd;                   /* do not disturb */
     int ringtone;              /* T48AC_RINGTONE_* of the call ringing now */
     int drop_next_out;         /* baresip is about to follow a forward we gave up on: hang that call up */
@@ -158,6 +162,7 @@ static void set_state(enum ph st)
     if (st != P.st) logmsg("phone: %s", ph_names[st]);
     P.st = st;
     P.t_state = t48_now_ms();
+    if (st != PH_DIAL) P.auto_at = 0;
     update_lamps();
     shell_phone_screen(st != PH_IDLE);
 }
@@ -526,6 +531,7 @@ static void finish(const char *text, const char *detail, int tone)
 static void start_dialler(int route)
 {
     P.number[0] = 0;
+    P.auto_at = 0;
     clear_call();
     set_route(route);
     set_tone(route != T48AC_ROUTE_NONE ? T48AC_TONE_DIAL : T48AC_TONE_OFF);
@@ -1197,6 +1203,53 @@ static void dial_now(void)
     if (P.number[0]) place_call(P.number, route_for_now(), P.dial_acct);
 }
 
+/* the owner's digit map, or the default if there is none or it is not one */
+static const char *dial_map(void)
+{
+    const char *m = cfg_str("phone", "dialplan", DP_DEFAULT);
+    static char warned[256];   /* as long as cfg_str gives, so a map too long is warned of once */
+    if (dp_check(m, NULL) < 0) {
+        if (strcmp(warned, m)) logmsg("phone: the dial plan in the settings is not a digit map; using the default");
+        snprintf(warned, sizeof warned, "%s", m);
+        return DP_DEFAULT;
+    }
+    return m;
+}
+
+/* After a key in the dialler: call now if the number is complete, or set the time to call it if nothing more is
+ * typed. Only while the sound has somewhere to go: a number typed on the hook waits for the handset or Call.
+ * later: after a rub-out or a change of account, which never call at once; the time starts again at most. */
+static void auto_check(int later)
+{
+    int ms = 0;
+    P.auto_at = 0;
+    if (P.st != PH_DIAL || !P.number[0] || P.route == T48AC_ROUTE_NONE) return;
+    /* emergency numbers go at once whatever the map says, even if it allows longer numbers that start with them */
+    if (!later && (!strcmp(P.number, "999") || !strcmp(P.number, "112"))) {
+        logmsg("phone: emergency number %s", P.number);
+        dial_now();
+        return;
+    }
+    switch (dp_match(dial_map(), P.number, &ms)) {
+    case DP_NOW:
+        if (later) { P.auto_at = t48_now_ms() + DP_TIMER_MS; break; }
+        logmsg("phone: the dial plan says %s is complete", P.number);
+        dial_now();
+        break;
+    case DP_TIMER: P.auto_at = t48_now_ms() + ms; break;
+    default: break;
+    }
+}
+
+/* # in the dialler: a key of the number if the map has a place for it there, otherwise Call */
+static int hash_is_call(void)
+{
+    char n[72];
+    if (!P.number[0]) return 0;
+    snprintf(n, sizeof n, "%s#", P.number);
+    return dp_match(dial_map(), n, NULL) == DP_NONE;
+}
+
 void phone_key(int code, int down)
 {
     int digit = (code >= '0' && code <= '9') || code == T48_KEY_STAR || code == T48_KEY_HASH;
@@ -1222,16 +1275,21 @@ void phone_key(int code, int down)
         case PH_IDLE:
             break;
         case PH_DIAL:
-            if (digit) {
+            if (code == T48_KEY_HASH && hash_is_call()) {
+                dial_now();
+            } else if (digit) {
                 if (!P.number[0]) set_tone(T48AC_TONE_OFF);
                 type_char(code);
+                auto_check(0);
             } else if (code == T48_KEY_OK) {
                 dial_now();
             } else if (code == T48_KEY_LEFT || code == T48_KEY_RIGHT) {
                 next_account(code == T48_KEY_LEFT ? -1 : 1);
+                if (P.auto_at) auto_check(1);   /* the owner is still at it: the time starts again */
             } else if (code == T48_KEY_BACK) {
                 if (P.number[0]) {
                     delete_char();
+                    auto_check(1);
                     if (!P.number[0] && P.route != T48AC_ROUTE_NONE) set_tone(T48AC_TONE_DIAL);
                 } else {
                     go_idle();
@@ -1267,7 +1325,7 @@ void phone_key(int code, int down)
             }
             break;
         case PH_ENDED:
-            if (digit) { start_dialler(P.hook_off ? T48AC_ROUTE_HANDSET : T48AC_ROUTE_NONE); set_tone(T48AC_TONE_OFF); type_char(code); }
+            if (digit) { start_dialler(P.hook_off ? T48AC_ROUTE_HANDSET : T48AC_ROUTE_NONE); set_tone(T48AC_TONE_OFF); type_char(code); auto_check(0); }
             else if (code == T48_KEY_OK || code == T48_KEY_BACK) go_idle();
             break;
         }
@@ -1372,6 +1430,13 @@ int phone_timeout(long long now)
     if (P.st == PH_INCALL && (t < 0 || t > 250)) t = 250;   /* the call timer */
     if (P.st == PH_INCOMING && P.c.fwd_at && (t < 0 || P.c.fwd_at - now < t)) t = P.c.fwd_at - now;
     if (P.o_st == O_WAITING && P.o.fwd_at && (t < 0 || P.o.fwd_at - now < t)) t = P.o.fwd_at - now;
+    if (P.auto_at) {
+        /* the dialler counts down: the next whole second, or the call */
+        long long left = P.auto_at - now, next = left % 1000 ? left % 1000 : 1000;
+        if (left < next) next = left;
+        if (next < 0) next = 0;   /* already due */
+        if (t < 0 || next < t) t = next;
+    }
     return t < 0 ? -1 : t > 0 ? (int)t : 0;
 }
 
@@ -1393,6 +1458,30 @@ void phone_tick(long long now)
         long long s = (now - P.c.t_established) / 1000;
         if (s != shown_secs) { shown_secs = s; changed(); }
     }
+    if (P.auto_at && P.st == PH_DIAL) {
+        static long long shown_left = -1;
+        long long left = (P.auto_at - now + 999) / 1000;
+        if (now >= P.auto_at) {
+            P.auto_at = 0;
+            logmsg("phone: no more digits; calling %s", P.number);
+            dial_now();
+            update_lamps();
+            changed();
+        } else if (left != shown_left) {
+            shown_left = left;
+            changed();
+        }
+    }
+}
+
+/* what the dialler shows while it waits to call by itself: "Dialling in 3 s", or "" */
+static const char *auto_text(void)
+{
+    static char b[32];
+    long long left = P.auto_at ? (P.auto_at - t48_now_ms() + 999) / 1000 : 0;
+    if (!P.auto_at || P.st != PH_DIAL) return "";
+    snprintf(b, sizeof b, "Dialling in %lld s", left < 1 ? 1 : left);
+    return b;
 }
 
 void phone_init(void)
@@ -1491,6 +1580,7 @@ static void draw_dial_small(void)
     }
     chips(-1, SM, 116);
     if (!sipc_connected()) t48_text_right(&ui, SW - SM, 117, &t48_font_normal, C_BAD, "No service");
+    else if (P.auto_at) t48_text_right(&ui, SW - SM, 117, &t48_font_normal, C_DIM, auto_text());
     if (accts_on() > 1) {
         char b[120], a[100];
         enum reg r = A[P.dial_acct].reg;
@@ -1650,6 +1740,7 @@ static void draw_dial(void)
         t48_text_centre(&ui, 248, KP_Y + 40, &t48_font_head, C_FAINT, "Number");
     }
     chips(-1, 24, KP_Y + 126);
+    if (P.auto_at) t48_text_right(&ui, 472, KP_Y + 127, &t48_font_normal, C_DIM, auto_text());
     if (!sipc_connected()) t48_text(&ui, 28, KP_Y + 182, &t48_font_normal, C_BAD, "No service");
     if (accts_on() > 1) {
         char b[120], a[100];
@@ -2158,6 +2249,11 @@ const char *phone_state(const char *key)
     if (!strcmp(key, "keypad")) return P.keypad ? "1" : "0";
     if (!strcmp(key, "xfer")) return P.xfer ? "1" : "0";
     if (!strcmp(key, "number")) return P.number[0] ? P.number : "-";
+    if (!strcmp(key, "autodial")) {
+        if (!P.auto_at) return "off";
+        snprintf(b, sizeof b, "%lld", (P.auto_at - t48_now_ms() + 999) / 1000);
+        return b;
+    }
     if (!strcmp(key, "peer")) return P.c.peer[0] ? P.c.peer : "-";
     if (!strcmp(key, "name")) { snprintf(b, sizeof b, "%s", P.c.name); return under(b); }
     if (!strcmp(key, "dtmf")) return P.c.dtmf[0] ? P.c.dtmf : "-";
