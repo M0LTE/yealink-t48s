@@ -292,10 +292,10 @@ Run on 2026-11-23. Nothing in this section touched the phone or any sound device
 
 | Call | Result |
 |---|---|
-| G.722, both sides on their own audio service | each heard the other's file all through (5975 of 6000), neither heard itself; alice heard dial tone then ringback, bob's ringer rang and stopped on answer; while alice was muted bob heard nothing; 371 frames each way, none late, none dropped |
+| G.722, both sides on their own audio service | each heard the other's file all through (5975 of 6000), neither heard itself; alice heard dial tone then ringback, bob's ringer rang at the loudspeaker's limit (1800) and stopped on answer; while alice was muted bob heard nothing; 371 frames each way, none late, none dropped |
 | G.711 (through baresip's resampler) | the same |
 | Echoing room, handset route | alice hears herself back 6 dB down (no echo control, as intended) |
-| Echoing room, speakerphone route | alice hears herself back 42 dB down |
+| Echoing room, speakerphone route | bob's loudspeaker plays alice at its limit (1800); she hears herself back 42 dB down |
 | G.722 with alice as the phone's ARM `t48-audiod` and ARM baresip under qemu-arm | the same checks pass, none late |
 
 The older `sip/test/call-test.sh` still passes; its `t48audio` call now proves the fallback (no audio service running, the call still completes in silence).
