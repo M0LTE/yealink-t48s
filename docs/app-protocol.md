@@ -1,6 +1,6 @@
 # The app protocol
 
-API level 5. This is the contract between the shell (`t48-shell`) and an app. `libt48` wraps it for C programs, but an app in any language can speak it directly. The C definitions are in [`libt48/include/t48_proto.h`](../libt48/include/t48_proto.h). The design reasons are in [architecture.md](architecture.md#screen-and-input).
+API level 6. This is the contract between the shell (`t48-shell`) and an app. `libt48` wraps it for C programs, but an app in any language can speak it directly. The C definitions are in [`libt48/include/t48_proto.h`](../libt48/include/t48_proto.h). The design reasons are in [architecture.md](architecture.md#screen-and-input).
 
 ## What an app is given
 
@@ -20,7 +20,11 @@ The app has no access to the framebuffer, the input devices or the sound hardwar
 
 ## The screen
 
-Map `T48_BUFFER_FD` shared and writable for the size the shell gives in HELLO. It is a picture of the whole screen: one 32-bit word per pixel, `0x00RRGGBB`, rows `stride` bytes apart. Draw into it whenever you like, then send DAMAGE for the rectangle that changed; the shell copies that rectangle to the real screen. Nothing reaches the screen without a DAMAGE message. The size comes from HELLO (800 x 480 on the T48S): do not build it in.
+Map `T48_BUFFER_FD` shared and writable for the size the shell gives in HELLO. It is a picture of the whole screen: one 32-bit word per pixel, `0x00RRGGBB`, rows `stride` bytes apart. Draw into it whenever you like, then send DAMAGE for the rectangle that changed; the shell copies that rectangle to the real screen. Nothing reaches the screen without a DAMAGE message. The size comes from HELLO: do not build it in.
+
+**Which size.** 800 x 480, the T48S's screen, on every phone. On a phone with a smaller screen (the T46S: 480 x 272) the shell fits that picture to the screen, each screen pixel the average of the picture's pixels under it, so an app written for the T48S runs there unchanged, small and a little soft. An app whose manifest says `"screen": "any"` (level 6) is given the screen's own size instead and must lay itself out from the width and height in HELLO; its picture is then shown pixel for pixel. The format is XRGB8888 either way: the shell packs it to the T46S's 16-bit panel, and turns it, as it copies.
+
+**What there is to press with.** HELLO's `flags` (level 6) say whether the screen takes touches (bit 0) and whether there are four soft keys under it (bit 1); with libt48, `t48_has_touch()` and `t48_has_softkeys()`. A phone without touch has the soft keys. An app that uses them says what they do along the bottom edge, each label above its key: `t48_ui_softkeys()` draws them as the shell's own screens do. A shell older than level 6 sends HELLO without `flags`: take that as touch and no soft keys.
 
 ## Messages
 
@@ -37,7 +41,7 @@ Shell to app:
 
 | Type | Name | Payload |
 |---|---|---|
-| 1 | HELLO | `u16 api, u16 width, u16 height, u16 format (0 = XRGB8888), u32 stride, u32 size`. Always first. |
+| 1 | HELLO | `u16 api, u16 width, u16 height, u16 format (0 = XRGB8888), u32 stride, u32 size`, and from level 6 `u32 flags` (1: touch, 2: soft keys). Always first. An app takes as much of it as came: 16 bytes before level 6, 20 since. |
 | 2 | SETTING | `key=value` text, no terminator. One per setting in the manifest, before START. |
 | 3 | START | none. Map the buffer, answer READY, draw. |
 | 4 | KEY | `u16 code, u8 state (1 pressed, 0 released), u8 0`. To a level 3 app: `u16 code, u8 state, u8 0 x 5, u64 time` |
@@ -79,7 +83,9 @@ Level 3, for games and anything else that draws the whole screen many times a se
 - After PAUSE a FLIP is answered at once and not shown. When the app is back in front the shell shows its last flipped picture itself.
 - `count` 0, or no FLIPINFO at all (a level 2 shell): draw in the shared buffer and send DAMAGE.
 
-The screen is 800 x 480 at 32 bits and nothing smaller is on offer: the LCD controller cannot stretch a picture. A game that draws 400 x 240 doubles each pixel into the flip buffer itself (`t48_blit_scaled`). Why there is no 16-bit mode is in [architecture.md](architecture.md#flipping).
+On a screen with no spare frames of its own (the T46S, the simulator, and any picture the shell has to fit) the buffers are a file in memory, a FLIP is one copy to the screen and FLIPPED comes sixty times a second. At the T46S's own 480 x 272 that copy is 130,000 pixels packed to 16 bits, a few milliseconds; a fitted 800 x 480 picture costs several times that, which is the best reason for a game to say `"screen": "any"`.
+
+The T48S's screen is 800 x 480 at 32 bits and nothing smaller is on offer: the LCD controller cannot stretch a picture. A game that draws 400 x 240 doubles each pixel into the flip buffer itself (`t48_blit_scaled`). Why there is no 16-bit mode is in [architecture.md](architecture.md#flipping).
 
 What it costs on the T48S, measured with `libt48/examples/fliptest`. Memory moves at about 160 MB a second, so filling the screen once is 10 ms of the 14.7 ms a refresh lasts:
 
@@ -221,6 +227,7 @@ An installed app is a folder holding `manifest.json`, the program and an icon. T
 ```
 
 - `id` (a-z, 0-9, `-`, `.`, `_`), `exec` (a path inside the folder) and `api` are required. An app asking for a higher API level than the shell speaks is not listed.
+- `"screen": "any"` (level 6): the app lays itself out for whatever size HELLO gives, and gets the screen's own ([The screen](#the-screen)). Without it the app is promised 800 x 480. It needs no higher `api`: a shell older than level 6 ignores the word, and its screen is 800 x 480 anyway.
 - `name`, `version` and `description` are shown to the owner; `t48-pack` (in the SDK) needs `name` and `version`, and copies `description` into the feed.
 - `icon` is a binary PPM (P6) up to 96 x 96 for now; without one the launcher shows the name's first letter. PNG will follow when libt48 can read it.
 - `permissions` is shown to the owner by the app manager ([apps.md](apps.md)). `audio-out` is enforced: without it the app is given no [sound](#sound). `lamps` is enforced: without it the app cannot set a [lamp](#lamps). `network` is not enforced yet.

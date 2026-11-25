@@ -2,7 +2,7 @@
 
 Issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10). The T48S is the only phone this firmware has run on. This page is what we know of its sibling the SIP-T46S, how the firmware was made to tell the two apart, and how an owner can try it on a T46S without writing anything to the phone.
 
-**Where this stands (2026-11-25): try-only; it starts.** Nobody here has a T46S; a tester started the live set on one on 25 November: U-Boot took it from a USB stick, the picture came up the right way round in the right colours, and DHCP worked. Keys, sound and the rest are still to be tried. Everything below was worked out from Yealink's and U-Boot's code, which is shared between the models and branches on a hardware id, and from Yealink's datasheet. A T46S live set is built with every build of `main` and passes the same file checks as the T48S one: download `t46s-live.zip` from the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release. The test plan is at the end. The installer and the release's `t48s-stick.zip` are for the T48S only.
+**Where this stands (2026-11-25): try-only; it starts, and its keys are right.** Nobody here has a T46S; a tester started the live set on one on 25 November: U-Boot took it from a USB stick, the picture came up the right way round in the right colours, and DHCP worked. His photos of the key test confirm the whole key table below. The shell now draws for the T46S's own 480x272 ([shell.md](shell.md#small-screens)); that layout has been seen in the simulator only. Sound and the rest are still to be tried. Everything below was worked out from Yealink's and U-Boot's code, which is shared between the models and branches on a hardware id, and from Yealink's datasheet. A T46S live set is built with every build of `main` and passes the same file checks as the T48S one: download `t46s-live.zip` from the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release. The test plan is at the end. The installer and the release's `t48s-stick.zip` are for the T48S only.
 
 ## What the T46S is
 
@@ -19,7 +19,7 @@ Issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10). The T48S is the on
 | Colour order in the 16 bits | red in the top 5 bits (assumed) | n/a | not read; a guess | low |
 | Touch | none | resistive, TSC2046 | datasheet; `tsc.ko` refuses id 66 | high |
 | Keys | 12 dial keys, 4 arrows, OK, X, volume up and down, Headset, Mute, Message, Hold, Redial, Transfer, Speakerphone, **4 soft keys** under the screen, **10 line keys** beside it | no soft or line keys | datasheet; Yealink's `T46.qmap` | high for which keys exist |
-| Key matrix | the same controller and pins, 9 rows by 7 columns, the keys in other places | | `keypad_dev_init` treats 65 and 66 alike; places from `T46.qmap` | medium: see below |
+| Key matrix | the same controller and pins, 9 rows by 7 columns, the keys in other places | | `keypad_dev_init` treats 65 and 66 alike; places from `T46.qmap` | confirmed on a phone (25 Nov) |
 | Hook switch | GPIO29 | the same | no branch on the id | high |
 | Lamps | the red lamp at the top right (Holtek chip), and a **matrix** for the rest: two colours in each of the 10 line keys, and Headset, Mute, Speakerphone | three GPIO lamps and the Holtek one | `led_init`, `led_hw_set` | high that it is a matrix; which bit is which lamp is not known |
 | Backlight | the same PWM; enable on **GPIO27**; another brightness curve | enable on GPIO18 | `bklight_init`, `bklight_set` | high |
@@ -35,14 +35,14 @@ Sources outside our own dumps: Yealink's SIP-T46S datasheet (V6, May 2017); Yeal
 
 ### How the facts were dug out
 
-- **Which keymap is the T46S's.** Yealink's app partition holds six keymaps; file names in that partition are scrambled and were not recovered, so the files were told apart by content. Two have 42 keys. One of them places the digits and Speakerphone exactly where U-Boot's key table for id 70 (the T54S) has them, so the other is `T46.qmap`. This is the weakest link in the key table: if it is wrong, keys do the wrong thing or nothing. The shell's key test ([shell.md](shell.md#the-key-test)) shows every key's row, column and code on the screen, in the table or not, so the table can be put right from photos; the kernel also logs every key it does not know.
+- **Which keymap is the T46S's.** Yealink's app partition holds six keymaps; file names in that partition are scrambled and were not recovered, so the files were told apart by content. Two have 42 keys. One of them places the digits and Speakerphone exactly where U-Boot's key table for id 70 (the T54S) has them, so the other is `T46.qmap`. This was the weakest link in the key table, and it held: every key was checked on a phone on 25 November (below). The shell's key test ([shell.md](shell.md#the-key-test)) shows every key's row, column and code on the screen, in the table or not, so the table can be put right from photos; the kernel also logs every key it does not know.
 - **This U-Boot does not fit a T46S's keys.** Our T48S's U-Boot has key tables for ids 65, 70 and 74 and a default; none has Speakerphone where `T46.qmap` puts it. So a T46S has another build of U-Boot. Its screen set-up and file names for id 66 are in ours all the same (shared source), which is why those are "medium to high" and not "high".
 - **The screen.** U-Boot's set-up for ids 66 and 70: 480 wide, 272 high, 16 bits, 960 bytes a row, shown from 0x03f80000; when the hardware version says "upside down" it draws at 0x03f00000 and copies the turned picture across.
 - **The backlight.** Yealink's level 1 to 99 becomes a 5-bit PWM number, smaller is brighter: 25 up to level 10, then 26 - (2 x (level - 1)) / 10 up to 70, then 29 - (3 x level - 33) / 10. Our ten steps are its values at 10, 20 ... 99: 25, 23, 21, 19, 17, 15, 13, 9, 6, 3.
 
 ### The key table
 
-Code = row x 8 + column + 1, as Yealink's driver numbers the matrix.
+Code = row x 8 + column + 1, as Yealink's driver numbers the matrix. **Confirmed on hardware, 25 November 2026:** a tester pressed every key in the key test and photographed the screen, and each came out at the code in this table, which is the one in `kernel6/dts/bcm11188-yealink-t46s.dts`.
 
 | Code | Key | Linux key |
 |---|---|---|
@@ -56,13 +56,11 @@ Code = row x 8 + column + 1, as Yealink's driver numbers the matrix.
 | 70, 69 | Headset, Mute | `KEY_PROG1`, `KEY_MUTE` |
 | 25 26 27 28 | Message, Hold, Redial, Transfer | as on the T48S |
 | 29 | Speakerphone | `KEY_PROG2` |
-| 68 67 66 65 | soft keys 1 to 4 (Yealink's F1 to F4) | `KEY_MACRO1` to `KEY_MACRO4` |
-| 62 54 46 38 30 | line keys 1 to 5 | `KEY_MACRO11` to `KEY_MACRO15` |
-| 63 55 47 39 31 | line keys 6 to 10 | `KEY_MACRO16` to `KEY_MACRO20` |
+| 68 67 66 65 | soft keys 1 to 4, left to right (Yealink's F1 to F4) | `KEY_MACRO1` to `KEY_MACRO4` |
+| 62 54 46 38 30 | the line keys on the left, top to bottom | `KEY_MACRO11` to `KEY_MACRO15` |
+| 63 55 47 39 31 | the line keys on the right, top to bottom | `KEY_MACRO16` to `KEY_MACRO20` |
 
-Which soft key is leftmost and which line key is at the top are guesses.
-
-**To check it on a phone:** hold X (or any key that is not a phone key such as volume or Speakerphone) for 5 seconds at the clock. The key test opens: press each key and photograph the screen, which shows the key's row, column and code and what the table makes of it. Hold any key for 3 seconds to leave.
+**To check it on a phone:** hold X (or any key that is not a phone key such as volume or Speakerphone) for 5 seconds at the home screen. The key test opens: press each key and photograph the screen, which shows the key's row, column and code and what the table makes of it. Hold any key for 3 seconds to leave.
 
 ### The lamp matrix (not driven yet)
 
@@ -91,17 +89,17 @@ One system image serves both phones. The kernel is built once per model, with th
 | Key lamps | `gpio-leds` in the T48S's tree; none in the T46S's | |
 | Flash | the T46S kernel has no flash driver at all, and its device tree no flash | `kernel6/build.sh` with `MODEL=t46s` |
 | Text console | turned with `fbcon=rotate:2` on the T46S | `kernel6/t46s.config`, the live `.dts` |
-| The shell's picture | the shell still draws 800x480. On a screen of another size or depth, or one mounted upside down, each screen pixel is the average of the picture's pixels under it, turned if the device tree says so | `shell/be_fb.c` |
-| No touch | every screen was checked for things only a finger could do. The four buttons along the bottom of Calls and Contacts were the gap; the T46S's four soft keys now press them, left to right | `shell/main.c`, `phone.c`, `contacts.c`; `shell/tests/11-softkeys.script` |
+| The shell's picture | the shell draws at the screen's own size, 480x272, in a layout for small screens ([shell.md](shell.md#small-screens)). Each row is packed to 16 bits and turned on its way to the panel if the device tree says so. An app gets 800x480 fitted to the screen (each screen pixel the average of the picture's pixels under it) unless its manifest says `"screen": "any"` | `shell/be_fb.c`, `shell/fit.c` |
+| No touch | every screen says what the four soft keys do along the bottom edge, each label over its key, and they take the place of the buttons a finger would press: the home screen's are Apps, Calls, Contacts and Settings. The keyboard shows what the keypad types | `shell/main.c` and each screen's file; `shell/tests/small/` |
 
 The T48S's device tree now carries its key table and backlight values too, the same numbers as before; the built-in ones remain for a tree without them. Nothing else about the T48S changed.
 
 **Left for later**, none of it in the way of a first start:
 
-- A layout drawn for 480x272. The fitted picture is readable (text comes out at about 60% of its T48S size) but small.
-- The line keys do nothing yet, and their lamps and the three key lamps are dark (above).
-- Three things still need a finger on the T48S and have no key on either phone: 19 punctuation marks on the keyboard (`; ( ) & ' "` and the brackets among them), "Close now" on the password notice (the Access page has a row for it), and showing the list of tones sent in a call (the tones themselves work from the keys).
-- In a call, X does not hang up: put the handset down, or press Speakerphone again.
+- The layout for 480x272 has been seen in the simulator only. Its pictures are in [img/t46s/](img/t46s); a photo of the home screen on a phone is the first thing to ask for.
+- The line keys do nothing yet, and their lamps and the three key lamps are dark (above). The home screen keeps room beside them for labels.
+- 19 punctuation marks cannot be typed from the keypad (`; ( ) & ' "` and the brackets among them): on the T48S they are on the touch keyboard, on the T46S nowhere yet.
+- In a call, X does not hang up: End is soft key 4, or put the handset down.
 - Screen shots (`tools/shot.py`, `tools/phone-input.sh shot`) assume the T48S's screen.
 
 ## Building the T46S live set
@@ -136,7 +134,7 @@ Do not use the T48S's stick or its Install page on a T46S: the kernel it writes 
 3. Hold **Speakerphone**, plug the power in, and keep holding until the screen shows a menu with "1. TFTP" (about 5 seconds). Let go. Do not press OK at this menu. Photograph it.
 4. Press **1**. Enter the phone's address, the netmask, the gateway and the PC's address, as it asks. Photograph what it shows next.
 5. The PC's TFTP server shows the phone fetching a `.rom`, a `.bin` and a `.rfs`. Keep that log.
-6. Within a minute the screen should show text scrolling, then a clock. Photograph the screen at each stage, whatever it shows, especially if it is upside down, has wrong colours, is shifted, or stays as it was.
+6. Within a minute the screen should show text scrolling, then the home screen. Photograph the screen at each stage, whatever it shows, especially if it is upside down, has wrong colours, is shifted, or stays as it was.
 
 **From a USB stick instead.** The zip's `README.txt` has these steps. Copy the three files to the top folder of a FAT32 stick (one partition, MBR), put it in the phone, do steps 1 to 3, press **2** instead of 1, and carry on at step 6. Use a 5 V supply of 1.5 A or more ([live-image.md](live-image.md#the-stick)). There is no TFTP log this way, but Yealink's settings survive if the stick is out of the phone before its next start: with the stick left in, Yealink's firmware tries to update from it and resets them. All of that is known from the T48S; a T46S's U-Boot has not been seen reading a stick.
 
@@ -144,12 +142,12 @@ Do not use the T48S's stick or its Install page on a T46S: the kernel it writes 
 
 | # | Do | Expect |
 |---|---|---|
-| 1 | look | the clock screen, the right way up, five buttons along the bottom. Top left: a green square and the phone's address. Top right: a red square and "No service" (if that square is blue, the colours are swapped: tell us). A note says it was started in recovery mode and that nothing is installed |
-| 2 | press each key once: digits (a digit opens the dialler; X rubs out), arrows, OK, X | Up: Calls. Left: Contacts. Down: Settings. OK: Apps. X: back. If any is wrong: hold X for 5 seconds at the clock, press every key in the key test and photograph the screen |
+| 1 | look | the home screen, the right way up and sharp: a large clock, and four labels along the bottom edge, one over each soft key: Apps, Calls, Contacts, Settings. Top left: a green square and the phone's address. Top right: a red square and "No service" (if that square is blue, the colours are swapped: tell us). A note says it was started in recovery mode and that nothing is installed, clear of the labels |
+| 2 | press each soft key, and X to come back; then the arrows and OK | each opens what its label says. Up: Calls. Left: Contacts. Down: Settings. OK: Apps. Right: do not disturb. A digit opens the dialler; X rubs out. If any is wrong: hold X for 5 seconds at the home screen, press every key in the key test and photograph the screen |
 | 3 | lift the handset, put it back | the call screen appears and goes |
-| 4 | Left (Contacts), then the four soft keys under the screen, one at a time | soft key 2 opens "Add": type a name on the dial keys, OK, a number, OK |
+| 4 | soft key 3 (Contacts), then soft key 2 (Add) | type a name on the dial keys (the screen shows what each key types), Done on soft key 4, a number, Done |
 | 5 | Down (Settings), Screen, change the brightness with Left and Right | the screen gets dimmer and brighter, no flicker |
-| 6 | X back to the clock | the address at the top left is one from your DHCP server. Ping it from the PC |
+| 6 | X back to the home screen | the address at the top left is one from your DHCP server. Ping it from the PC |
 | 7 | Volume up and down | a level shows |
 | 8 | if you have a SIP account: Settings, Accounts, enter it; call a number with the handset, then with Speakerphone | sound both ways. Start quiet |
 | 9 | Settings, Access: turn SSH on with your public key if you want to send us logs (`dmesg`, `/var/log/t48/shell/current`, `cat /sys/module/t48s_holtek/parameters/hwversion`) | |
@@ -164,7 +162,7 @@ The line keys do nothing, and no key lamps light: that is expected in this set.
 - "Update failed" or it stops before fetching the `.bin`: nothing has changed in the phone. Photograph the message, unplug, start normally. The TFTP log shows what it asked for.
 - The screen goes blank or freezes after the files are fetched: our kernel did not come up. Unplug, start normally. A photo of the last thing on the screen is the most useful thing you can send.
 
-**Serial, for those who can.** On the T48S the console is a 3-pin header marked CON4 on the main board: ground, the board's transmit, the board's receive, 3.3 V levels, 115200 8N1. We do not know where it is on a T46S. If you open the phone, photograph both sides of the board first; look for an unpopulated 3 or 4-pin header near the SoC, find ground with a meter, and the pin that idles at 3.3 V and flickers at power-on is the board's transmit. Never connect an adapter's 5 V or 3.3 V supply pin. A capture from power-on to the clock (U-Boot's banner, then our kernel's log) would answer most of the open questions at once.
+**Serial, for those who can.** On the T48S the console is a 3-pin header marked CON4 on the main board: ground, the board's transmit, the board's receive, 3.3 V levels, 115200 8N1. We do not know where it is on a T46S. If you open the phone, photograph both sides of the board first; look for an unpopulated 3 or 4-pin header near the SoC, find ground with a meter, and the pin that idles at 3.3 V and flickers at power-on is the board's transmit. Never connect an adapter's 5 V or 3.3 V supply pin. A capture from power-on to the home screen (U-Boot's banner, then our kernel's log) would answer most of the open questions at once.
 
 **What to send back**, on issue #10: the photos, the TFTP log, which checks passed, and anything odd.
 

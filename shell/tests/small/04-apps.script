@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Apps on a small screen. One whose manifest says "screen": "any" is given the screen's
+# own size, 480x272; any other still gets 800x480, and the shell fits its picture to
+# the screen. Both flip, by copying, as this screen has no spare frames of its own.
+run mkdir -p simdata/installed && cp -r extra/anyscreen extra/fliptest extra/level2 simdata/installed/
+wait 2500
+key soft1
+expect launcher
+# Any screen, Clock, Crasher, Level two, Screen test, Get apps
+expectstate soft1 Open
+shot shots/t46s-launcher-two-rows.png
+key soft1
+waitframe 3000
+expect app
+expectstate appid anyscreen
+expectstate appsize 480x272
+expectstate flip on
+# the top line is black, to the corner of the screen
+expectpixel 2 2 000000
+expectpixel 477 2 000000
+wait 600
+shot shots/t46s-app-native.png
+# whole pictures, sixty a second
+key 2
+wait 500
+expectstate flip on
+shot shots/t46s-app-native-full.png
+# Home, and back
+key x 1000
+expect launcher
+key soft1
+wait 300
+expect app
+expectstate flip on
+# the soft keys are the app's while it is in front
+key soft4
+expect app
+key x
+waitscreen launcher 3000
+# the same program without the word in its manifest: 800x480, fitted
+key down
+expectstate soft1 Open
+key soft1
+waitframe 3000
+expectstate appid fliptest
+expectstate appsize 800x480
+expectstate flip on
+wait 600
+shot shots/t46s-app-fitted-flip.png
+key x
+waitscreen launcher 3000
+# and an app that speaks the protocol as level 2 did is sent what level 2 sent
+key left
+key soft1
+waitframe 3000
+expectstate appid level2
+expectstate appsize 800x480
+key x 1000
+expect launcher
+key soft4
+expect idle

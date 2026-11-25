@@ -6,6 +6,10 @@ One look for the phone's screen, the web setup page and apps, to go with the one
 
 Every phone picture is the shell's own simulator running the real code with the real fonts (`render.sh`); every web picture is the real server in Chromium at twice the size (`web.sh`). Each folder has the same set: the phone's idle screen, launcher, dialler, a call, a settings list, the theme chooser and the keyboard; the web overview, accounts form, backup page and Sound and screen (the whole page, with its theme chooser), desktop and phone-width, dark and light.
 
+A small screen (the T46S's 480x272) has the same three, with the same type and less room around it: a 30 pixel header, and the actions as labels over the phone's four soft keys ([shell.md](../shell.md#small-screens)).
+
+![a small screen](../img/t46s/home.png) ![Directory](../img/t46s/theme-directory.png) ![Two-tone](../img/t46s/home-twotone.png)
+
 What all three share: an 8 pixel grid with 24 pixel margins, a 48 pixel header (the screen's name, the time, a way back), actions in one row along the bottom, a type scale of 15, 19, 26, 40 and 104 pixels, and no icon font: the few marks (back, rub out, plus, the scroll arrows, lamps) are drawn from fills. Flat drawing only, as the phone has no GPU.
 
 ## Switchboard

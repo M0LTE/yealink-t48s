@@ -45,7 +45,8 @@ $(O)/apps: $(LIB) tests/crasher.c tests/crasher.json
 
 # more for tests/15-flip.script, 16-sound.script and 17-lamps.script, which install them themselves so the other
 # tests' launcher stays as it was: the flipping test, an app that speaks the protocol as level 2 did, the one that
-# plays notes, and the one that sets the lamps (and the same again without the permission to)
+# plays notes, the one that sets the lamps (and the same again without the permission to), and the flipping test
+# again as an app that takes any size of screen (tests/small/04-apps.script)
 $(O)/extra: $(LIB) tests/level2.c tests/level2.json $(wildcard ../libt48/examples/fliptest/* ../libt48/examples/tones/* ../libt48/examples/lamps/*)
 	rm -rf $@ && mkdir -p $@/level2
 	cp -r ../libt48/$(O)/examples/fliptest $@/fliptest
@@ -53,6 +54,8 @@ $(O)/extra: $(LIB) tests/level2.c tests/level2.json $(wildcard ../libt48/example
 	cp -r ../libt48/$(O)/examples/lamps $@/lamps
 	cp -r ../libt48/$(O)/examples/lamps $@/nolamps
 	sed -i -e 's/"id": "lamps"/"id": "nolamps"/' -e 's/"name": "Lamps"/"name": "No lamps"/' -e 's/\["lamps"\]/[]/' $@/nolamps/manifest.json
+	cp -r ../libt48/$(O)/examples/fliptest $@/anyscreen
+	sed -i -e 's/"id": "fliptest"/"id": "anyscreen"/' -e 's/"name": "Screen test"/"name": "Any screen"/' -e 's/"api": 3,/"api": 3, "screen": "any",/' $@/anyscreen/manifest.json
 	$(CC) $(CFLAGS) -o $@/level2/level2 tests/level2.c
 	cp tests/level2.json $@/level2/manifest.json
 
