@@ -11,6 +11,7 @@ The T48S is a working desk phone on this firmware. All of the below has been don
 - **Linux 6.18** started by the phone's own U-Boot, from flash and from a stick, with our drivers for every part of the board: screen, backlight, touch, keys, hook, lamps, Ethernet, audio, flash, watchdog, USB ([kernel6/README.md](../kernel6/README.md)).
 - **The phone.** Six SIP accounts, calls on handset and speaker, hold, mute, transfer, a second call, contacts, the call list, do not disturb, voicemail ([phone.md](phone.md)).
 - **Apps** from a feed, three themes, the web setup page, SSH that is off until turned on at the screen ([apps.md](apps.md), [design](design/README.md), [web.md](web.md), [access.md](access.md)).
+- **Games can flip.** An app draws whole pictures in the screen's own spare frames and they are shown at the screen's 67.8 a second, with no tearing and no copy; keys and touches carry their times ([app-protocol.md](app-protocol.md#flipping)). Measured on the phone; nobody has looked at the glass yet.
 - **Updates** over the network into two system slots, with a fallback by itself when an update does not start. Stable and testing channels ([install.md](install.md#updates-and-fallback)).
 - **USB** needs a proper power supply and nothing else. The freezes of 2026-11-22 and 23 were Yealink's 0.6 A adapter: the phone draws up to 0.9 A (issue [#58](https://github.com/M0LTE/yealink-t48s/issues/58)).
 

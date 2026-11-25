@@ -116,6 +116,29 @@ Why this rather than giving the app the framebuffer and a grab on the input devi
 - The same protocol runs on a PC, which gives a simulator for development and for CI.
 - Screen size is told to the app, which leaves room for other models ([#10](https://github.com/M0LTE/yealink-t48s/issues/10)).
 
+#### Flipping
+
+**Decision: games get whole frames of the screen's own memory, and the shell still holds the screen.** API level 3 ([app-protocol.md](app-protocol.md#flipping)).
+
+Copying is what the first design cannot afford at speed. Memory on this chip moves at about 160 MB a second while the screen is being read out of it, so one 800 x 480 picture is 10 ms, and a refresh lasts 14.7 ms (67.8 a second, measured: not 60). An app that fills the shared buffer and has the shell copy it has spent two refreshes before anything shows, and the copy lands part way down the screen.
+
+The boot loader reserved four frames and used one. The other three are now lent to the app in front:
+
+- The app draws in one and sends FLIP. The shell asks the kernel ([`kernel6/drivers/t48s_flip.c`](../kernel6/drivers/t48s_flip.c)) to point the LCD controller at it. The controller takes a new address only at the start of a frame and interrupts when it has, which becomes FLIPPED. No copy, no tearing.
+- The shell's own frame is the fourth, and only the shell can point the screen anywhere: the app holds a descriptor it can map and nothing else (the kernel refuses it the rest). So a call or Home still takes the screen at once, by drawing the shell's frame and pointing back at it, and an app that has hung or died leaves nothing on the glass.
+- The app's mapping is ordinary cached memory, written out to RAM by the kernel as part of each flip. The framebuffer's own kind of mapping reads back at a fifth of the speed, which matters to anything that blends.
+- Where the screen cannot do this (the simulator, a model whose picture is fitted to another screen, a kernel without the driver) the buffers are a file in memory and the shell copies on each FLIP. The app cannot tell, except by the rate.
+
+Tried on the phone (2026-11-24, `libt48/examples/fliptest`, read from its log and the frame the controller was showing): 67.8 pictures a second with none missed, whether a bar, every pixel or a doubled 400 x 240 picture is redrawn each time; Home and back; the app killed while flipping. Nobody has yet looked at the glass.
+
+![the frame on the phone's screen](img/flip-on-phone.png)
+
+Looked at and left out:
+
+- **A smaller screen mode.** The PL111 has no scaler and the panel wants its 800 x 480. Doubling in the app costs one write of the frame, 9.6 ms with the picture made as well, and still holds the full rate.
+- **16 bits a pixel, or a palette.** It would halve the bytes. The PL111 has both modes, but its documentation puts their colour bits on other pins than the 24-bit mode's, so on a panel wired for 24 bits the colours should come out wrong. Not tried on the glass: it needs someone looking.
+- **60 refreshes a second**, which an emulator of a 60 Hz machine would like. It means writing the controller's timing, which we never have.
+
 ### Lifecycle
 
 - One app in front at a time; starting another closes the first. Memory is small.

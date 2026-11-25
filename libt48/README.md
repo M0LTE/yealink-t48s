@@ -7,6 +7,8 @@ make                                               # this PC, into build/
 make CC=$HOME/src-build/t48s/bin/armcc O=build-arm # the phone
 ```
 
+**Games.** `t48_flip_start()` and `t48_flip()` show whole pictures without tearing, in time with the screen, and on the phone without a copy; keys and touches carry the time they happened. [`examples/fliptest`](examples/fliptest) is the smallest program that does it, and the check for tearing. The simulator flips too, sixty times a second.
+
 Run an app on a PC with the simulator: see [docs/shell.md](../docs/shell.md#the-simulator).
 
 The WebSocket client (plain `ws://`) came from the old `native/waterfall.c`; `wss://` will follow with mbedTLS. The on-screen keyboard (`t48_kbd_*`) is the one the shell's settings use ([docs/settings.md](../docs/settings.md#the-keyboard)). Not written yet: PNG reading.

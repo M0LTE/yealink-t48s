@@ -27,7 +27,7 @@ Each firmware release (a `v*` tag) also carries `t48s-sdk.tar.gz`, built from th
 | `bin/t48-pack` | makes a `.t48app` from an app folder, and `index.json` for a feed |
 | `share/t48/app.mk` | make rules: an app's Makefile is three lines |
 | `share/t48/libt48/` | libt48's source, for building apps to run in the simulator |
-| `share/t48/api` | the app protocol level this SDK speaks (2 added the theme: an app built with this SDK follows the owner's theme, and still runs on level 1 firmware) ([docs/app-protocol.md](https://github.com/M0LTE/yealink-t48s/blob/main/docs/app-protocol.md)) |
+| `share/t48/api` | the app protocol level this SDK speaks (2 added the theme, 3 flipping for games: an app built with this SDK follows the owner's theme and may flip, and still runs on older firmware) ([docs/app-protocol.md](https://github.com/M0LTE/yealink-t48s/blob/main/docs/app-protocol.md)) |
 | `share/t48/VERSION` | the commit and date it was built from |
 
 ## An app's Makefile

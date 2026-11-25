@@ -155,7 +155,7 @@ static int fb_init(void)
             logmsg("flipping: %u buffers, refresh every %u.%03u ms", flip.count, flip.period_ns / 1000000, flip.period_ns / 1000 % 1000);
         }
     }
-    if (flip_fd < 0) logmsg("flipping: by copying (no %s)", fdev ? fdev : "/dev/t48flip");
+    if (flip_fd < 0) logmsg("flipping: by copying");
     /* keep the text console from drawing over us */
     int tty = open("/dev/tty0", O_RDWR);
     if (tty >= 0) { ioctl(tty, KDSETMODE, 1); close(tty); }
