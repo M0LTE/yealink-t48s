@@ -204,7 +204,7 @@ void t48_resample_init(t48_resampler *r, int rate, int channels)
 
 int t48_resample_max(const t48_resampler *r, int in_frames)
 {
-    return (int)((int64_t)in_frames * T48_SOUND_RATE / r->rate) + 2;
+    return (int)(((int64_t)in_frames << 13) / r->step) + 2;   /* from step: it is truncated, so the output can run a little over the nominal ratio */
 }
 
 int t48_resample(t48_resampler *r, const int16_t *in, int in_frames, int16_t *out, int cap)
