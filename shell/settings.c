@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -31,12 +32,12 @@
 #define T48_VERSION "development build"
 #endif
 
-enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL };
+enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL, P_FWD };
 static const char *const page_names[] = {"root", "accounts", "sip", "network", "time", "timezone", "sound", "screen", "access", "about",
-                                         "appsettings", "appconf", "store", "storeapp", "theme", "update", "install"};
+                                         "appsettings", "appconf", "store", "storeapp", "theme", "update", "install", "forward"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
-enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16, F_HOST = 32, F_PROXY = 64 };
+enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16, F_HOST = 32, F_PROXY = 64, F_SECONDS = 128 };
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
               A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME,
               A_UPD_CHANNEL, A_UPD_CHECK, A_UPD_INSTALL, A_UPD_KERNEL, A_UPD_RESTART,
@@ -780,6 +781,45 @@ static void build_accounts(void)
         r->choices = keep;
         if (!strstr(keep, r->value)) snprintf(r->value, sizeof r->value, "%s", v);
     }
+    /* issue #77: calls only from the accounts' servers; baresip reads it at start */
+    add_stored(R_TOGGLE, "Block direct calls", "phone", "block_direct", "on", 0);
+}
+
+/* what an account's forwarding comes to, for its row: Off, or the first kind that is on */
+static void forward_summary(const char *f, char *out, size_t n)
+{
+    static const char *const kinds[][2] = {{"always", "Always"}, {"busy", "Busy"}, {"noanswer", "No answer"}};
+    char key[40];
+    out[0] = 0;
+    for (int k = 0; k < 3; k++) {
+        snprintf(key, sizeof key, "forward_%s", kinds[k][0]);
+        if (strcmp(cfg_str(f, key, "off"), "on")) continue;
+        snprintf(key, sizeof key, "forward_%s_to", kinds[k][0]);
+        if (!cfg_str(f, key, "")[0]) continue;
+        size_t at = strlen(out);
+        snprintf(out + at, n - at, "%s%s", at ? ", " : "", kinds[k][1]);
+    }
+    if (!out[0]) snprintf(out, n, "Off");
+}
+
+/* an account's call forwarding (issue #77): each kind on or off, and where to */
+static void build_fwd(const char *arg)
+{
+    int n = atoi(arg) < 1 ? 1 : atoi(arg);
+    const char *f = sip_file(n);
+    static const char *const kinds[][2] = {{"always", "Always"}, {"busy", "Busy"}, {"noanswer", "No answer"}};
+    char key[40], label[40];
+    snprintf(title, sizeof title, "Call forwarding %d", n);
+    for (int k = 0; k < 3; k++) {
+        snprintf(key, sizeof key, "forward_%s", kinds[k][0]);
+        int on = !strcmp(add_stored(R_TOGGLE, kinds[k][1], f, key, "off", 0)->value, "on");
+        snprintf(key, sizeof key, "forward_%s_to", kinds[k][0]);
+        snprintf(label, sizeof label, "%s to", kinds[k][1]);
+        add_stored(R_TEXT, label, f, key, "", F_DIGITS | (on ? 0 : F_DISABLED));
+        if (k == 2)
+            add_stored(R_CHOICE, "No answer after", f, "forward_noanswer_after", "20", F_SECONDS | (on ? 0 : F_DISABLED))->choices =
+                "5|10|15|20|25|30|45|60";
+    }
 }
 
 static void build_sip(const char *arg)
@@ -798,6 +838,16 @@ static void build_sip(const char *arg)
     add_stored(R_CHOICE, "Transport", f, "transport", "udp", 0)->choices = "udp|tcp|tls";
     add_stored(R_TEXT, "Label", f, "label", "", 0);
     add_stored(R_TEXT, "Voicemail", f, "voicemail", "", F_DIGITS);
+    {
+        /* issue #77: the ringtone, and Custom once a sound has been given on the web setup page */
+        char path[300], fwd[60];
+        struct stat st;
+        ringtone_path(f, path, sizeof path);
+        add_stored(R_CHOICE, "Ringtone", f, "ringtone", "standard", 0)->choices =
+            stat(path, &st) == 0 ? "standard|long|chime|pulse|custom" : "standard|long|chime|pulse";
+        forward_summary(f, fwd, sizeof fwd);
+        snprintf(add_menu("Call forwarding", P_FWD, fwd)->arg, sizeof rows[0].arg, "%d", n);
+    }
     add_stored(R_TOGGLE, "Enabled", f, "enabled", "on", 0);
     snprintf(acc, sizeof acc, "reg.%d", n);
     const char *reg = phone_state(acc);
@@ -1251,6 +1301,7 @@ static void rebuild(void)
     case P_THEME: build_theme(); break;
     case P_UPDATE: build_update(); break;
     case P_INSTALL: build_install(); break;
+    case P_FWD: build_fwd(stack[depth].arg); break;
     }
     for (int i = 0; keep[0] && i < nrows; i++)
         if (rows[i].kind == R_ACTION && !strcmp(rows[i].label, keep)) stack[depth].sel = i;
@@ -1336,6 +1387,13 @@ static void store_value(const struct row *r, const char *value)
         return;
     }
     logmsg("settings: %s %s set", r->file, r->key);   /* never the value */
+    /* the shell's own account keys (issue #77): no need to restart baresip */
+    if (!strncmp(r->file, "sip", 3) && (!strcmp(r->key, "ringtone") || !strncmp(r->key, "forward_", 8))) {
+        phone_reload_account();
+        return;
+    }
+    /* read by t48-sip when baresip starts */
+    if (!strcmp(r->file, "phone") && !strcmp(r->key, "block_direct")) snprintf(dirty, sizeof dirty, "sip");
     mark_dirty(r->file);
     if (!strcmp(r->file, "feed") && !strcmp(r->key, "url")) store_refresh();
 }
@@ -1544,6 +1602,8 @@ static void confirmed(enum action act, const char *arg)
         char path[400];
         if (strncmp(arg, "sip", 3) || strchr(arg, '/')) break;
         snprintf(path, sizeof path, "%s/%s", opt.config, arg);
+        unlink(path);
+        ringtone_path(arg, path, sizeof path);   /* its custom ringtone, if it had one */
         unlink(path);
         logmsg("settings: account file %s removed", arg);
         snprintf(dirty, sizeof dirty, "sip");
@@ -1835,7 +1895,9 @@ static void two_lines_centred(int cx, int y, int w, const t48_font *f, uint32_t 
 static const char *choice_text(const char *v)
 {
     static const char *const map[][2] = {{"dhcp", "DHCP"}, {"static", "Static"}, {"udp", "UDP"}, {"tcp", "TCP"}, {"tls", "TLS"},
-                                             {"stable", "Stable"}, {"testing", "Testing"}};
+                                             {"stable", "Stable"}, {"testing", "Testing"},
+                                             {"standard", "Standard"}, {"long", "Long"}, {"chime", "Chime"}, {"pulse", "Pulse"},
+                                             {"custom", "Custom"}};
     for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
         if (!strcmp(v, map[i][0])) return map[i][1];
     return v;
@@ -1893,7 +1955,9 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
     if (lw > room * 2 / 3 && r->value[0]) lw = room * 2 / 3;
     t48_text_fit(&ui, x + pad, ty, lw + 2, f, r->kind == R_INFO && !selected ? ink.dim : text, r->label);
     if (r->value[0]) {
+        char secs[40];
         const char *shown = r->kind == R_CHOICE ? choice_text(r->value) : r->value;
+        if (r->flags & F_SECONDS) { snprintf(secs, sizeof secs, "%s s", r->value); shown = secs; }
         int vw = t48_text_width(f, shown), max = room - lw - 24;
         uint32_t vc = dis ? ink.faint : r->kind == R_INFO ? ink.text : ink.dim;
         if (vw <= max) t48_text_right(&ui, right, ty, f, vc, shown);

@@ -403,8 +403,16 @@ static void url_decode(char *s)
 const char *form(const struct req *r, const char *name)
 {
     for (int i = 0; i < r->nf; i++)
-        if (!strcmp(r->f[i].name, name)) return r->f[i].value;
+        if (!strcmp(r->f[i].name, name)) return strlen(r->f[i].value) == r->f[i].len ? r->f[i].value : "";
     return "";
+}
+
+const char *form_bytes(const struct req *r, const char *name, size_t *len)
+{
+    for (int i = 0; i < r->nf; i++)
+        if (!strcmp(r->f[i].name, name)) { *len = r->f[i].len; return r->f[i].value; }
+    *len = 0;
+    return NULL;
 }
 
 const char *query(const struct req *r, const char *name)
@@ -434,6 +442,7 @@ static void parse_urlencoded(struct req *r)
             url_decode(p);
             url_decode(eq + 1);
             r->f[r->nf].name = p;
+            r->f[r->nf].len = strlen(eq + 1);
             r->f[r->nf++].value = eq + 1;
         }
         p = amp ? amp + 1 : NULL;
@@ -449,7 +458,8 @@ static char *find_bytes(char *hay, size_t hn, const char *needle, size_t nn)
 }
 
 /* multipart/form-data: a file chosen in the browser arrives this way. Fields
- * are text; one with a zero byte in it is dropped. */
+ * keep their length: form() takes one with a zero byte in it for empty,
+ * form_bytes() has it whole. */
 static void parse_multipart(struct req *r)
 {
     char delim[120];
@@ -474,10 +484,11 @@ static void parse_multipart(struct req *r)
         char *vend = next >= value + 2 ? next - 2 : value;   /* the line break before the boundary */
         *vend = 0;
         char *name = strstr(p, "name=\"");
-        if (name && strlen(value) == (size_t)(vend - value)) {
+        if (name) {
             name += 6;
             name[strcspn(name, "\"")] = 0;
             r->f[r->nf].name = name;
+            r->f[r->nf].len = (size_t)(vend - value);
             r->f[r->nf++].value = value;
         }
         p = next;

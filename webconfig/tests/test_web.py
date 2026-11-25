@@ -169,6 +169,15 @@ class Browser:
         parts.append("--%s--\r\n" % b)
         return self.request("POST", path, "".join(parts).encode(), {"Content-Type": "multipart/form-data; boundary=" + b})
 
+    def upload_bytes(self, path, fields, name, filename, content):
+        b = b"----t48test"
+        f = dict(fields)
+        f["csrf"] = self.csrf
+        body = b"".join(b'--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (b, k.encode(), v.encode()) for k, v in f.items())
+        body += b'--%s\r\nContent-Disposition: form-data; name="%s"; filename="%s"\r\nContent-Type: audio/wav\r\n\r\n' % (b, name.encode(), filename.encode())
+        body += content + b"\r\n--%s--\r\n" % b
+        return self.request("POST", path, body, {"Content-Type": "multipart/form-data; boundary=" + b.decode()})
+
     def pair(self):
         r = self.post("/pair/start", csrf=False)
         assert r.status == 303 and r.getheader("Location") == "/pair", (r.status, r.getheader("Location"))
@@ -459,6 +468,114 @@ class Paired(unittest.TestCase):
         self.assertNotIn("s3cret", log)
         self.assertNotIn("hunter2", log)
         self.assertNotIn("pbx.example.org", log)
+
+    def test_11_calls(self):
+        """issue #77: block direct calls, ringtones, a custom sound, call forwarding"""
+        import io, math, struct, wave
+        b, p = self.b, self.p
+        acct = {"n": "3", "user": "4004", "domain": "pbx.example.org", "transport": "udp", "enabled": "on"}
+        page = b.get("/accounts").body
+        self.assertIn("name='block_direct' value='on' checked", page)
+        self.ok("/accounts/block", {}, "/accounts")
+        self.assertEqual(p.get("phone", "block_direct"), "off")
+        self.assertIn("sip", p.applied_list())
+        self.ok("/accounts/block", {"block_direct": "on"}, "/accounts")
+        self.assertEqual(p.get("phone", "block_direct"), "on")
+        # a ringtone, and forwarding
+        self.ok("/accounts/save", dict(acct, ringtone="chime", fwd="1", forward_always="on", forward_always_to="07700900123",
+                                       forward_busy_to="2002", forward_noanswer="on", forward_noanswer_to="sip:desk@example.org",
+                                       forward_noanswer_after="15"), "/accounts")
+        self.assertEqual(p.get("sip3", "ringtone"), "chime")
+        self.assertEqual(p.get("sip3", "forward_always"), "on")
+        self.assertEqual(p.get("sip3", "forward_always_to"), "07700900123")
+        self.assertEqual(p.get("sip3", "forward_busy"), "off")
+        self.assertEqual(p.get("sip3", "forward_busy_to"), "2002")
+        self.assertEqual(p.get("sip3", "forward_noanswer_to"), "sip:desk@example.org")
+        self.assertEqual(p.get("sip3", "forward_noanswer_after"), "15")
+        page = b.get("/accounts").body
+        self.assertIn("name='forward_always' value='on' checked", page)
+        self.assertIn("<option value='chime' selected>Chime</option>", page)
+        self.assertNotIn("value='custom'", page)
+        # a form without the forwarding part leaves it alone
+        self.ok("/accounts/save", acct, "/accounts")
+        self.assertEqual(p.get("sip3", "forward_always"), "on")
+        self.assertEqual(p.get("sip3", "ringtone"), "chime")
+        # refusals: on with no number, a number with a space
+        text = self.bad("/accounts/save", dict(acct, fwd="1", forward_busy="on", forward_busy_to=""), "/accounts")
+        self.assertIn("Busy forwarding needs a number", text)
+        text = self.bad("/accounts/save", dict(acct, fwd="1", forward_always_to="0770 090"), "/accounts")
+        self.assertIn("not a number or an address", text)
+        self.assertEqual(p.get("sip3", "forward_always_to"), "07700900123")
+        self.ok("/accounts/save", dict(acct, fwd="1"), "/accounts")
+        self.assertEqual(p.get("sip3", "forward_always"), "off")
+
+        # a custom sound: 44.1 kHz stereo 16-bit, 1 kHz, 1.5 s, quiet
+        def wav(rate, ch, width, secs, hz=1000, level=0.25):
+            out = io.BytesIO()
+            with wave.open(out, "wb") as w:
+                w.setnchannels(ch); w.setsampwidth(width); w.setframerate(rate)
+                n = int(rate * secs)
+                full = (1 << (8 * width - 1)) - 1
+                frames = []
+                for i in range(n):
+                    v = int(full * level * math.sin(2 * math.pi * hz * i / rate))
+                    if width == 1:
+                        frames.append(struct.pack("<B", v + 128) * ch)
+                    elif width == 3:
+                        frames.append(struct.pack("<i", v)[:3] * ch)
+                    else:
+                        frames.append(struct.pack("<h" if width == 2 else "<i", v) * ch)
+                w.writeframes(b"".join(frames))
+            return out.getvalue()
+
+        def stored():
+            with open(os.path.join(p.state, "ringtones", "sip3.s16"), "rb") as f:
+                d = f.read()
+            return list(struct.unpack("<%dh" % (len(d) // 2), d))
+
+        def amp(x, hz):
+            w = 2 * math.pi * hz / 16000
+            return 2 * math.hypot(sum(v * math.cos(w * i) for i, v in enumerate(x)), sum(v * math.sin(w * i) for i, v in enumerate(x))) / len(x)
+
+        r = b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "bell.wav", wav(44100, 2, 2, 1.5))
+        self.assertEqual(r.status, 303)
+        bad, text = b.flash("/accounts")
+        self.assertIs(bad, False, text)
+        self.assertEqual(text, "Ringtone saved.")
+        x = stored()
+        self.assertEqual(len(x), 24000)                     # 1.5 s at 16 kHz
+        self.assertTrue(15900 <= max(abs(v) for v in x) <= 16000)   # brought to the built-in ringtones' level
+        self.assertGreater(amp(x[4000:8000], 1000), 15500)
+        self.assertLess(amp(x[4000:8000], 3000), 50)        # clean: no images from the resampling
+        self.assertLess(abs(x[0]) + abs(x[-1]), 20)         # faded in and out
+        self.assertEqual(p.get("sip3", "ringtone"), "custom")
+        self.assertIn("<option value='custom' selected>Custom</option>", b.get("/accounts").body)
+        # other formats: 8 kHz 8-bit mono, 48 kHz 24-bit, 16 kHz as it is; too long is cut to 10 s
+        for rate, ch, width, secs in ((8000, 1, 1, 1.0), (48000, 1, 3, 0.5), (16000, 1, 2, 0.5)):
+            r = b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "x.wav", wav(rate, ch, width, secs))
+            self.assertIs(b.flash("/accounts")[0], False, (rate, ch, width))
+            self.assertEqual(len(stored()), int(16000 * secs))
+            self.assertGreater(amp(stored()[2000:6000], 1000), 15000, (rate, width))
+        r = b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "long.wav", wav(16000, 1, 2, 14))
+        self.assertEqual(b.flash("/accounts"), (False, "Ringtone saved, cut to 10 s."))
+        self.assertEqual(len(stored()), 160000)
+        # refusals: not a WAV, silence, too big
+        for content, why in ((b"ID3 not a wav at all", "not a WAV file"), (wav(16000, 1, 2, 0.5, level=0), "the sound is silent")):
+            b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "x.wav", content)
+            self.assertEqual(b.flash("/accounts"), (True, "Ringtone not saved: %s." % why))
+        self.assertEqual(len(stored()), 160000)
+        try:   # refused before it is all sent: a 413, or the connection closed under the sender
+            self.assertEqual(b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "big.wav", wav(48000, 2, 2, 3)).status, 413)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        # removed: back to Standard
+        self.ok("/accounts/ringtone-remove", {"n": "3"}, "/accounts")
+        self.assertFalse(os.path.exists(os.path.join(p.state, "ringtones", "sip3.s16")))
+        self.assertEqual(p.get("sip3", "ringtone"), "standard")
+        # removing the account takes its sound too
+        b.upload_bytes("/accounts/ringtone", {"n": "3"}, "sound", "x.wav", wav(16000, 1, 2, 0.5))
+        self.ok("/accounts/remove", {"n": "3", "sure": "yes"}, "/accounts")
+        self.assertFalse(os.path.exists(os.path.join(p.state, "ringtones", "sip3.s16")))
 
     def test_20_network(self):
         b, p = self.b, self.p

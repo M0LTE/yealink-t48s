@@ -294,3 +294,18 @@ int config_main(int argc, char **argv)
         "Most changes take effect after: t48-apply FILE\n", opt.config);
     return 2;
 }
+
+/* ---------- ringtones (issue #77) ---------- */
+
+void ringtone_path(const char *acct_file, char *out, size_t n)
+{
+    snprintf(out, n, "%s/ringtones/%s.s16", opt.state, acct_file);
+}
+
+int ringtone_code(const char *name)
+{
+    static const char *const names[] = {"standard", "long", "chime", "pulse", "custom"};
+    for (int i = 0; i < T48AC_RINGTONE_COUNT; i++)
+        if (!strcmp(name, names[i])) return i;
+    return T48AC_RINGTONE_STANDARD;
+}

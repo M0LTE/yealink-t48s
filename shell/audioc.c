@@ -4,6 +4,7 @@
  * tones, the ringer. Keeps trying once a second while the service is not
  * there; phone.c says how things should be again each time it comes back. */
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -49,7 +50,34 @@ static void send1(int type, int v) { unsigned char b = (unsigned char)v; send_ms
 void audioc_route(int route) { send1(T48AC_ROUTE, route); }
 void audioc_mute(int on) { send1(T48AC_MUTE, on); }
 void audioc_tone(int tone) { send1(T48AC_TONE, tone); }
-void audioc_ring(int on) { send1(T48AC_RING, on); }
+/* The ringer, with the account's ringtone. A custom sound's file travels
+ * as a descriptor beside the message; one that cannot be opened rings the
+ * standard tone. */
+void audioc_ring(int on, int ringtone, const char *custom)
+{
+    unsigned char m[6] = {T48AC_RING, 0, 2, 0, (unsigned char)on, (unsigned char)ringtone};
+    union { struct cmsghdr h; char space[CMSG_SPACE(sizeof(int))]; } cm;
+    struct iovec iov = {m, sizeof m};
+    struct msghdr mh = {.msg_iov = &iov, .msg_iovlen = 1};
+    int file = -1;
+
+    if (fd < 0) return;
+    if (on && ringtone == T48AC_RINGTONE_CUSTOM) {
+        file = custom ? open(custom, O_RDONLY | O_CLOEXEC) : -1;
+        if (file < 0) m[5] = T48AC_RINGTONE_STANDARD;
+    }
+    if (file >= 0) {
+        memset(&cm, 0, sizeof cm);
+        mh.msg_control = &cm;
+        mh.msg_controllen = sizeof cm;
+        cm.h.cmsg_level = SOL_SOCKET;
+        cm.h.cmsg_type = SCM_RIGHTS;
+        cm.h.cmsg_len = CMSG_LEN(sizeof(int));
+        memcpy(CMSG_DATA(&cm.h), &file, sizeof(int));
+    }
+    if (sendmsg(fd, &mh, MSG_NOSIGNAL) != (ssize_t)sizeof m) drop("cannot send");
+    if (file >= 0) close(file);
+}
 void audioc_key(int ch) { send1(T48AC_KEY, ch); }
 /* An app's sound: whether it is in front, and with ring_fd its ring, which
  * travels as a descriptor beside the message. */
