@@ -392,6 +392,80 @@ class Paired(unittest.TestCase):
 
     # ---- every form ----
 
+    def test_11_accounts_advanced(self):
+        # issue #77: account name, the Advanced part, and up to 16 accounts
+        b, p = self.b, self.p
+        base = {"n": "1", "user": "1001", "domain": "pbx.example.org", "transport": "udp", "enabled": "on", "label": "Office"}
+        adv = dict(base, adv="1", register_seconds="", dtmf="rfc2833", codec_order="opus,g722,pcmu,pcma",
+                   codec_opus="on", codec_g722="on", codec_pcmu="on", codec_pcma="on", keepalive="on")
+        self.ok("/accounts/save", adv, "/accounts")
+        # the usual values are not written
+        for k in ("register_seconds", "dtmf", "codecs", "keepalive"):
+            self.assertIsNone(p.get("sip", k), k)
+        page = b.get("/accounts").body
+        self.assertIn("<span>Account name</span>", page)
+        self.assertIn("value='Office'", page)
+        self.assertNotIn("<span>Label</span>", page)
+        for text in ("<summary>Advanced</summary>", "<span>Registration expiry</span>", "<span>DTMF</span>", "RFC 2833", "In-band",
+                     "SIP INFO", "<span>Codecs</span>", "NAT keepalive", "name='codec_g722' value='on' checked> G.722"):
+            self.assertIn(text, page)
+        self.assertNotIn("<details class='sub' open>", page)      # Advanced is shut while all is usual
+        # every setting, changed
+        self.ok("/accounts/save", dict(adv, register_seconds="120", dtmf="inband", codec_pcmu="", keepalive=""), "/accounts")
+        self.assertEqual(p.get("sip", "register_seconds"), "120")
+        self.assertEqual(p.get("sip", "dtmf"), "inband")
+        self.assertEqual(p.get("sip", "codecs"), "opus,g722,-pcmu,pcma")
+        self.assertEqual(p.get("sip", "keepalive"), "off")
+        page = b.get("/accounts").body
+        self.assertIn("<details class='sub' open>", page)
+        self.assertIn("value='120'", page)
+        self.assertIn("<option value='inband' selected>", page)
+        self.assertIn("name='codec_pcmu' value='on'> PCMU", page)
+        self.ok("/accounts/save", dict(adv, dtmf="info"), "/accounts")
+        self.assertEqual(p.get("sip", "dtmf"), "info")
+        self.assertIsNone(p.get("sip", "keepalive"))
+        self.assertIsNone(p.get("sip", "register_seconds"))
+        # Up and Down move a codec; what the page showed is the order moved in
+        self.ok("/accounts/save", dict(adv, move="pcma:up"), "/accounts")
+        self.assertEqual(p.get("sip", "codecs"), "opus,g722,pcma,pcmu")
+        self.ok("/accounts/save", dict(adv, codec_order="opus,g722,pcma,pcmu", move="opus:down", codec_pcmu=""), "/accounts")
+        self.assertEqual(p.get("sip", "codecs"), "g722,opus,pcma,-pcmu")
+        page = b.get("/accounts").body
+        self.assertLess(page.index("> G.722</label>"), page.index("> Opus</label>"))
+        self.assertLess(page.index("> PCMA</label>"), page.index("> PCMU</label>"))
+        self.ok("/accounts/save", dict(adv, codec_order="g722,opus,pcma,pcmu", move="g722:up"), "/accounts")   # already first
+        self.assertEqual(p.get("sip", "codecs"), "g722,opus,pcma,pcmu")
+        # refusals: nothing changes
+        for bad, why in (({"register_seconds": "59"}, "registration expiry"), ({"register_seconds": "86401"}, "registration expiry"),
+                         ({"register_seconds": "1h"}, "registration expiry"),
+                         ({"codec_opus": "", "codec_g722": "", "codec_pcmu": "", "codec_pcma": ""}, "one codec must be on")):
+            text = self.bad("/accounts/save", dict(adv, codec_order="g722,opus,pcma,pcmu", **bad), "/accounts")
+            self.assertIn(why, text)
+            self.assertEqual(p.get("sip", "codecs"), "g722,opus,pcma,pcmu")
+        self.ok("/accounts/save", dict(adv, register_seconds="86400", dtmf="info", codec_order="g722,opus,pcma,pcmu"), "/accounts")
+        self.assertEqual(p.get("sip", "register_seconds"), "86400")
+        # a form without the Advanced part (an older page, a script) leaves it alone
+        self.ok("/accounts/save", base, "/accounts")
+        self.assertEqual(p.get("sip", "register_seconds"), "86400")
+        self.assertEqual(p.get("sip", "codecs"), "g722,opus,pcma,pcmu")
+        self.assertEqual(p.get("sip", "dtmf"), "info")
+        # sixteen accounts: those set and the next free one are shown; the default can be any
+        for n in range(2, 17):
+            self.ok("/accounts/save", {"n": str(n), "user": "20%02d" % n, "domain": "pbx.example.org", "transport": "udp", "enabled": "on"}, "/accounts")
+        self.assertEqual(p.get("sip16", "user"), "2016")
+        page = b.get("/accounts").body
+        self.assertIn("<h2>Account 16</h2>", page)
+        self.assertIn("<option value='16'", page)
+        self.ok("/accounts/default", {"n": "16"}, "/accounts")
+        self.assertEqual(p.get("phone", "default_account"), "16")
+        for n in range(3, 17):
+            self.ok("/accounts/remove", {"n": str(n), "sure": "yes"}, "/accounts")
+        page = b.get("/accounts").body
+        self.assertIn("<h2>Account 3</h2>", page)                  # the one to add
+        self.assertNotIn("<h2>Account 4</h2>", page)
+        self.ok("/accounts/remove", {"n": "2", "sure": "yes"}, "/accounts")
+        self.ok("/accounts/save", dict(adv, label=""), "/accounts")     # all usual again, for the tests after
+
     def test_10_accounts(self):
         b, p = self.b, self.p
         secret = "s3cret-Pass word&<>'\"%"
@@ -449,8 +523,8 @@ class Paired(unittest.TestCase):
         self.ok("/accounts/save", {"n": "2", "user": "3003", "domain": "pbx.example.org", "outbound_proxy": "SIP:[fe80::1]:5080", "transport": "udp"}, "/accounts")
         self.assertEqual(p.get("sip2", "outbound_proxy"), "SIP:[fe80::1]:5080")
         self.ok("/accounts/remove", {"n": "2", "sure": "yes"}, "/accounts")
-        self.assertEqual(b.post("/accounts/save", {"n": "7", "user": "x"}).status, 303)
-        self.assertFalse(os.path.exists(os.path.join(p.config, "sip7")))
+        self.assertEqual(b.post("/accounts/save", {"n": "17", "user": "x"}).status, 303)
+        self.assertFalse(os.path.exists(os.path.join(p.config, "sip17")))
         self.bad("/accounts/remove", {"n": "6"}, "/accounts")          # the box was not ticked
         self.assertEqual(p.get("sip6", "user"), "2002")
         self.ok("/accounts/remove", {"n": "6", "sure": "yes"}, "/accounts")

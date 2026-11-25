@@ -25,7 +25,7 @@
 #define T48_VERSION "development build"
 #endif
 
-#define MAX_ACCTS 6
+#define MAX_ACCTS T48_ACCOUNTS
 #define MAX_CONTACTS 200
 #define MAX_KEYS 16
 
@@ -42,7 +42,7 @@ static const char *val(const char *file, const char *key, const char *def)
     return s;
 }
 
-static const char *sip_file(int n)   /* 1 to 6 */
+static const char *sip_file(int n)   /* 1 to 16 */
 {
     static char f[16][8];
     static int at;
@@ -279,6 +279,83 @@ void page_overview(struct req *r)
 
 /* ---------- phone accounts ---------- */
 
+/* An account's Advanced part (issue #77): registration expiry, DTMF, the
+ * codecs in the order offered, NAT keepalive. Open when any is not the default. */
+static void account_advanced(const char *f)
+{
+    static const char *const dtmf[][2] = {{"rfc2833", "RFC 2833"}, {"inband", "In-band"}, {"info", "SIP INFO"}};
+    const char *d = val(f, "dtmf", "rfc2833");
+    int order[T48_CODECS], on[T48_CODECS];
+    char keys[40] = "", usual[40];
+    sip_codecs(val(f, "codecs", ""), order, on);
+    sip_codecs_str(order, on, usual, sizeof usual);
+    int changed = val(f, "register_seconds", "")[0] || strcmp(d, "rfc2833") || strcmp(usual, "opus,g722,pcmu,pcma") ||
+                  !strcmp(val(f, "keepalive", "on"), "off");
+    H("<details class='sub'%r><summary>Advanced</summary><div class='fields'>", changed ? " open" : "");
+    field("Registration expiry", "register_seconds", val(f, "register_seconds", ""),
+          "inputmode='numeric' pattern='[0-9]*' placeholder='3600'", "Seconds, 60 to 86400");
+    H("<label class='field'><span>DTMF</span><select name='dtmf'>");
+    for (int i = 0; i < 3; i++) H("<option value='%s'%r>%s</option>", dtmf[i][0], !strcmp(d, dtmf[i][0]) ? " selected" : "", dtmf[i][1]);
+    H("</select></label></div><div class='field'><span>Codecs</span><ol class='codecs'>");
+    for (int i = 0; i < T48_CODECS; i++) {
+        const char *k = sip_codec_keys[order[i]];
+        size_t at = strlen(keys);
+        snprintf(keys + at, sizeof keys - at, "%s%s", i ? "," : "", k);
+        H("<li><label class='check'><input type='checkbox' name='codec_%s' value='on'%r> %s</label>"
+          "<button type='submit' class='small quiet' name='move' value='%s:up' aria-label='Move %s up'%r>Up</button>"
+          "<button type='submit' class='small quiet' name='move' value='%s:down' aria-label='Move %s down'%r>Down</button></li>",
+          k, on[i] ? " checked" : "", sip_codec_names[order[i]], k, sip_codec_names[order[i]], i ? "" : " disabled",
+          k, sip_codec_names[order[i]], i < T48_CODECS - 1 ? "" : " disabled");
+    }
+    H("</ol><input type='hidden' name='codec_order' value='%s'></div>", keys);
+    H("<label class='check'><input type='checkbox' name='keepalive' value='on'%r> NAT keepalive</label></details>",
+      strcmp(val(f, "keepalive", "on"), "off") ? " checked" : "");
+}
+
+/* The Advanced part of a saved form, checked; 0 and the reason if it will not do */
+static int advanced_values(const struct req *r, char *regint, char *codecs, size_t n, const char **why)
+{
+    int order[T48_CODECS], on[T48_CODECS], k = 0, any = 0;
+    char list[64], *save = NULL;
+    snprintf(regint, 8, "%s", "");
+    if (!line(r, "register_seconds", list, 8) || !sip_regint_ok(list)) { *why = "registration expiry must be 60 to 86400 s"; return 0; }
+    snprintf(regint, 8, "%s", list);
+    /* the order the page showed, then the move asked for, if any */
+    snprintf(list, sizeof list, "%s", form(r, "codec_order"));
+    for (char *p = strtok_r(list, ",", &save); p && k < T48_CODECS; p = strtok_r(NULL, ",", &save))
+        for (int c = 0; c < T48_CODECS; c++)
+            if (!strcmp(p, sip_codec_keys[c])) {
+                int dup = 0;
+                for (int j = 0; j < k; j++) dup |= order[j] == c;
+                if (!dup) order[k++] = c;
+            }
+    for (int c = 0; c < T48_CODECS; c++) {
+        int have = 0;
+        for (int j = 0; j < k; j++) have |= order[j] == c;
+        if (!have) order[k++] = c;
+    }
+    for (int i = 0; i < T48_CODECS; i++) {
+        char name[16];
+        snprintf(name, sizeof name, "codec_%s", sip_codec_keys[order[i]]);
+        any |= on[i] = !strcmp(form(r, name), "on");
+    }
+    if (!any) { *why = "one codec must be on"; return 0; }
+    const char *mv = form(r, "move");
+    for (int i = 0; i < T48_CODECS; i++) {
+        size_t kl = strlen(sip_codec_keys[order[i]]);
+        if (strncmp(mv, sip_codec_keys[order[i]], kl) || mv[kl] != ':') continue;
+        int j = i + (!strcmp(mv + kl + 1, "up") ? -1 : !strcmp(mv + kl + 1, "down") ? 1 : 0);
+        if (j < 0 || j >= T48_CODECS || j == i) break;
+        int o = order[i], f = on[i];
+        order[i] = order[j]; on[i] = on[j];
+        order[j] = o; on[j] = f;
+        break;
+    }
+    sip_codecs_str(order, on, codecs, n);
+    if (!strcmp(codecs, "opus,g722,pcmu,pcma")) codecs[0] = 0;   /* the usual: not written */
+    return 1;
+}
+
 static void page_accounts(struct req *r)
 {
     int used = 0, def = atoi(val("phone", "default_account", "1"));
@@ -293,18 +370,23 @@ static void page_accounts(struct req *r)
                 H("<option value='%d'%r>%d: %s@%s</option>", n, n == def ? " selected" : "", n, val(sip_file(n), "user", ""), val(sip_file(n), "domain", ""));
         H("</select></label><button type='submit'>Save</button></form></div>");
     }
+    /* the accounts that are set, and the first that is not, to add one (as the phone lists them) */
+    int spare = 0;
     for (int n = 1; n <= MAX_ACCTS; n++) {
         const char *f = sip_file(n);
         int has = val(f, "user", "")[0] || val(f, "domain", "")[0];
         int pw = val(f, "password", "")[0] != 0;
         const char *tr = val(f, "transport", "udp");
+        if (!has && spare++) continue;
         H("<details class='card' id='a%d'%r><summary><h2>Account %d</h2>", n, has || n == 1 ? " open" : "", n);
         if (account_used(n))
             H("<span class='sum'>%s@%s</span><span class='pill %r'>%r</span>", val(f, "user", ""), val(f, "domain", ""), account_on(n) ? "good" : "", account_on(n) ? "On" : "Off");
         else H("<span class='sum dim'>Not set</span>");
         H("</summary>");
         form_begin(r, "/accounts/save", NULL);
-        H("<input type='hidden' name='n' value='%d'><div class='fields'>", n);
+        /* Enter in a box saves: the first submit button is the one a browser presses for it */
+        H("<input type='hidden' name='n' value='%d'><input type='hidden' name='adv' value='1'>"
+          "<button type='submit' class='enter' tabindex='-1' aria-hidden='true'>Save</button><div class='fields'>", n);
         field("User", "user", val(f, "user", ""), "autocomplete='off' autocapitalize='none' spellcheck='false'", NULL);
         field("Server host", "domain", val(f, "domain", ""), "autocomplete='off' autocapitalize='none' spellcheck='false' placeholder='host or host:port'", NULL);
         H("<label class='field'><span>Password</span><input type='password' name='password' value='' maxlength='200' autocomplete='new-password' placeholder='%r'></label>", pw ? "Set. Empty keeps it" : "Not set");
@@ -315,11 +397,12 @@ static void page_accounts(struct req *r)
         for (const char *const *t = (const char *const[]){"udp", "tcp", "tls", NULL}; *t; t++)
             H("<option value='%s'%r>%r</option>", *t, !strcmp(tr, *t) ? " selected" : "", !strcmp(*t, "udp") ? "UDP" : !strcmp(*t, "tcp") ? "TCP" : "TLS");
         H("</select></label>");
-        field("Label", "label", val(f, "label", ""), "placeholder='Optional'", "Name on the phone's screens");
+        field("Account name", "label", val(f, "label", ""), "placeholder='Optional'", "Name on the phone's screens");
         field("Voicemail", "voicemail", val(f, "voicemail", ""), "inputmode='tel' placeholder='Optional'", "Number the Message key calls");
-        H("</div><label class='check'><input type='checkbox' name='enabled' value='on'%r> Enabled</label>"
-          "<div class='actions'><button class='primary' type='submit'>Save</button></div></form>",
+        H("</div><label class='check'><input type='checkbox' name='enabled' value='on'%r> Enabled</label>",
           strcmp(val(f, "enabled", "on"), "off") ? " checked" : "");
+        account_advanced(f);
+        H("<div class='actions'><button class='primary' type='submit'>Save</button></div></form>");
         if (has) {
             form_begin(r, "/accounts/remove", "class='danger'");
             H("<input type='hidden' name='n' value='%d'>", n);
@@ -351,7 +434,19 @@ static void post_account_save(struct req *r)
         return;
     }
     if (strcmp(tr, "udp") && strcmp(tr, "tcp") && strcmp(tr, "tls")) tr = "udp";
+    /* the Advanced part: only from a form that has it */
+    char regint[8] = "", codecs[64] = "";
+    const char *why = NULL, *dtmf = form(r, "dtmf");
+    int adv = form(r, "adv")[0] != 0;
+    if (adv && !advanced_values(r, regint, codecs, sizeof codecs, &why)) {
+        flash(r, 1, "Account %d not saved: %s.", n, why);
+        redirect(r, where);
+        return;
+    }
+    if (strcmp(dtmf, "inband") && strcmp(dtmf, "info")) dtmf = "";   /* RFC 2833, the usual: not written */
     for (int i = 0; i < 7 && ok; i++) ok = set(f, keys[i], v[i]) == 0;
+    if (ok && adv) ok = set(f, "register_seconds", regint) == 0 && set(f, "dtmf", dtmf) == 0 && set(f, "codecs", codecs) == 0 &&
+                        set(f, "keepalive", !strcmp(form(r, "keepalive"), "on") ? NULL : "off") == 0;
     if (ok) ok = cfg_set(f, "transport", tr) == 0 && cfg_set(f, "enabled", !strcmp(form(r, "enabled"), "on") ? "on" : "off") == 0;
     if (ok && pw[0]) ok = cfg_set(f, "password", pw) == 0;
     memset(pw, 0, sizeof pw);
@@ -1235,7 +1330,8 @@ static void post_web_off(struct req *r)
 /* ---------- backup and restore ---------- */
 
 #define BACKUP_FIRST "# T48S settings backup, format 1"
-static const char *const backup_files[] = {"sip", "sip2", "sip3", "sip4", "sip5", "sip6", "phone", "network", "system", "audio", "screen", "feed"};
+static const char *const backup_files[] = {"sip", "sip2", "sip3", "sip4", "sip5", "sip6", "sip7", "sip8", "sip9", "sip10", "sip11", "sip12",
+                                           "sip13", "sip14", "sip15", "sip16", "phone", "network", "system", "audio", "screen", "feed"};
 #define NBACKUP ((int)(sizeof backup_files / sizeof backup_files[0]))
 
 /* is this key of this file a password: by its name, or because the app's manifest says so */
