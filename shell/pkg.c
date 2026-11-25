@@ -341,6 +341,14 @@ static int unpack(const char *pkg, const char *dest, char *id, size_t idn)
         if (!wrote) break;
     }
     if (ok < 0) kill(pid, SIGKILL);
+    else {
+        /* read gzip's output to the end (the archive's padding after the end
+         * marker), or it dies of SIGPIPE and the package looks damaged */
+        long rest = 0;
+        ssize_t r;
+        while (rest < MAX_PACKAGE && ((r = read(pfd[0], h, sizeof h)) > 0 || (r < 0 && errno == EINTR)))
+            if (r > 0) rest += r;
+    }
     close(pfd[0]);
     int status;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
