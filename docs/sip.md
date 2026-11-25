@@ -16,6 +16,7 @@ Issue [#25](https://github.com/M0LTE/yealink-t48s/issues/25). Design: [architect
 |---|---|
 | `account` | reads the accounts file that `t48-sip` writes |
 | `menu` | the call commands (`dial`, `accept`, `hangup`, `reginfo`, ...) that t48ctrl runs |
+| `t48keepalive` | ours: NAT keepalives while an account is registered ([NAT keepalives](#nat-keepalives)) |
 | `t48mwi` | ours: asks each account's server about waiting voicemail (RFC 3842) and passes the answer on as an event, for the message lamp. baresip's own `mwi` module is not built: it can spin for ever at start when an account registers before its start-up timer runs (seen against a server on the same machine), and it delays shutdown by half a second |
 | `opus`, `g711`, `libg722` | codecs: Opus, G.711 (PCMU, PCMA) and G.722 ([Codecs](#codecs)). Neither Opus nor G.722 is inside baresip: `opus` wraps [libopus](https://opus-codec.org) 1.6.1 (BSD-3-Clause), built fixed point; `libg722` wraps sippy's [libg722](https://github.com/sippy/libg722) (two C files, BSD-2-Clause and public domain) |
 | `auresamp` | converts the 16 kHz device audio to and from 8 kHz for G.711 |
@@ -28,7 +29,7 @@ libre is built without BFCP, PCP, RTMP, zlib and backtraces. It needs a crypto l
 
 | Binary (stripped) | Size |
 |---|---|
-| ARM, no TLS (the default) | 1,290,360 bytes |
+| ARM, no TLS (the default) | 1,291,720 bytes |
 | ARM, with TLS | about 3.77 MB (3,464,920 before Opus, which adds 307,392) |
 | x86-64, for the PC test | 1,456,312 bytes |
 
@@ -53,7 +54,7 @@ The phone's image builds the same thing with Buildroot (#16): packages `libre`, 
 
 ## Running it
 
-`t48-sip` is the program runit starts. It reads the owner's accounts from `/data/config/sip` (account 1) and `sip2` to `sip6` beside it (#36), leaves out any that are switched off or have no user or domain, writes baresip's accounts file into `/run/t48-sip` (mode 0700, as it holds the password) beside a copy of the config, and runs baresip there.
+`t48-sip` is the program runit starts. It reads the owner's accounts from `/data/config/sip` (account 1) and `sip2` to `sip6` beside it (#36), leaves out any that are switched off or have no user or server host, writes baresip's accounts file into `/run/t48-sip` (mode 0700, as it holds the password) beside a copy of the config, and runs baresip there.
 
 ```
 # /data/config/sip  (see sip/config/sip.example)
@@ -61,8 +62,23 @@ user=1001
 password=...
 domain=sip.example.com
 # optional: auth_user, display_name, transport (udp, tcp, tls), outbound_proxy, register_seconds,
-#           enabled (off), mwi (off); label and voicemail are for the shell
+#           enabled (off), mwi (off), keepalive (off); label and voicemail are for the shell
 ```
+
+`domain` is the server host, shown as Server host in Settings and on the web setup page; the key keeps its old name so existing files work. With no port the server is found by DNS SRV records for the account's transport, then the plain address on 5060 (5061 for TLS). With a port (`sip.example.com:5070`, `[2001:db8::1]:5070`) that host and port are used, without SRV. `outbound_proxy` (Outbound proxy) takes a host, `host:port` or a `sip:` URI, and is reached on the account's transport.
+
+### NAT keepalives
+
+Behind a home router, the router's UDP binding for the phone's SIP port lasts from 30 s to a few minutes without traffic. Registrations are about 9 minutes apart, so between them the server's INVITE would hit a closed binding and the call would be lost.
+
+While an account is registered, our module `t48keepalive` sends its server an OPTIONS request on the account's own transport and route (through the outbound proxy, if set): every **23 to 29 s over UDP**, every **96 to 120 s over TCP and TLS**. These are RFC 5626's intervals, spread the way libre spreads its own. Every SIP server answers OPTIONS (200, 401, 404 or 405); any answer will do.
+
+- **No answer at all** (32 s, the server unreachable or a TCP connection gone): the account registers again, once per run of failures.
+- **The server sees a new public address or port** (its `received` and `rport` on our Via): the router lost the binding and made a new one, so the account registers again and calls follow. The test below finds this within one interval of a router restart.
+
+libre's own keepalives are not used: it starts them only when the registrar does SIP outbound (RFC 5626), which most providers do not; over UDP they are STUN requests that most SIP servers ignore; and over TCP it closes the connection when the server does not answer the CRLF ping.
+
+On by default for every account. `keepalive=off` in an account's settings file turns them off, for a server that objects; it is not in Settings.
 
 When an account is changed in Settings, `t48-apply sip` kills baresip and starts `t48-sip` again a second later. `t48-sip` keeps its process number in the run directory and waits (up to five seconds) for an old baresip to let go of the SIP port before starting the new one.
 
@@ -170,6 +186,16 @@ Result on 2026-11-23, all passing (Opus rows 2026-11-25):
 | G.722 call with bob on `t48audio` and no audio service running | established and closed cleanly; alice heard silence, as she should |
 | G.722 call with **alice as the ARM binary under qemu-arm** | bob heard 440 Hz, alice heard 1000 Hz |
 | Opus call with alice as the ARM binary under qemu-arm | the same |
+
+`sip/test/nat-test.sh` (in the build container, about 4 minutes) puts alice behind a router's UDP NAT ([`nat.py`](../sip/test/nat.py)) that drops a binding after 40 s with nothing going out, and bob on TCP with no NAT. Both register for 600 s, so only keepalives cross the NAT between registrations. Result on 2026-11-25, all passing:
+
+| Check | Result |
+|---|---|
+| alice, UDP, over 130 s | OPTIONS 28, 24, 24 and 28 s apart; the binding stayed |
+| bob, TCP | one OPTIONS, about 100 s after registering |
+| bob calls alice after 130 s | alice rang |
+| The router restarts (every binding gone) | alice's next OPTIONS showed a new port, she registered again (26 s after the restart); bob's call rang |
+| alice with `keepalive=off` | the binding went after 40 s and bob's call did not reach her |
 
 `sip/test/audiod-test.sh` adds an Opus call through two audio services, and one with alice's side as the ARM binaries under qemu; both pass.
 

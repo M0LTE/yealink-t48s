@@ -41,10 +41,11 @@ MBEDTLS=mbedtls-3.6.8
 # ausine: file and tone audio for tests; stdio: a console for testing by
 # hand. Ours, from sip/modules: t48audio (the call's audio, to t48-audiod)
 # and t48ctrl (JSON control for the shell on a root-only Unix socket; it
-# replaces baresip's ctrl_tcp, which any local program could reach), and
-# t48mwi (message waiting, for the lamp; in place of baresip's mwi).
+# replaces baresip's ctrl_tcp, which any local program could reach),
+# t48mwi (message waiting, for the lamp; in place of baresip's mwi), and
+# t48keepalive (keeps NAT bindings open between registrations).
 MODULES="account;menu;opus;g711;libg722;auresamp;aufile;ausine;stdio"
-APP_MODULES="t48audio;t48ctrl;t48mwi"
+APP_MODULES="t48audio;t48ctrl;t48mwi;t48keepalive"
 
 LLVM_AR=$(command -v llvm-ar || command -v llvm-ar-21)
 LLVM_RANLIB=$(command -v llvm-ranlib || command -v llvm-ranlib-21)
