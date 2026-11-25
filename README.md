@@ -22,6 +22,7 @@ Every step, and what the screen messages mean: **[docs/guide.md](docs/guide.md)*
 
 - Apps for the phone: [M0LTE/yealink-t48s-apps](https://github.com/M0LTE/yealink-t48s-apps), written against the app SDK ([sdk/README.md](sdk/README.md)).
 - How it is built and how it works: [docs/developing.md](docs/developing.md).
+- Contributing, with or without an AI tool: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ![Waterfall of GB7RDG](docs/img/waterfall-gb7rdg.png)
 

@@ -168,6 +168,18 @@ On the phone, `t48-app list | install | update | remove` and an Apps screen do t
 
 The existing pages become apps: the waterfall ([apps#3](https://github.com/M0LTE/yealink-t48s-apps/issues/3), from [#13](https://github.com/M0LTE/yealink-t48s/issues/13)), the GB7RDG links screen ([apps#4](https://github.com/M0LTE/yealink-t48s-apps/issues/4)), and later the station picker and UberSDR client ([apps#5](https://github.com/M0LTE/yealink-t48s-apps/issues/5), from [#15](https://github.com/M0LTE/yealink-t48s/issues/15) and [#14](https://github.com/M0LTE/yealink-t48s/issues/14)). Once the waterfall runs as an app, its copy here is deleted, so the separation is real. (2026-11-23: done for the waterfall and the links screen, which are `apps/waterfall` and `apps/links` there.)
 
+### USB
+
+The socket on the back is a USB 2.0 host (EHCI, [installer.md](installer.md)). Working since 2026-11-24: sticks, for the installer and, read-only, for apps at `/run/media` ([app-protocol.md](app-protocol.md)). Anything plugged in needs the 5 V 1.5 A supply ([#58](https://github.com/M0LTE/yealink-t48s/issues/58)).
+
+Planned, not scheduled:
+
+- **Keyboards** ([#62](https://github.com/M0LTE/yealink-t48s/issues/62)): USB HID, with key presses passed to the app as text and key codes, UK and US layouts. For the terminal and packet radio apps.
+- **Hubs**, so a keyboard and a stick or a serial device can be in at once.
+- **USB serial for apps** ([#74](https://github.com/M0LTE/yealink-t48s/issues/74)): drivers for FTDI, CP210x, CH34x and CDC-ACM, and a way for an app to be given a port, likely a manifest permission as for audio. FTDI ports get `latency_timer` set to 1, which real-time audio over serial needs. For: a NinoTNC (packet radio), a KV4P HT (an SA818 radio with rig control and audio on one link), an MMDVM hotspot, radios running Radio Foundry firmware, and a DVStick for AMBE transcoding (DMR, Fusion).
+
+To settle first: our kernel has no OHCI, so a full-speed device, as most serial chips are, may need a hub with a transaction translator; and the 2.5 MB kernel slot has little room left, so the drivers may have to be modules on the system image.
+
 ## 4. Configuration, patchability and safety
 
 ### Never brick
@@ -289,4 +301,4 @@ Answered 2026-11-23:
 - **NAND writes and UBI** on this controller under 3.6 are unproven. Reading is done and the ECC layout is known and matches U-Boot's and Yealink's ([#5](https://github.com/M0LTE/yealink-t48s/issues/5), `docs/nand.md`), so U-Boot should read a kernel we write; how its loader treats a bad block in the kernel partition is still to check. Backups must include the spare bytes, or Yealink's partitions cannot be put back.
 - **Speakerphone echo cancelling in software** on this CPU, if there is no DSP. Half-duplex is the fallback.
 - **TFTP server address in the live image**: our kernel ignores what U-Boot passes, so the live image needs another way to find its settings file (DHCP, or reading U-Boot's environment). Part of [#7](https://github.com/M0LTE/yealink-t48s/issues/7).
-- **USB** is not planned: no driver in our kernel, and nothing above needs it.
+- **USB power.** The phone draws up to 0.9 A and a device adds its own, so owners need a 1.5 A supply ([#58](https://github.com/M0LTE/yealink-t48s/issues/58)). What USB does and what is planned: [USB](#usb).
