@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The key test (issue 10): every key's place in the matrix on the screen, for a
+# phone whose key table is in doubt. It opens and closes whatever the table says.
+wait 300
+expect idle
+# a short press of a key the table does not hold does nothing
+scandown 30 240
+wait 100
+scanup 30 240
+wait 300
+expect idle
+# held for 5 s from the idle screen it opens the test; its release is shown, and is the first key seen
+scandown 30 240
+wait 4000
+expect idle
+waitscreen keys 2000
+expectstate keys.seen 0
+scanup 30 240
+expectstate keys.last 30/240/up
+expectstate keys.seen 1
+shot shots/18-keytest-unmapped.png
+# a key the table holds: shown, and it does nothing else (1 would open the dialler)
+scandown 57 2 1
+expectstate keys.last 57/2/down
+scanup 57 2 1
+expectstate keys.last 57/2/up
+expect keys
+expectstate phone idle
+# phone keys too
+scandown 29 149 speaker
+scanup 29 149 speaker
+expectstate phone idle
+expectstate route none
+# a soft key, a line key, and a place that comes with no key event at all
+scandown 68 656 soft1
+scanup 68 656 soft1
+scandown 62 666
+scanup 62 666
+scandown 31
+expectstate keys.last 31/0/none
+# the same key again is not seen twice
+scandown 57 2 1
+expectstate keys.seen 6
+shot shots/18-keytest.png
+scanup 57 2 1
+# two seconds of holding is not enough to leave
+scandown 35 28 ok
+wait 2000
+expect keys
+scanup 35 28 ok
+wait 1500
+expect keys
+# three is, and the release that follows does nothing at the idle screen
+scandown 35 28 ok
+waitscreen idle 4000
+scanup 35 28 ok
+wait 200
+expect idle
+# a key that does something at the idle screen opens the test as well: OK shows Apps on the way
+scandown 35 28 ok
+expect launcher
+waitscreen keys 6000
+scanup 35 28 ok
+scandown 44 14 x
+waitscreen idle 4000
+scanup 44 14 x
+# and a digit, whose dialler goes away
+scandown 57 2 1
+expect call
+waitscreen keys 6000
+expectstate phone idle
+scanup 57 2 1
+# a phone key held at the idle screen does not open it: volume is held to change the level
+scandown 45 115 volup
+wait 5500
+expect idle
+scanup 45 115 volup
+# two keys the table does not hold, overlapping: the second has no key event of its own, its release ends
+# the first's, and the first's release then comes as a place alone. Nothing is held: the test does not open
+scandown 30 240
+scandown 31
+scanup 31 240
+scandown 30
+wait 5500
+expect idle
+# a call comes first: the handset takes the screen, and the test is over
+hook off
+expect call
+hook on
+waitscreen idle 4000
+# from Settings, About: the first row
+key down
+expect settings
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row About
+key ok
+expectstate settings.page about
+expectstate settings.row Key_test
+# the release of the OK that opens it is not the test's first key
+scandown 35 28 ok
+expect keys
+scanup 35 28 ok
+expectstate keys.seen 0
+expectstate keys.last -
+scandown 1 240
+scanup 1 240
+expectstate keys.seen 1
+scandown 44 14 x
+waitscreen idle 4000
+scanup 44 14 x
+expect idle
+quit

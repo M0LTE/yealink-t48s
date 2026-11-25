@@ -54,6 +54,10 @@ What to report, on issue 10
   square, top right a red one. Blue instead of red: say so.
 - Which keys work: digits, arrows, OK, X, the four soft keys under
   the screen, volume, handset on and off the hook.
+- If a key does the wrong thing or nothing: hold X for 5 seconds
+  at the clock. A key test opens. Press every key and
+  photograph the screen after each. Hold any key for 3 seconds to
+  leave.
 - Settings, Screen: does the brightness change?
 - The exact text of any message, and where it stopped.
 

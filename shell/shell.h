@@ -68,6 +68,10 @@ extern struct options opt;
 extern long long shell_input_us;
 void shell_flipped(int n, unsigned frame, long long time_us);   /* flip_show(n) is on the screen */
 void shell_key(int code, int down);
+/* A key as the keypad sent it: its place in the matrix (the driver's MSC_SCAN, row * 8 + column + 1; 0 if
+ * not known), the Linux key code, the shell's code for that (0: none) and 1 down, 0 up, or -1 for a place
+ * that came with no key event. It goes on to shell_key() unless the key test has the screen. */
+void shell_scan(int scan, int key, int code, int value);
 void shell_touch(int state, int x, int y);
 void shell_hook(int off_hook);
 
@@ -184,6 +188,19 @@ int phone_dnd(void);
 int phone_messages(void);                    /* new voice messages waiting, over all accounts */
 int phone_accounts(void);                    /* how many accounts are switched on */
 int phone_account_line(int k, char *out, size_t n, uint32_t *colour, int *is_default);
+
+/* ---------- the key test (keytest.c): every key's place in the matrix, on the screen ---------- */
+
+#define KEYTEST_OPEN_MS 5000    /* a key held this long from the idle screen opens it (not a phone key: SK_VOLDOWN and up) */
+#define KEYTEST_LEAVE_MS 3000   /* and any key held this long leaves it */
+void keytest_open(void);
+void keytest_event(int scan, int key, int value);
+void keytest_draw(void);
+int keytest_timeout(long long now);
+int keytest_tick(long long now, int *scan, int *key);   /* 1: time to leave, and the key that is still held */
+const char *keytest_state(const char *key);
+void shell_show_keytest(void);               /* from Settings, About */
+int phone_stand_down(void);                  /* a dialler goes away, whatever is typed in it, if the handset is down; 1 if the phone is idle */
 
 /* ---------- contacts (contacts.c): a list of names and numbers ---------- */
 

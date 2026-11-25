@@ -60,6 +60,7 @@ static int flip_fd = -1, flip_showing = -1;
 static const char *flip_dev = "/dev/t48flip";
 static struct flip_info flip;
 static int timed;   /* the input devices stamp events with CLOCK_MONOTONIC */
+static int scan;    /* the keypad's MSC_SCAN that came last, 0 once its key event has: the key's place in the matrix */
 
 static int key_code(int code)
 {
@@ -316,14 +317,18 @@ static void fb_handle(const struct pollfd *p, int n)
             shell_input_us = timed ? (long long)ev.sec * 1000000 + (long long)ev.usec : t48_now_us();
             if (p[i].fd == dev[DEV_TOUCH]) {
                 touch_event(&ev);
+            } else if (p[i].fd == dev[DEV_HOOK]) {
+                if (ev.type == EV_KEY && ev.code == KEY_PHONE && ev.value != 2) shell_hook(ev.value);
+            } else if (ev.type == EV_MSC && ev.code == MSC_SCAN) {
+                if (scan) shell_scan(scan, 0, 0, -1);
+                scan = ev.value;
             } else if (ev.type == EV_KEY && ev.value != 2) {  /* 2 is auto-repeat */
-                if (p[i].fd == dev[DEV_HOOK]) {
-                    if (ev.code == KEY_PHONE) shell_hook(ev.value);
-                } else {
-                    int code = key_code(ev.code);
-                    if (code) shell_key(code, ev.value);
-                    else logmsg("key code %d has no meaning yet", ev.code);
-                }
+                shell_scan(scan, ev.code, key_code(ev.code), ev.value);
+                scan = 0;
+            } else if (ev.type == EV_SYN && scan) {
+                /* a place with no key event: a kernel that sends none for what its table does not hold */
+                shell_scan(scan, 0, 0, -1);
+                scan = 0;
             }
         }
     }

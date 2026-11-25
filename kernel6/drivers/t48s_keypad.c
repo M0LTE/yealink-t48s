@@ -29,6 +29,11 @@
  * "yealink,t4xs-keypad" may hold "yealink,keymap", pairs of <Yealink code,
  * Linux key code>, which then replaces the T48S table below entirely.
  *
+ * A position that is not in the table is sent as KEY_UNKNOWN, so that a
+ * program reading MSC_SCAN sees every key there is: the shell's key test
+ * (shell/keytest.c) shows row, column and code on the screen, which is how a
+ * table is checked on a phone with no console.
+ *
  * To check a key by hand:
  *   echo 1 > /sys/module/t48s_keypad/parameters/debug
  * then every press and release is logged with its row, column and codes.
@@ -199,8 +204,7 @@ static void t48s_keypad_poll(struct timer_list *unused)
 				pr_info(DRV_NAME ": row %d col %d code %d %s -> key %d\n",
 					r, c, code, down ? "down" : "up", key);
 			input_event(keys_dev, EV_MSC, MSC_SCAN, code);
-			if (key != KEY_RESERVED)
-				input_report_key(keys_dev, key, down);
+			input_report_key(keys_dev, key != KEY_RESERVED ? key : KEY_UNKNOWN, down);
 			sync = true;
 		}
 		last_col[c] = col[c];
@@ -385,6 +389,7 @@ static int __init t48s_keypad_init(void)
 	for (i = 0; i < NCODES; i++)
 		if (t48s_keymap[i] != KEY_RESERVED)
 			__set_bit(t48s_keymap[i], keys_dev->keybit);
+	__set_bit(KEY_UNKNOWN, keys_dev->keybit);	/* a position not in the table */
 
 	/* its own device: a lifted handset must not auto-repeat */
 	hook_dev->name = "T48S hook switch";
