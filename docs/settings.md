@@ -15,6 +15,7 @@ Press **Down** on the idle screen, or touch **Settings**. Everything here can al
 | Page | What it sets | Takes effect |
 |---|---|---|
 | Accounts | up to six accounts ([phone.md](phone.md#several-accounts)), and which is the default for calls. For each: User, Password, Domain, Proxy, Auth user, Display name, Transport, Label (a short name for this phone's screens), Voicemail, Enabled, and Remove account | on leaving an account's page: baresip is restarted if it is running. The usual account changes at once |
+| Do not disturb | on or off, the same as Right on the idle screen ([phone.md](phone.md#do-not-disturb)) | at once |
 | Network | DHCP, or a fixed address, netmask, gateway and DNS server | on leaving the page. If the address is a different one, baresip is started again, as it listens on the address it started with |
 | Date and time | time zone, from a list | at once, in the shell and in apps started afterwards |
 | Sound | ringer, handset, speakerphone and headset levels, 0 to 15 | at once, through the audio service. Nothing is played. The volume keys change the same levels |

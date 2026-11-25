@@ -126,13 +126,27 @@ key ok
 expectstate contacts 2
 key x
 expect idle
-# ---- do not disturb: Right on the idle screen, or its button; it is remembered ----
+# ---- do not disturb: Right on the idle screen, or Settings; a tag in the header; it is remembered ----
 expectstate dnd off
 key right
 expectstate dnd on
 expectstate cfg.phone.dnd on
 shot shots/idle-dnd.png
-touch 554 420
+touch 700 420
+expectstate settings.page root
+key down
+expectstate settings.row Do_not_disturb
+expectstate settings.value on
+shot shots/settings-dnd.png
+key ok
+expectstate dnd off
+expectstate cfg.phone.dnd off
+expectstate settings.value off
+key ok
+expectstate dnd on
+key x
+expect idle
+key right
 expectstate dnd off
 expectstate cfg.phone.dnd off
 # the message lamp is off with nothing to say

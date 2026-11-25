@@ -155,6 +155,7 @@ expectstate settings.value 1001@sip.lan
 
 # ---- network ----
 key down
+key down
 key ok
 expectstate settings.page network
 expectstate settings.value dhcp
@@ -314,6 +315,7 @@ key x
 waitscreen launcher 2000
 key x
 # and back to its own default
+key down
 key down
 key down
 key down

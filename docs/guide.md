@@ -70,7 +70,7 @@ If the power fails during Install: start from the stick again and choose Install
 - **Accounts.** Settings, Accounts: up to six SIP accounts. User, Password and Domain are enough for most. Calls go out from the default account; Left and Right in the dialler pick another. [phone.md](phone.md).
 - **Calls.** Lift the handset or press Speaker. Hold, mute, transfer, a second call, voicemail on the Message key. On Speaker one side is heard at a time. The headset socket is untried.
 - **Contacts and calls.** Left for contacts, Up for the call list. A name shows wherever its number does.
-- **Do not disturb.** Right on the idle screen. Callers are told the phone is not available, nothing rings, and each call is listed as missed.
+- **Do not disturb.** Right on the idle screen, or Settings, Do not disturb. DND shows in the header, after the network address. Callers are told the phone is not available, nothing rings, and each call is listed as missed.
 - **Web setup.** Typing a password on the phone is slow. Settings, Access, Web setup turns on a page for a browser on the same network; the phone shows a code to pair it. Accounts, contacts, sound, keys, a settings backup. [web.md](web.md).
 - **Apps.** Settings, Apps lists what the feed offers. Install, update, remove. [apps.md](apps.md); to write one, [sdk/README.md](../sdk/README.md).
 - **Themes.** Settings, Screen, Theme. Three: [design](design/README.md).

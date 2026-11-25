@@ -10,7 +10,7 @@ A small screen (the T46S's 480x272) has the same three, with the same type and l
 
 ![a small screen](../img/t46s/home.png) ![Directory](../img/t46s/theme-directory.png) ![Two-tone](../img/t46s/home-twotone.png)
 
-What all three share: an 8 pixel grid with 24 pixel margins, a 48 pixel header (the screen's name, the time, a way back), actions in one row along the bottom, a type scale of 15, 19, 26, 40 and 104 pixels, and no icon font: the few marks (back, rub out, plus, the scroll arrows, lamps) are drawn from fills. Flat drawing only, as the phone has no GPU.
+What all three share: an 8 pixel grid with 24 pixel margins, a 48 pixel header (the screen's name, the time, a way back), actions in one row along the bottom, a type scale of 15, 19, 26, 40 and 104 pixels, and no icon font: the few marks (back, rub out, plus, the scroll arrows, lamps) are drawn from fills. Flat drawing only, as the phone has no GPU. A state is a lamp and a word with no box round it, as the header's network and account are: DND, and a call's Speaker, Muted and On hold (`t48_ui_tag`). A box is something to press.
 
 ## Switchboard
 

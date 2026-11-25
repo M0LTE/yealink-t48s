@@ -13,6 +13,7 @@ key down
 key down
 key down
 key down
+key down
 expectstate settings.row Update
 
 # ---- nothing checked: opening the page asks the channel nothing ----

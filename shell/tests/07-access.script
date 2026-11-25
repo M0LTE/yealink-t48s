@@ -15,6 +15,7 @@ key down
 key down
 key down
 key down
+key down
 expectstate settings.row Access
 key ok
 expectstate settings.page access

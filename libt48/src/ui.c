@@ -206,24 +206,21 @@ void t48_ui_row(t48_surface *s, int x, int y, int w, int h, int selected, t48_ui
 }
 
 /* a short word in a box: where the sound is, what is switched off. Returns the x after it. */
+/* A state, not something to press: a lamp in the role's colour and the word, with no box
+ * round it, as the header shows the network and the account. Plain is a quiet lamp. */
 int t48_ui_tag(t48_surface *s, int x, int y, const char *text, int role)
 {
-    uint32_t fill, ink;
-    int w = t48_ui_tag_width(text);
-    if (role == T48_UI_PLAIN || role == T48_UI_OFF) {
-        fill = T->edge == T48_EDGE_LIP ? t48_mix(ground, 0x000000, 60) : T->panel;
-        ink = role == T48_UI_OFF ? T->dim : T->text;
-        if (T->edge == T48_EDGE_OUTLINE) { t48_round_fill(s, x, y, w, TAG_H, TAG_H / 2, T->edge_colour); t48_round_fill(s, x + 1, y + 1, w - 2, TAG_H - 2, TAG_H / 2 - 1, fill); }
-        else t48_round_fill(s, x, y, w, TAG_H, T->radius < 6 ? T->radius : TAG_H / 2, fill);
-    } else {
-        role_colours(role, &fill, &ink);
-        t48_round_fill(s, x, y, w, TAG_H, T->radius < 6 ? T->radius : TAG_H / 2, fill);
-    }
-    t48_text(s, x + (small ? 10 : 14), y + (TAG_H - t48_font_bold.height) / 2, &t48_font_bold, ink, text);
-    return x + w + 8;
+    uint32_t lamp, ink;
+    role_colours(role, &lamp, &ink);
+    ink = role == T48_UI_OFF ? T->dim : T->text;
+    if (role == T48_UI_PLAIN) lamp = T->dim;
+    else if (role == T48_UI_OFF) lamp = T->faint;
+    t48_ui_lamp(s, x, y + TAG_H / 2 - 6, lamp);
+    t48_text(s, x + 20, y + (TAG_H - t48_font_bold.height) / 2, &t48_font_bold, ink, text);
+    return x + t48_ui_tag_width(text) + (small ? 14 : 20);
 }
 
-int t48_ui_tag_width(const char *text) { return t48_text_width(&t48_font_bold, text) + (small ? 20 : 28); }
+int t48_ui_tag_width(const char *text) { return 20 + t48_text_width(&t48_font_bold, text); }
 
 /* an On/Off switch, its right edge at rx */
 void t48_ui_switch(t48_surface *s, int rx, int y, int h, int on, int selected)

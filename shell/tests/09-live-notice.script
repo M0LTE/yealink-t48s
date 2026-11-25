@@ -12,10 +12,10 @@ wait 1500
 expectstate notice Running_from_USB._Nothing_is_installed.
 expectstate notices 1
 shot shots/live-notice.png
-# it shares the row with the phone's own notices
+# do not disturb takes the header, not the row
 key right
 expectstate dnd on
-expectstate notices 2
+expectstate notices 1
 shot shots/live-notice-dnd.png
 key right
 expectstate dnd off

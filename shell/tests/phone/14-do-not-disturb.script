@@ -24,8 +24,8 @@ waitstate phone outgoing 2000
 run $FAR $CAROL waitcall incoming 5
 key x
 waitstate phone idle 5000
-# off again, by touch: the next call rings
-touch 554 420
+# off again, by Right: the next call rings
+key right
 expectstate dnd off
 run $FAR $BOB cmd dial 1001
 waitstate phone incoming 5000
