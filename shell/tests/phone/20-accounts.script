@@ -224,6 +224,7 @@ key down
 key down
 key down
 key down
+key down
 expectstate settings.row Remove_account
 key ok
 expectstate overlay confirm
