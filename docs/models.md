@@ -2,7 +2,7 @@
 
 Issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10). The T48S is the only phone this firmware has run on. This page is what we know of its sibling the SIP-T46S, how the firmware was made to tell the two apart, and how an owner can try it on a T46S without writing anything to the phone.
 
-**Where this stands (2026-11-25): try-only, and untried.** Nobody here has a T46S. Everything below was worked out from Yealink's and U-Boot's code, which is shared between the models and branches on a hardware id, and from Yealink's datasheet. A T46S live set is built with every build of `main` and passes the same file checks as the T48S one: download `t46s-live.zip` from the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release. **It has never been started on a T46S.** The first start is the test plan at the end. The installer and the release's `t48s-stick.zip` are for the T48S only.
+**Where this stands (2026-11-25): try-only; it starts.** Nobody here has a T46S; a tester started the live set on one on 25 November: U-Boot took it from a USB stick, the picture came up the right way round in the right colours, and DHCP worked. Keys, sound and the rest are still to be tried. Everything below was worked out from Yealink's and U-Boot's code, which is shared between the models and branches on a hardware id, and from Yealink's datasheet. A T46S live set is built with every build of `main` and passes the same file checks as the T48S one: download `t46s-live.zip` from the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release. The test plan is at the end. The installer and the release's `t48s-stick.zip` are for the T48S only.
 
 ## What the T46S is
 
