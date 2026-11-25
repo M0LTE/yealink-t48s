@@ -55,11 +55,11 @@ key speaker
 waitscreen app 3000
 # back in front, nothing is the app's until it asks again
 expectstate lamp.speaker off
-key 5
-waitstate lamp.speaker 255 1500
+key 2
+waitstate lamp.mute 40 1500
 # back to the phone when the app says so
 key 0
-waitstate lamp.speaker off
+waitstate lamp.mute off
 waitstate lamp.headset off
 # Home
 key 1
