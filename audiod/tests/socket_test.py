@@ -218,7 +218,7 @@ def app_tests():
     a.tell(2, with_ring=True)
     time.sleep(0.1)
     st = d.ctl()
-    check("app=front" in st and "idle" in st, "the ring is taken; nothing written yet, so no clock runs")
+    check("app=front" in st and "running" in st, "the ring is taken: the hardware runs while the app is in front, ready for its first sound")
     check(a.field(1) == 1, "the app is told its sound will be played")
     t0, rd0 = time.monotonic(), a.field(0)
     a.play(500, 32767, 1.5)

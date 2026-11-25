@@ -46,8 +46,8 @@
 
 #define MAX_CTL      4
 #define LINGER_TICKS 5	/* run on 100 ms after the last sound, so it is played out */
-/* After an app's sound the hardware is kept for 2 s: a game's next beep then
- * starts at once and the amplifier is not switched for each one */
+/* While an app with sound is in front the hardware stays running, so a
+ * game's next beep starts at once. After it leaves, 2 s more. */
 #define APP_LINGER_TICKS 100
 #define APP_HEARD_TICKS  25	/* STATE says an app is sounding for this long after */
 
@@ -426,7 +426,8 @@ static void ctl_publish(void)
 
 static int wanted(void)
 {
-	return eng.route || call.fd >= 0 || engine_sounding(&eng) || appsnd_waiting(&app) > 0;
+	return eng.route || call.fd >= 0 || engine_sounding(&eng) || appsnd_waiting(&app) > 0 ||
+	       (app.ring && app.front);
 }
 
 /* Open, switch or close the hardware to match what is wanted */
