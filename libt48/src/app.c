@@ -264,14 +264,20 @@ static void flipped_msg(const unsigned char *p, t48_event *ev)
     ev->time_us = (long long)f.time_us;
 }
 
+/* Events set aside by t48_flip_wait() when rx filled up before the shell's
+ * answer came: reported by t48_poll, oldest first. If even this fills, the
+ * oldest go. */
+#define NQUEUE 256
+static t48_event queue[NQUEUE];
+static unsigned queue_at, queue_n;
+
 /* turn the next message in rx into an event: 1 if there was one worth reporting */
-static int next_event(t48_event *ev)
+static int rx_event(t48_event *ev)
 {
     unsigned char p[512];
     size_t len;
     int type;
 
-    if (flip_ev_waiting) { *ev = flip_ev; flip_ev_waiting = 0; return 1; }
     while (take(&type, p, sizeof p, &len)) {
         memset(ev, 0, sizeof *ev);
         if (type == T48_MSG_KEY && len >= sizeof(struct t48_msg_key)) {
@@ -304,6 +310,13 @@ static int next_event(t48_event *ev)
         /* anything else: from a newer shell, skip it */
     }
     return 0;
+}
+
+static int next_event(t48_event *ev)
+{
+    if (flip_ev_waiting) { *ev = flip_ev; flip_ev_waiting = 0; return 1; }
+    if (queue_n) { *ev = queue[queue_at]; queue_at = (queue_at + 1) % NQUEUE; queue_n--; return 1; }
+    return rx_event(ev);
 }
 
 int t48_poll(t48_event *ev, int timeout_ms)
@@ -412,14 +425,24 @@ void t48_flip_wait(void)
             at += sizeof h + h.len;
         }
         if (found) continue;
-        if (rx_n == sizeof rx) { closed = 1; return; }   /* the shell has sent 4 KB of events and no answer */
+        if (rx_n == sizeof rx) {
+            /* full of keys and touches and still no answer: set them aside to make room */
+            t48_event ev;
+            while (rx_event(&ev)) {
+                if (queue_n == NQUEUE) { queue_at = (queue_at + 1) % NQUEUE; queue_n--; }
+                queue[(queue_at + queue_n++) % NQUEUE] = ev;
+            }
+            if (rx_n == sizeof rx) { closed = 1; return; }   /* not messages at all */
+            continue;
+        }
         fill_rx();
     }
 }
 
 t48_surface *t48_flip(void)
 {
-    if (!flip_on) return t48_flip_start();
+    if (!flip_s[0].px) return t48_flip_start();   /* never started: nothing has been drawn to show */
+    flip_on = 1;   /* after a t48_damage() too: the picture drawn in the buffer is shown all the same */
     if (flip_pending >= 0) t48_flip_wait();   /* one at a time: this is what keeps time with the screen */
     struct t48_msg_flip f = {(uint16_t)flip_draw, 0};
     send_msg(T48_MSG_FLIP, &f, sizeof f);

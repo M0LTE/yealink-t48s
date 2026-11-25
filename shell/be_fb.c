@@ -57,6 +57,7 @@ static long cal[7] = {14798, 13, -4134128, 53, 10207, -5441552, 65536};  /* fact
 static int raw_x, raw_y, touching, was_touching, last_x, last_y;
 /* the flip device, what it offers, and what the screen is showing: a flip buffer, or -1 for the frame we draw in */
 static int flip_fd = -1, flip_showing = -1;
+static const char *flip_dev = "/dev/t48flip";
 static struct flip_info flip;
 static int timed;   /* the input devices stamp events with CLOCK_MONOTONIC */
 
@@ -145,7 +146,8 @@ static int fb_init(void)
      * to another screen: an app's buffer could not be shown as it is. T48_FLIP_DEV
      * names another device, or none ("") to try the copying path on the phone. */
     const char *fdev = getenv("T48_FLIP_DEV");
-    if (!scaled && (flip_fd = open(fdev ? fdev : "/dev/t48flip", O_RDWR | O_NONBLOCK | O_CLOEXEC)) >= 0) {
+    if (fdev) flip_dev = fdev;
+    if (!scaled && (flip_fd = open(flip_dev, O_RDWR | O_NONBLOCK | O_CLOEXEC)) >= 0) {
         int32_t home = -1;
         if (ioctl(flip_fd, T48FLIP_INFO, &flip) < 0 || flip.width != SW || flip.height != SH || flip.stride != SW * 4 || flip.count < 2) {
             close(flip_fd);
@@ -253,10 +255,12 @@ static int fb_fds(struct pollfd *p, int max)
     return n;
 }
 
+/* The app gets an open of its own. Ours it must never hold: flags such as
+ * O_NONBLOCK belong to the open, and an app that cleared them on a shared one
+ * would have the shell wait in read() for ever. */
 static int fb_flip_info(int *fd, int *count, size_t *size, unsigned *period_us)
 {
-    if (flip_fd < 0) return -1;
-    *fd = flip_fd;
+    if (flip_fd < 0 || (*fd = open(flip_dev, O_RDWR | O_CLOEXEC)) < 0) return -1;
     *count = (int)flip.count;
     *size = flip.size;
     *period_us = flip.period_ns / 1000;
@@ -302,9 +306,10 @@ static void fb_handle(const struct pollfd *p, int n)
         struct kev ev;
         if (!(p[i].revents & POLLIN)) continue;
         if (p[i].fd == flip_fd) {
+            /* one read for one POLLIN: the driver keeps only the latest, and this must never wait */
             struct flip_event fe;
-            while (read(flip_fd, &fe, sizeof fe) == sizeof fe)
-                if (fe.buffer >= 0) shell_flipped(fe.buffer, fe.frame, (long long)(fe.time_ns / 1000));
+            if (read(flip_fd, &fe, sizeof fe) == sizeof fe && fe.buffer >= 0)
+                shell_flipped(fe.buffer, fe.frame, (long long)(fe.time_ns / 1000));
             continue;
         }
         while (read(p[i].fd, &ev, sizeof ev) == sizeof ev) {

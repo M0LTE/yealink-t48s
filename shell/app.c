@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +42,7 @@ static struct {
     ino_t dir_ino;
     long long deadline;       /* for STARTING, PAUSING and QUITTING */
     const char *kill_reason;  /* set when the shell kills it for misbehaving */
+    int flip_late;            /* the screen has failed to report a flip, and the log says so */
     int api;                  /* the level it answered READY with */
     uint32_t *flip_map;       /* the flip buffers, where the shell copies them; NULL: the screen shows them itself */
     int flip_count;
@@ -220,7 +222,7 @@ int app_launch(const struct manifest *m)
      * memory until an app draws in it */
     const struct backend *be = shell_backend();
     if (be->flip_info && be->flip_info(&flip_fd, &flip_count, &flip_size, &flip_period) == 0) {
-        be->flip_clear();   /* the last app's pictures */
+        be->flip_clear();   /* the last app's pictures, and anything of its that is still running loses the buffers */
     } else if ((flip_fd = make_file("flip", COPY_BUFFERS * (size_t)BUF_BYTES)) >= 0) {
         flip_map = mmap(NULL, COPY_BUFFERS * (size_t)BUF_BYTES, PROT_READ, MAP_SHARED, flip_fd, 0);
         if (flip_map == MAP_FAILED) { close(flip_fd); flip_fd = -1; flip_map = NULL; }
@@ -234,6 +236,9 @@ int app_launch(const struct manifest *m)
     snprintf(data, sizeof data, "%s/%s", opt.data, m->id);
     mkdir(data, 0700);
     if (geteuid() == 0 && chown(data, uid, uid) < 0) logmsg("chown %s: %s", data, strerror(errno));
+    /* the app is started in its own folder, so the name it is given must not depend on ours (the simulator's is relative) */
+    char full[PATH_MAX];
+    if (data[0] != '/' && realpath(data, full) && strlen(full) < sizeof data) strcpy(data, full);
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -241,7 +246,8 @@ int app_launch(const struct manifest *m)
         munmap(buf, BUF_BYTES);
         close(buf_fd); close(sv[0]); close(sv[1]);
         if (fonts_fd >= 0) close(fonts_fd);
-        if (flip_ours) { munmap(flip_map, COPY_BUFFERS * (size_t)BUF_BYTES); close(flip_fd); }
+        if (flip_ours) munmap(flip_map, COPY_BUFFERS * (size_t)BUF_BYTES);
+        if (flip_fd >= 0) close(flip_fd);
         return -1;
     }
     if (pid == 0) {
@@ -276,7 +282,7 @@ int app_launch(const struct manifest *m)
     close(sv[1]);
     close(buf_fd);
     if (fonts_fd >= 0) close(fonts_fd);   /* the app's copy keeps the file for as long as the app lives */
-    if (flip_ours) close(flip_fd);
+    if (flip_fd >= 0) close(flip_fd);   /* the app's own now */
 
     memset(&app, 0, sizeof app);
     app.flip_map = flip_map;
@@ -469,7 +475,7 @@ void app_tick(long long now)
             app.flip_frame = (unsigned)(app.flip_due / app.flip_period);
             send_flipped(n, app.flip_frame, app.flip_due);
         } else {
-            logmsg("app %s: the screen did not say that a flip was shown", app.id);
+            if (!app.flip_late++) logmsg("app %s: the screen did not say that a flip was shown", app.id);
             send_flipped(n, app.flip_frame, t48_now_us());
         }
     }

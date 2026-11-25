@@ -32,8 +32,9 @@ struct backend {
     void (*tick)(long long now);
     void (*fini)(void);
     /* A screen that can show an app's flip buffers itself, with no copy (NULL: it
-     * cannot). flip_info: 0 and the descriptor to hand the app, how many buffers,
-     * the bytes from one to the next and the refresh period; -1: not this screen.
+     * cannot). flip_info: 0 and a descriptor opened for this one app (the caller
+     * closes it), how many buffers, the bytes from one to the next and the refresh
+     * period; -1: not this screen.
      * flip_show: buffer n at the next refresh, then shell_flipped(); -1: the
      * shell's own picture again. flip_clear: all buffers to black. */
     int (*flip_info)(int *fd, int *count, size_t *size, unsigned *period_us);

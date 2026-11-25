@@ -17,7 +17,9 @@
  *             controller takes a new address (LCDUPBASE) at the start of the
  *             next frame and raises "next base update" (LNBU) when it has,
  *             so nothing changes part way down the screen.
- *   T48FLIP_CLEAR  all buffers to black.
+ *   T48FLIP_CLEAR  all buffers to black, and every mapping of them taken
+ *             away: whatever a program before left running can no longer
+ *             draw in them. Map after this, not before.
  *   read, poll     one struct t48flip_event for each T48FLIP_SHOW that has
  *             reached the screen: which buffer, the frame count and the time.
  *             A SHOW made before the last one arrived replaces it.
@@ -293,6 +295,9 @@ static long flip_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case T48FLIP_CLEAR:
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
+		/* whoever had the buffers before loses them (the node's one inode
+		 * holds every open's mappings) */
+		unmap_mapping_range(file->f_mapping, 0, 0, 1);
 		/* nothing older may be written over this later, or read back from the cache */
 		flush_cache_all();
 		memset(mem_wc, 0, (size_t)info.count * info.size);

@@ -36,6 +36,7 @@ int main(void)
     uint32_t *px = NULL;
 
     sock = atoi(getenv(T48_ENV_SOCKET));
+    if (getenv(T48_ENV_APP_DATA)[0] != '/') return 4;   /* we are started in our own folder: a relative name would point nowhere */
     while (get(&h, sizeof h) == 0) {
         if (h.len > sizeof p || get(p, h.len) < 0) return 1;
         if (h.type == T48_MSG_HELLO) {
@@ -47,9 +48,10 @@ int main(void)
             if (h.type == T48_MSG_START) { struct t48_msg_ready r = {2}; put(T48_MSG_READY, &r, sizeof r); }
             if (h.type == T48_MSG_KEY && h.len != sizeof(struct t48_msg_key)) return 3;
             if (h.type == T48_MSG_TOUCH && h.len != sizeof(struct t48_msg_touch)) return 3;
-            if (h.type == T48_MSG_KEY && p[0] == '5') c = 0x00ff00;
-            if (h.type == T48_MSG_KEY && p[0] != '5' && p[0] >= 0x10) continue;   /* any other key: nothing; soft keys must not come */
-            if (h.type == T48_MSG_KEY && (p[0] | p[1] << 8) >= T48_KEY_SOFT1) return 3;
+            int code = p[0] | p[1] << 8;
+            if (h.type == T48_MSG_KEY && code >= T48_KEY_SOFT1) return 3;   /* level 2 has no soft keys */
+            if (h.type == T48_MSG_KEY && code != '5') continue;            /* any other key: nothing */
+            if (h.type == T48_MSG_KEY) c = 0x00ff00;
             if (h.type == T48_MSG_TOUCH) c = 0x0000ff;
             for (unsigned i = 0; i < hello.size / 4; i++) px[i] = c;
             struct t48_msg_rect r = {0, 0, hello.width, hello.height};

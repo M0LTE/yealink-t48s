@@ -300,7 +300,8 @@ long long t48_now_us(void);   /* the same clock in microseconds: the one events 
 t48_surface *t48_flip_start(void);    /* the first buffer to draw into; NULL: this shell cannot flip */
 t48_surface *t48_flip(void);          /* show what was drawn; the buffer to draw next */
 void t48_flip_wait(void);             /* until the last t48_flip() is on the screen */
-/* Back to t48_screen() and t48_damage(): the next t48_damage() takes the screen. */
+/* Back to t48_screen() and t48_damage(): the next t48_damage() takes the screen,
+ * and the next t48_flip() takes it back. */
 void t48_flip_stop(void);
 int t48_flip_period_us(void);         /* one refresh of the screen, in microseconds (14746 on the T48S); 0: cannot flip */
 
