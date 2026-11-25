@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# A small screen with no touch (the T46S: 480x272, four soft keys): the home screen, the
+# launcher, an app, the key test. Every button is a soft key's label, and the key does it.
+wait 2500
+expect idle
+expectstate layout small
+expectstate soft1 Apps
+expectstate soft2 Calls
+expectstate soft3 Contacts
+expectstate soft4 Settings
+shot shots/t46s-home.png
+# each soft key does what its label says
+key soft2
+expect history
+expectstate soft4 Back
+shot shots/t46s-calls-empty.png
+key soft4
+expect idle
+key soft3
+expect contacts
+shot shots/t46s-contacts-empty.png
+key x
+key soft4
+expect settings
+key x
+expect idle
+# do not disturb stays on Right, and shows as a notice
+key right
+expectstate dnd on
+expectstate notices 1
+shot shots/t46s-home-dnd.png
+# the notice of a start from a USB stick: both its lines clear of the soft keys
+run sh -c "printf 'Running from USB. Nothing is installed.\nTo go back to Yealink: unplug the power, take the stick out, plug the power in.\n' > simdata/notice"
+wait 1500
+expectstate notices 2
+shot shots/t46s-home-notice.png
+key right
+expectstate dnd off
+# the longest first line t48-live writes is kept whole
+run sh -c "printf 'Started over the network. Nothing is installed.\nCareful: Yealink settings will be reset at its next start. See the guide.\n' > simdata/notice"
+wait 1500
+expectstate notices 1
+expectstate notice Started_over_the_network._Nothing_is_installed.
+shot shots/t46s-home-notice-long.png
+run rm simdata/notice
+wait 1500
+# the launcher
+key soft1
+expect launcher
+expectstate soft1 Open
+shot shots/t46s-launcher.png
+key right
+key right
+expectstate soft1 Get_apps
+key left
+key left
+# an app that knows nothing of small screens draws 800x480, and the shell fits it
+key soft1
+waitscreen app
+waitframe 3000
+expectstate appsize 800x480
+wait 300
+shot shots/t46s-app-fitted.png
+# Home
+key x 1000
+expect launcher
+shot shots/t46s-launcher-open.png
+key soft4
+expect idle
+# an app that dies: the message, and OK on soft key 4
+key ok
+key right
+key ok
+waitframe 3000
+key 1
+waitscreen message 4000
+expectstate soft4 OK
+shot shots/t46s-app-stopped.png
+key soft4
+expect launcher
+key x
+# the key test, from a key held at the home screen
+scandown 68 656 soft1
+wait 5200
+waitscreen keys 2000
+scanup 68 656 soft1
+scandown 62 666
+scanup 62 666
+scandown 30 240
+scanup 30 240
+scandown 57 2 1
+shot shots/t46s-keytest.png
+scanup 57 2 1
+scandown 44 14 x
+wait 3200
+waitscreen idle 2000
+scanup 44 14 x
+expect idle

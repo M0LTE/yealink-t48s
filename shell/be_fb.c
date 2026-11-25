@@ -3,11 +3,12 @@
  * touchscreen input devices of our kernel (kernel/README.md), all grabbed so
  * nothing else sees them.
  *
- * The shell draws one picture of SW x SH pixels, 32 bits each. On the T48S that
- * is the screen, and rows are copied to it as they are. A phone with another
- * screen (the T46S: 480x272, 16 bits, mounted upside down) gets the same
- * picture made smaller, each screen pixel the average of the picture's pixels
- * under it, turned if the device tree says so. See docs/models.md. */
+ * The shell draws one picture the size of the screen, 32 bits a pixel. On the
+ * T48S rows are copied to the screen as they are. A phone with another screen
+ * (the T46S: 480x272, 16 bits, mounted upside down) is drawn for at its own
+ * size, and each row is packed to 16 bits and turned on the way (fit.c). An
+ * app that asks for the T48S's 800x480 there has its picture fitted. See
+ * docs/models.md. */
 #include <fcntl.h>
 #include <glob.h>
 #include <linux/input.h>
@@ -50,9 +51,8 @@ struct fb_fix_min {
 enum { DEV_KEYS, DEV_HOOK, DEV_TOUCH, NDEV };
 static int dev[NDEV] = {-1, -1, -1};
 static uint32_t *fb;
-static unsigned fb_stride;
-/* a screen that is not SW x SH at 32 bits: its size, depth, bytes per row, and whether it is upside down */
-static int scaled, pw, ph, pbpp, pline, turned;
+/* the panel: its size, depth, bytes per row, and whether it is upside down */
+static int pw, ph, pbpp, pline, turned;
 static long cal[7] = {14798, 13, -4134128, 53, 10207, -5441552, 65536};  /* factory values, from U-Boot */
 static int raw_x, raw_y, touching, was_touching, last_x, last_y;
 /* the flip device, what it offers, and what the screen is showing: a flip buffer, or -1 for the frame we draw in */
@@ -132,25 +132,26 @@ static int fb_init(void)
     if (fd < 0) { perror(opt.fb); return -1; }
     if (ioctl(fd, FBIOGET_VSCREENINFO, &v) || ioctl(fd, FBIOGET_FSCREENINFO, &f)) { perror("framebuffer ioctl"); return -1; }
     turned = fb_rotation() == 180;
-    if (v.xres < SW || v.yres < SH || v.bits_per_pixel != 32 || turned) {
-        if ((v.bits_per_pixel != 32 && v.bits_per_pixel != 16) || v.xres < 160 || v.yres < 90 || v.xres > SW || v.yres > SH) {
-            fprintf(stderr, "%s is %ux%u at %u bpp; need %dx%d or smaller, at 32 or 16 bpp\n", opt.fb, v.xres, v.yres, v.bits_per_pixel, SW, SH);
-            return -1;
-        }
-        scaled = 1; pw = (int)v.xres; ph = (int)v.yres; pbpp = (int)v.bits_per_pixel; pline = (int)f.line_length;
-        logmsg("screen %dx%d at %d bpp%s: the %dx%d picture is fitted to it", pw, ph, pbpp, turned ? ", upside down" : "", SW, SH);
+    if ((v.bits_per_pixel != 32 && v.bits_per_pixel != 16) || v.xres < 320 || v.yres < 200) {
+        fprintf(stderr, "%s is %ux%u at %u bpp; need 320x200 or more, at 32 or 16 bpp\n", opt.fb, v.xres, v.yres, v.bits_per_pixel);
+        return -1;
     }
-    fb_stride = f.line_length / 4;
-    fb = mmap(0, (size_t)f.line_length * (scaled ? (size_t)ph : SH), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    /* a screen bigger than the T48S's is used as far as that */
+    pw = v.xres > APP_W ? APP_W : (int)v.xres;
+    ph = v.yres > APP_H ? APP_H : (int)v.yres;
+    pbpp = (int)v.bits_per_pixel;
+    pline = (int)f.line_length;
+    logmsg("screen %dx%d at %d bpp%s", pw, ph, pbpp, turned ? ", upside down" : "");
+    fb = mmap(0, (size_t)f.line_length * (size_t)ph, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (fb == MAP_FAILED) { perror("mapping the framebuffer"); return -1; }
-    /* The kernel's spare frames, for apps that flip. Not when the picture is fitted
-     * to another screen: an app's buffer could not be shown as it is. T48_FLIP_DEV
+    /* The kernel's spare frames, for apps that flip. Only on a screen that shows a
+     * picture as an app draws it: an app's buffer could not be shown otherwise. T48_FLIP_DEV
      * names another device, or none ("") to try the copying path on the phone. */
     const char *fdev = getenv("T48_FLIP_DEV");
     if (fdev) flip_dev = fdev;
-    if (!scaled && (flip_fd = open(flip_dev, O_RDWR | O_NONBLOCK | O_CLOEXEC)) >= 0) {
+    if (pbpp == 32 && !turned && (flip_fd = open(flip_dev, O_RDWR | O_NONBLOCK | O_CLOEXEC)) >= 0) {
         int32_t home = -1;
-        if (ioctl(flip_fd, T48FLIP_INFO, &flip) < 0 || flip.width != SW || flip.height != SH || flip.stride != SW * 4 || flip.count < 2) {
+        if (ioctl(flip_fd, T48FLIP_INFO, &flip) < 0 || (int)flip.width != pw || (int)flip.height != ph || (int)flip.stride != pw * 4 || flip.count < 2) {
             close(flip_fd);
             flip_fd = -1;
         } else {
@@ -185,6 +186,11 @@ static int fb_init(void)
     if (dev[DEV_KEYS] < 0) logmsg("no keypad found: the keys will not work");
     if (dev[DEV_HOOK] < 0) logmsg("no hook switch found");
     if (dev[DEV_TOUCH] < 0) logmsg("no touchscreen found");
+    /* The shell draws at the screen's own size. T48_FIT in the environment has it draw the T48S's
+     * 800x480 and fit that to the screen, as it did before it had a layout for small screens: for
+     * comparing. A phone without a touch screen is one with soft keys (the T46S, T42S and T41S). */
+    if (getenv("T48_FIT")) shell_screen_is(APP_W, APP_H, dev[DEV_TOUCH] >= 0, dev[DEV_TOUCH] < 0);
+    else shell_screen_is(pw, ph, dev[DEV_TOUCH] >= 0, dev[DEV_TOUCH] < 0);
 
     FILE *pc = fopen("/etc/pointercal", "r");
     if (pc) {
@@ -211,40 +217,9 @@ static int fb_init(void)
     return 0;
 }
 
-static void fb_flush(const uint32_t *src, int stride, int x, int y, int w, int h)
+static void fb_flush(const uint32_t *src, int stride, int sw, int sh, int x, int y, int w, int h)
 {
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > SW) w = SW - x;
-    if (y + h > SH) h = SH - y;
-    if (w <= 0 || h <= 0) return;
-    if (scaled) {
-        /* the screen pixels that any of this part of the picture falls on */
-        int dx0 = x * pw / SW, dx1 = ((x + w) * pw + SW - 1) / SW;
-        int dy0 = y * ph / SH, dy1 = ((y + h) * ph + SH - 1) / SH;
-        for (int dy = dy0; dy < dy1; dy++) {
-            int sy0 = dy * SH / ph, sy1 = ((dy + 1) * SH + ph - 1) / ph;
-            int ty = turned ? ph - 1 - dy : dy;
-            unsigned char *row = (unsigned char *)fb + (size_t)ty * pline;
-            for (int dx = dx0; dx < dx1; dx++) {
-                int sx0 = dx * SW / pw, sx1 = ((dx + 1) * SW + pw - 1) / pw;
-                unsigned r = 0, g = 0, b = 0, n = 0;
-                for (int sy = sy0; sy < sy1; sy++) {
-                    const uint32_t *sp = src + sy * stride;
-                    for (int sx = sx0; sx < sx1; sx++, n++) {
-                        r += sp[sx] >> 16 & 255; g += sp[sx] >> 8 & 255; b += sp[sx] & 255;
-                    }
-                }
-                r /= n; g /= n; b /= n;
-                int tx = turned ? pw - 1 - dx : dx;
-                if (pbpp == 16) ((uint16_t *)row)[tx] = (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | b >> 3);
-                else ((uint32_t *)row)[tx] = r << 16 | g << 8 | b;
-            }
-        }
-        return;
-    }
-    for (int j = 0; j < h; j++)
-        memcpy(fb + (y + j) * fb_stride + x, src + (y + j) * stride + x, (size_t)w * 4);
+    fit_put(fb, pline, pw, ph, pbpp, turned, src, stride, sw, sh, x, y, w, h);
 }
 
 static int fb_fds(struct pollfd *p, int max)

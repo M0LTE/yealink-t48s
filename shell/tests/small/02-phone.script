@@ -1,0 +1,145 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# A small screen with no touch: the dialler, a call out, a call in, a second call, the call
+# list and the contacts, all from the keys. A stand-in for the SIP service answers
+# (tests/small/fakesip.py).
+wait 2500
+expect idle
+# contacts: Add is soft key 2, and the keyboard shows what the keypad types
+key soft3
+expect contacts
+key soft2
+expectstate contacts.mode name
+key 2
+wait 1000
+key 5
+key 5
+key 5
+wait 1000
+shot shots/t46s-keyboard.png
+# its soft keys: the mode, rub out, Cancel, Done
+key soft1
+key 4
+key soft2
+key soft1
+key soft1
+expectstate kbd.text al
+key soft4
+expectstate contacts.mode number
+shot shots/t46s-keyboard-number.png
+key 1
+key 0
+key 0
+key 2
+key soft4
+expectstate contacts 1
+expectstate contacts.sel al
+shot shots/t46s-contacts.png
+# Delete asks; Cancel is soft key 3
+key soft4
+expectstate contacts.mode confirm
+expectstate soft3 Cancel
+expectstate soft4 Delete
+shot shots/t46s-contacts-delete.png
+key soft3
+expectstate contacts 1
+# Dial is soft key 1: the dialler, with the name under the number
+key soft1
+expect call
+expectstate phone dial
+expectstate number 1002
+expectstate soft1 Call
+shot shots/t46s-dial.png
+# rub out and Cancel
+key soft2
+expectstate number 100
+key soft4
+expect idle
+# a call out: typed at the home screen, Call on soft key 1
+key 1
+key 0
+key 0
+key 2
+key soft1
+waitstate phone outgoing
+wait 300
+shot shots/t46s-calling.png
+waitstate phone incall 4000
+wait 1200
+expectstate soft1 Mute
+expectstate soft4 End
+shot shots/t46s-in-call.png
+# Mute and Hold light up and stay named
+key soft1
+expectstate mute 1
+key soft2
+wait 200
+shot shots/t46s-in-call-hold.png
+key soft2
+key soft1
+expectstate mute 0
+# tones sent show as they are keyed
+key 1
+key 2
+key 3
+shot shots/t46s-in-call-tones.png
+# a second call comes in: Answer and Decline on the soft keys
+run sh -c "echo incoming 1003 Carol > simdata/sip.sock.cmd"
+waitstate other waiting 3000
+expectstate soft1 Answer
+expectstate soft2 Decline
+shot shots/t46s-call-waiting.png
+key soft1
+waitstate other held 3000
+expectstate soft1 Swap
+shot shots/t46s-call-held.png
+key soft1
+wait 300
+# Transfer: a number, then Transfer or Ask first
+key soft4
+waitstate other none 3000
+waitstate phone incall 3000
+key soft3
+expectstate xfer 1
+key 1
+key 0
+key 0
+key 4
+expectstate soft1 Transfer
+expectstate soft2 Ask_first
+shot shots/t46s-transfer.png
+key soft4
+expectstate xfer 0
+# End
+key soft4
+waitstate phone ended 3000
+shot shots/t46s-call-ended.png
+waitscreen idle 5000
+# a call in: Answer, Decline
+run sh -c "echo incoming 1002 > simdata/sip.sock.cmd"
+waitstate phone incoming 3000
+expectstate soft1 Answer
+expectstate soft4 Decline
+shot shots/t46s-incoming.png
+key soft4
+waitscreen idle 5000
+# the volume, over the home screen
+key volup
+shot shots/t46s-volume.png
+wait 1800
+# the call list: Dial, Add or Saved, Delete, Clear
+key soft2
+expect history
+expectstate soft1 Dial
+expectstate soft2 Saved
+shot shots/t46s-calls.png
+key down
+key soft3
+key soft4
+expectstate soft4 Clear
+shot shots/t46s-calls-clear.png
+key soft3
+key soft4
+key soft4
+expectstate soft4 Back
+key soft4
+expect idle

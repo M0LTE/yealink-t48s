@@ -48,9 +48,14 @@ static const char *const screen_names[] = {"idle", "launcher", "app", "call", "m
 
 static const struct backend *be;
 long long shell_input_us;
-static uint32_t ui_px[SW * SH];
-t48_surface ui = {ui_px, SW, SH, SW};
-static t48_surface app_surface = {NULL, SW, SH, SW};
+int screen_w = APP_W, screen_h = APP_H;
+struct layout L = {.touch = 1};
+static uint32_t *ui_px;
+t48_surface ui;
+static t48_surface app_surface;
+/* small screens: what the soft keys do on the screen being drawn */
+static char bar_label[4][16];
+static int bar_role[4], bar_set;
 
 static enum screen scr = SCR_IDLE;
 static enum screen under_call;       /* where to go when the handset goes back down */
@@ -97,6 +102,23 @@ void shell_mkdirs(const char *path)
     mkdir(p, 0700);
 }
 
+/* The backend has found the screen. Smaller than the T48S's: the small layout (docs/shell.md). */
+void shell_screen_is(int w, int h, int touch, int softkeys)
+{
+    free(ui_px);
+    ui_px = calloc((size_t)w * (size_t)h, sizeof *ui_px);
+    if (!ui_px) { perror("the screen's picture"); exit(1); }
+    screen_w = w;
+    screen_h = h;
+    ui = (t48_surface){ui_px, w, h, w};
+    L.small = w < APP_W || h < APP_H;
+    L.touch = touch;
+    L.softkeys = softkeys;
+    t48_ui_small(L.small);
+    t48_kbd_keys_only = !touch;
+    logmsg("layout: %dx%d, %s%s%s", w, h, L.small ? "small" : "full", touch ? ", touch" : ", no touch", softkeys ? ", soft keys" : "");
+}
+
 const char *shell_screen_name(void) { return screen_names[scr]; }
 const struct backend *shell_backend(void) { return be; }
 unsigned shell_app_frames(void) { return app_frames; }
@@ -120,6 +142,45 @@ void ui_network_status(char *out, size_t n, int *up)
         break;
     }
     freeifaddrs(list);
+}
+
+void ui_bar(const char *l0, int r0, const char *l1, int r1, const char *l2, int r2, const char *l3, int r3)
+{
+    const char *const l[4] = {l0, l1, l2, l3};
+    const int r[4] = {r0, r1, r2, r3};
+    for (int i = 0; i < 4; i++) {
+        snprintf(bar_label[i], sizeof bar_label[i], "%s", l[i] ? l[i] : "");
+        bar_role[i] = r[i];
+    }
+    bar_set = 1;
+}
+
+/* a key that does something, by its label: for the simulator's checks */
+static const char *bar_state(int i)
+{
+    static char b[16];
+    snprintf(b, sizeof b, "%s", bar_set && bar_label[i][0] ? bar_label[i] : "-");
+    for (char *p = b; *p; p++) if (*p == ' ') *p = '_';
+    return b;
+}
+
+void ui_ask(const char *title, const char *text, const char *extra, int tone)
+{
+    struct row_ink ink;
+    int more = (text && text[0]) || (extra && extra[0]);
+    int w = SW - 40, h = !more ? 76 : extra && extra[0] ? UI_ASK_H : UI_ASK_H - 26, x = 20, y = HEAD_H + (BAR_Y - HEAD_H - h) / 2;
+    const t48_font *f = t48_text_width(&t48_font_head, title) > w - 24 ? &t48_font_bold : &t48_font_head;
+    ui_dialog(x, y, w, h, tone);
+    ui_dialog_ink(&ink);
+    int ty = y + (more ? 16 : (h - t48_font_head.height) / 2 + 2) + (t48_font_head.height - f->height) / 2;
+    if (t48_text_width(f, title) > w - 24) t48_text_fit(&ui, x + 12, ty, w - 24, f, ink.text, title);
+    else t48_text_centre(&ui, SW / 2, ty, f, ink.text, title);
+    if (text && text[0]) ui_two_lines_centred(SW / 2, y + 58, w - 32, &t48_font_normal, ink.dim, text);
+    if (extra && extra[0]) {
+        const t48_font *ef = t48_text_width(&t48_font_small, extra) > w - 16 ? &t48_font_tiny : &t48_font_small;
+        if (t48_text_width(ef, extra) > w - 16) t48_text_fit(&ui, x + 8, y + h - 30, w - 16, ef, ink.dim, extra);
+        else t48_text_centre(&ui, SW / 2, y + h - 30, ef, ink.dim, extra);
+    }
 }
 
 /* five buttons along the bottom of the idle screen */
@@ -181,6 +242,30 @@ static void acc_box(int k, int n, int *x, int *y, int *w)
     *y = ACC_Y - (n > 3 ? 40 : 0) + row * (ACC_H + 4);
 }
 
+/* Small screens: one line for all the accounts, a lamp and a name each, with as many words as there is room for */
+static void idle_accounts_small(int y)
+{
+    char line[ACC_MAX][80];
+    uint32_t c[ACC_MAX];
+    int n = 0, def, total = 0;
+    while (n < ACC_MAX && phone_account_line(n, line[n], sizeof line[0], &c[n], &def)) n++;
+    for (int cut = 0; cut < 3; cut++) {
+        total = 0;
+        for (int i = 0; i < n; i++) {
+            if (cut == 1) line[i][strcspn(line[i], ":")] = 0;   /* the name without its state: the lamp says it */
+            if (cut == 2) line[i][0] = 0;
+            total += 12 + (line[i][0] ? 6 + t48_text_width(&t48_font_small, line[i]) : 0) + (i ? 14 : 0);
+        }
+        if (total <= SW - 24) break;
+    }
+    for (int i = 0, x = (SW - total) / 2; i < n; i++) {
+        ui_lamp(x, y + (t48_font_small.height - 12) / 2, c[i]);
+        x += 12;
+        if (line[i][0]) x = t48_text(&ui, x + 6, y, &t48_font_small, C_DIM, line[i]);
+        x += 14;
+    }
+}
+
 static void draw_idle(void)
 {
     char hm[8], date[64];
@@ -193,10 +278,27 @@ static void draw_idle(void)
     ui_clear(C_BG);
     ui_header_idle();
     /* the accounts, when there are several: which are registered, and a touch dials from one */
-    int naccts = phone_accounts(), several = naccts > 1;
-    t48_text_centre(&ui, SW / 2, several ? 72 : 112, &t48_font_huge, C_TEXT, hm);
-    t48_text_centre(&ui, SW / 2, several ? 200 : 248, &t48_font_head, C_DIM, date);
-    for (int i = 0; several && i < ACC_MAX; i++) {
+    int naccts = phone_accounts(), several = naccts > 1, ny, y2;
+    if (SMALL) {
+        /* The clock, the date, the accounts on one line, the notices: down the middle, between where
+         * the line keys' labels will go. 214 rows between the header and the soft keys on 480x272. */
+        const t48_glyph *d = &t48_font_huge.g['0' - 32];
+        int top = HEAD_H + (BAR_Y - HEAD_H - 214) / 2 + (several ? 6 : 18);
+        t48_text_centre(&ui, SW / 2, top - d->yoff, &t48_font_huge, C_TEXT, hm);
+        int y = top + d->h + 9;
+        if (t48_text_width(&t48_font_normal, date) > SW - 2 * LINE_W) t48_text_fit(&ui, LINE_W, y, SW - 2 * LINE_W, &t48_font_normal, C_DIM, date);
+        else t48_text_centre(&ui, SW / 2, y, &t48_font_normal, C_DIM, date);
+        y += t48_font_normal.height + 2;
+        if (several) { idle_accounts_small(y); y += 22; }
+        ny = y + 3;
+        y2 = ny + 34;
+    } else {
+        t48_text_centre(&ui, SW / 2, several ? 72 : 112, &t48_font_huge, C_TEXT, hm);
+        t48_text_centre(&ui, SW / 2, several ? 200 : 248, &t48_font_head, C_DIM, date);
+        ny = several ? 340 : 320;
+        y2 = 372;
+    }
+    for (int i = 0; !SMALL && several && i < ACC_MAX; i++) {
         char line[80];
         uint32_t c;
         int def, x, y, w;
@@ -214,13 +316,9 @@ static void draw_idle(void)
      * the end: do not disturb shows on its button too, and messages on the lamp. */
     char note[4][96], file[2][96];
     int role[4];
-    int nn = 0, total = 0, ny = several ? 340 : 320;
+    int nn = 0, total = 0;
     notice_read(file);
-    if (file[0][0]) {
-        snprintf(note[nn], sizeof note[0], "%s", file[0]);
-        for (size_t l = strlen(note[0]); l && ui_notice_width(note[0]) > SW - 24; ) note[0][--l] = 0;
-        role[nn++] = B_FIRST;
-    }
+    if (file[0][0]) role[nn++] = B_FIRST;
     if (phone_missed()) {
         snprintf(note[nn], sizeof note[0], "%d missed call%s", phone_missed(), phone_missed() == 1 ? "" : "s");
         role[nn++] = B_STOP;
@@ -233,30 +331,60 @@ static void draw_idle(void)
         snprintf(note[nn], sizeof note[0], "Do not disturb");
         role[nn++] = B_LIT;
     }
-    idle_notices = 0;
-    for (int i = 0; i < nn; i++) {
-        int w = ui_notice_width(note[i]) + (i ? 12 : 0);
-        if (total + w > SW - 24) break;
-        total += w;
-        idle_notices++;
+    /* a small screen sets the row in the small face when that is what it takes to show it all */
+    for (int tight = 0; tight <= SMALL; tight++) {
+        t48_ui_notice_tight(tight);
+        if (file[0][0]) {
+            snprintf(note[0], sizeof note[0], "%s", file[0]);
+            for (size_t l = strlen(note[0]); l && ui_notice_width(note[0]) > SW - 24; ) note[0][--l] = 0;
+        }
+        idle_notices = total = 0;
+        for (int i = 0; i < nn; i++) {
+            int w = ui_notice_width(note[i]) + (i ? (SMALL ? 8 : 12) : 0);
+            if (total + w > SW - 24) break;
+            total += w;
+            idle_notices++;
+        }
+        if (idle_notices == nn && (!file[0][0] || !strcmp(note[0], file[0]))) break;
     }
     for (int i = 0, x = (SW - total) / 2; i < idle_notices; i++) x = ui_notice(x, ny, note[i], role[i]);
+    t48_ui_notice_tight(0);
+    if (SMALL) {
+        /* the soft keys; do not disturb is Right, and shows as a notice */
+        ui_bar("Apps", B_PLAIN, "Calls", B_PLAIN, "Contacts", B_PLAIN, "Settings", B_PLAIN);
+        if (file[1][0] && several) t48_text_fit(&ui, 12, y2, SW - 24, &t48_font_small, C_DIM, file[1]);
+        else if (file[1][0]) ui_two_lines_centred(SW / 2, y2, SW - 24, &t48_font_small, C_DIM, file[1]);
+        return;
+    }
     static const char *const labels[5] = {"Apps", "Calls", "Contacts", "DND", "Settings"};
     for (int i = 0; i < 5; i++)
         ui_btn(IDLE_BTN_X(i), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H, labels[i], i == IB_DND && phone_dnd() ? B_LIT : B_PLAIN);
     /* the notice's second line (how to go back to Yealink), above the buttons */
-    if (file[1][0] && t48_text_width(&t48_font_small, file[1]) > SW - 20) t48_text_fit(&ui, 10, 372, SW - 20, &t48_font_small, C_DIM, file[1]);
-    else if (file[1][0]) t48_text_centre(&ui, SW / 2, 372, &t48_font_small, C_DIM, file[1]);
+    if (file[1][0] && t48_text_width(&t48_font_small, file[1]) > SW - 20) t48_text_fit(&ui, 10, y2, SW - 20, &t48_font_small, C_DIM, file[1]);
+    else if (file[1][0]) t48_text_centre(&ui, SW / 2, y2, &t48_font_small, C_DIM, file[1]);
 }
 
-/* launcher grid: 4 across, 2 down, a page at a time */
+/* launcher grid: 4 across, 2 down, a page at a time. On a small screen the tiles and their pictures are smaller. */
 #define COLS 4
 #define ROWS 2
-#define TILE_W 170
-#define TILE_H 188
-#define TILE_GAP 20
+#define TILE_W (SMALL ? 108 : 170)
+#define TILE_H (SMALL ? 98 : 188)
+#define TILE_GAP (SMALL ? 8 : 20)
 #define GRID_X ((SW - COLS * TILE_W - (COLS - 1) * TILE_GAP) / 2)
-#define GRID_Y 66
+#define GRID_Y (SMALL ? HEAD_H + (BAR_Y - HEAD_H - ROWS * TILE_H - TILE_GAP) / 2 : 66)
+#define ICON (SMALL ? 48 : 96)
+
+/* an app's picture at half its size, each pixel the average of four */
+static void blit_half(int x, int y, const t48_surface *img)
+{
+    for (int j = 0; j + 1 < img->h; j += 2)
+        for (int i = 0; i + 1 < img->w; i += 2) {
+            const uint32_t *p = img->px + j * img->stride + i, *q = p + img->stride;
+            uint32_t rb = ((p[0] & 0xFF00FF) + (p[1] & 0xFF00FF) + (q[0] & 0xFF00FF) + (q[1] & 0xFF00FF)) >> 2 & 0xFF00FF;
+            uint32_t g = ((p[0] & 0x00FF00) + (p[1] & 0x00FF00) + (q[0] & 0x00FF00) + (q[1] & 0x00FF00)) >> 2 & 0x00FF00;
+            t48_fill(&ui, x + i / 2, y + j / 2, 1, 1, rb | g);
+        }
+}
 
 static void tile_box(int slot, int *x, int *y)
 {
@@ -279,24 +407,29 @@ static void draw_launcher(void)
         if (i >= NTILES) break;
         tile_box(slot, &x, &y);
         ui_tile(x, y, TILE_W, TILE_H, i == sel, &ink);
-        int ix = x + (TILE_W - 96) / 2, iy = y + 16;
+        int ix = x + (TILE_W - ICON) / 2, iy = y + (SMALL ? 10 : 16), ty = y + (SMALL ? 66 : 124), pad = SMALL ? 4 : 8;
         if (i == napps) {
-            ui_icon(ix, iy, 96, "+");
-            t48_text_centre(&ui, x + TILE_W / 2, y + 124, &t48_font_bold, ink.text, "Get apps");
+            ui_icon(ix, iy, ICON, "+");
+            t48_text_centre(&ui, x + TILE_W / 2, ty, &t48_font_bold, ink.text, "Get apps");
             continue;
         }
         const struct manifest *m = &apps[i];
-        if (m->icon.px) {
+        if (m->icon.px && SMALL) {
+            blit_half(ix + (ICON - m->icon.w / 2) / 2, iy + (ICON - m->icon.h / 2) / 2, &m->icon);
+        } else if (m->icon.px) {
             t48_blit(&ui, ix + (96 - m->icon.w) / 2, iy + (96 - m->icon.h) / 2, m->icon.px, m->icon.w, m->icon.h, m->icon.stride);
         } else {
             char letter[2] = {m->name[0], 0};
             if (letter[0] >= 'a' && letter[0] <= 'z') letter[0] -= 32;
-            ui_icon(ix, iy, 96, letter);
+            ui_icon(ix, iy, ICON, letter);
         }
         int tw = t48_text_width(&t48_font_bold, m->name);
-        if (tw > TILE_W - 16) t48_text_fit(&ui, x + 8, y + 124, TILE_W - 16, &t48_font_bold, ink.text, m->name);
-        else t48_text_centre(&ui, x + TILE_W / 2, y + 124, &t48_font_bold, ink.text, m->name);
-        if (!strcmp(app_id(), m->id)) {
+        if (tw > TILE_W - 2 * pad) t48_text_fit(&ui, x + pad, ty, TILE_W - 2 * pad, &t48_font_bold, ink.text, m->name);
+        else t48_text_centre(&ui, x + TILE_W / 2, ty, &t48_font_bold, ink.text, m->name);
+        if (SMALL) {
+            /* open: a lamp in the corner, as there is no room for the word */
+            if (!strcmp(app_id(), m->id)) ui_lamp(x + TILE_W - 20, y + 8, C_GOOD);
+        } else if (!strcmp(app_id(), m->id)) {
             int w = t48_text_width(&t48_font_small, "Open") + 18;
             ui_lamp(x + (TILE_W - w) / 2, y + 156, C_GOOD);
             t48_text(&ui, x + (TILE_W - w) / 2 + 18, y + 153, &t48_font_small, ink.dim, "Open");
@@ -305,8 +438,9 @@ static void draw_launcher(void)
     if (pages > 1) {
         char b[24];
         snprintf(b, sizeof b, "%d/%d", page + 1, pages);
-        t48_text_right(&ui, SW - 100, (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, b);
+        t48_text_right(&ui, HEAD_NOTE_X, (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, b);
     }
+    ui_bar(sel == napps ? "Get apps" : "Open", B_FIRST, NULL, 0, NULL, 0, "Back", B_PLAIN);
 }
 
 #define MSG_BTN_X 320
@@ -319,6 +453,11 @@ static void draw_message(void)
     struct row_ink ink;
     ui_clear(C_BG);
     ui_header("Apps", 1, 0);
+    if (SMALL) {
+        ui_ask(msg_title, msg_text, NULL, B_STOP);
+        ui_bar(NULL, 0, NULL, 0, NULL, 0, "OK", B_FIRST);
+        return;
+    }
     ui_dialog(80, 96, 640, 290, B_STOP);
     ui_dialog_ink(&ink);
     t48_text_centre(&ui, SW / 2, 132, &t48_font_head, ink.text, msg_title);
@@ -333,7 +472,7 @@ static void draw_starting(void)
     char b[96];
     ui_clear(C_BG);
     snprintf(b, sizeof b, "Starting %s", app_id());
-    t48_text_centre(&ui, SW / 2, 210, &t48_font_head, C_DIM, b);
+    t48_text_centre(&ui, SW / 2, SMALL ? SH / 2 - t48_font_head.height / 2 : 210, &t48_font_head, C_DIM, b);
 }
 
 /* The screen shows the shell's own frame again, not an app's flip buffer.
@@ -343,9 +482,9 @@ static void screen_home(void)
     if (be->flip_show) be->flip_show(-1);
 }
 
-void shell_screen_flush(const uint32_t *src)
+void shell_screen_flush(const uint32_t *src, int w, int h)
 {
-    be->flush(src, SW, 0, 0, SW, SH);
+    be->flush(src, w, w, h, 0, 0, w, h);
     screen_home();
 }
 
@@ -354,9 +493,10 @@ static void redraw(void)
     idle_text(idle_shown, sizeof idle_shown);
     if (scr == SCR_APP && app_shown && app_pixels()) {
         if (app_flip() >= 0) app_flip_show();   /* its last whole picture, wherever that is kept */
-        else shell_screen_flush(app_pixels());
+        else shell_screen_flush(app_pixels(), app_w(), app_h());
         return;
     }
+    bar_set = 0;
     switch (scr) {
     case SCR_IDLE: draw_idle(); break;
     case SCR_LAUNCHER: draw_launcher(); break;
@@ -370,7 +510,12 @@ static void redraw(void)
     }
     phone_draw_overlay();
     if (scr != SCR_CALL) watch_draw_overlay();
-    shell_screen_flush(ui_px);
+    if (!SMALL) bar_set = 0;
+    if (bar_set) {
+        const char *const label[4] = {bar_label[0], bar_label[1], bar_label[2], bar_label[3]};
+        t48_ui_softkeys(&ui, label, bar_role);
+    }
+    shell_screen_flush(ui_px, SW, SH);
 }
 
 static void show(enum screen s)
@@ -391,7 +536,7 @@ static void message(const char *title, const char *text)
 
 const t48_surface *shell_app_surface(void)
 {
-    app_surface.px = (uint32_t *)app_pixels();
+    app_surface = (t48_surface){(uint32_t *)app_pixels(), app_w(), app_h(), app_w()};
     return app_surface.px ? &app_surface : NULL;
 }
 
@@ -483,10 +628,7 @@ void shell_app_damage(int x, int y, int w, int h)
         redraw();
         return;
     }
-    if (x >= SW || y >= SH) return;
-    if (x + w > SW) w = SW - x;
-    if (y + h > SH) h = SH - y;
-    be->flush(app_pixels(), SW, x, y, w, h);
+    be->flush(app_pixels(), app_w(), app_w(), app_h(), x, y, w, h);
     screen_home();
 }
 
@@ -605,6 +747,22 @@ void shell_scan(int scan, int key, int code, int value)
     else if (value) logmsg("key code %d has no meaning yet", key);
 }
 
+/* Small screens: soft key b, 0 to 3, does what its label says */
+static void soft_key(int b)
+{
+    static const int idle[4] = {T48_KEY_OK, T48_KEY_UP, T48_KEY_LEFT, T48_KEY_DOWN};   /* Apps, Calls, Contacts, Settings */
+    switch (scr) {
+    case SCR_IDLE: shell_key(idle[b], 1); break;
+    case SCR_LAUNCHER: if (b == 0) shell_key(T48_KEY_OK, 1); else if (b == 3) shell_key(T48_KEY_BACK, 1); break;
+    case SCR_MESSAGE: if (b == 3) show(SCR_LAUNCHER); break;
+    case SCR_CALL: phone_soft(b); break;
+    case SCR_HISTORY: phone_history_soft(b); break;
+    case SCR_SETTINGS: settings_soft(b); break;
+    case SCR_CONTACTS: contacts_soft(b); break;
+    default: break;
+    }
+}
+
 void shell_key(int code, int down)
 {
     if (backlight_key(code, down)) return;   /* it woke a dark screen, and that is all it does */
@@ -614,8 +772,10 @@ void shell_key(int code, int down)
         return;
     }
     if (code >= SK_SOFT1 && code <= SK_SOFT4) {
-        /* the bottom row of buttons, where a screen has one; in an app, the app's (level 3) */
+        /* In an app, the app's (level 3). On a small screen, what the label above the key says. On the
+         * T48S's layout, the bottom row of buttons, where a screen has one. */
         if (scr == SCR_APP) app_key(T48_KEY_SOFT1 + code - SK_SOFT1, down);
+        else if (down && SMALL) soft_key(code - SK_SOFT1);
         else if (down && scr == SCR_HISTORY) phone_history_soft(code - SK_SOFT1);
         else if (down && scr == SCR_CONTACTS) contacts_soft(code - SK_SOFT1);
         return;
@@ -680,6 +840,12 @@ void shell_touch(int state, int x, int y)
     if (backlight_touch(state)) return;
     if (scr == SCR_KEYS) return;
     if (scr == SCR_APP) { app_touch(state, x, y); return; }
+    if (SMALL && bar_set && y >= BAR_Y) {
+        /* a small screen that takes touches: each label is a button */
+        int b = x * 4 / SW;
+        if (state == T48_TOUCH_DOWN && bar_label[b][0]) soft_key(b);
+        return;
+    }
     if (scr != SCR_CALL && watch_touch(state, x, y)) return;
     if (scr == SCR_SETTINGS) { settings_touch(state, x, y); return; }
     if (scr == SCR_CONTACTS) { contacts_touch(state, x, y); return; }
@@ -690,6 +856,8 @@ void shell_touch(int state, int x, int y)
         phone_touch(x, y);
     } else if (scr == SCR_HISTORY) {
         phone_history_touch(x, y);
+    } else if (SMALL && scr != SCR_LAUNCHER) {
+        /* the idle screen and a message have nothing else to touch */
     } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_APPS), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
         shell_key(T48_KEY_OK, 1);
     } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_CALLS), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
@@ -781,6 +949,13 @@ const char *shell_state(const char *key)
     if (!strcmp(key, "appid")) return app_id()[0] ? app_id() : "-";
     if (!strcmp(key, "flip")) return app_flip() >= 0 ? "on" : "off";
     if (!strncmp(key, "lamp.", 5)) return leds_shown(key + 5);
+    if (!strncmp(key, "soft", 4) && key[4] >= '1' && key[4] <= '4' && !key[5]) return bar_state(key[4] - '1');
+    if (!strcmp(key, "layout")) return SMALL ? "small" : "full";
+    if (!strcmp(key, "appsize")) {
+        static char size[16];
+        snprintf(size, sizeof size, "%dx%d", app_w(), app_h());
+        return app_state() == APP_NONE ? "-" : size;
+    }
     if (!strcmp(key, "theme")) return T->name;
     if (!strcmp(key, "font")) return T->font;
     const char *v = contacts_state(key);
@@ -837,6 +1012,9 @@ static void usage(void)
         "  --script FILE    input script, - for standard input (see docs/shell.md)\n"
         "  --shot FILE      write one picture (.png or .ppm) of the first screen and stop\n"
         "  --runner PROGRAM run apps with this, such as qemu-arm for apps built for the phone\n"
+        "  --screen WxH     the screen's size (800x480); smaller gets the small layout\n"
+        "  --no-touch       a screen that takes no touches, with four soft keys under it\n"
+        "  --model t46s     that phone: 480x272 at 16 bits, upside down, no touch, soft keys\n"
         "also: t48-app (install, update and remove apps) and t48-config (settings), each with its own help\n",
         opt.apps, opt.data, opt.config, opt.state, opt.sip ? opt.sip : "none", opt.audio ? opt.audio : "none", opt.fb,
         opt.apply ? opt.apply : "none", opt.update ? opt.update : "none", opt.access, opt.notice ? opt.notice : "none",
@@ -861,6 +1039,7 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         const char **dst = NULL;
         if (!strcmp(argv[i], "--sim")) continue;
+        if (!strcmp(argv[i], "--no-touch")) { opt.no_touch = 1; continue; }
         else if (!strcmp(argv[i], "--apps")) dst = &opt.apps;
         else if (!strcmp(argv[i], "--data")) dst = &opt.data;
         else if (!strcmp(argv[i], "--config")) dst = &opt.config;
@@ -877,6 +1056,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--access")) dst = &opt.access;
         else if (!strcmp(argv[i], "--notice")) dst = &opt.notice;
         else if (!strcmp(argv[i], "--web")) dst = &opt.web;
+        else if (!strcmp(argv[i], "--screen")) dst = &opt.screen;
+        else if (!strcmp(argv[i], "--model")) dst = &opt.model;
         if (!dst || i + 1 >= argc) { usage(); return 2; }
         *dst = argv[++i];
     }

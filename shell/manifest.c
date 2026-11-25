@@ -77,6 +77,9 @@ int manifest_read(const char *dir, struct manifest *m, char *err, size_t errn)
         memcpy(m->name, m->id, sizeof m->name);
     t48_json_str(t48_json_get(txt, e, "version"), e, m->version, sizeof m->version);
     t48_json_str(t48_json_get(txt, e, "description"), e, m->description, sizeof m->description);
+    /* "screen": "any": the app takes whatever size it is told. Without it, it is promised 800x480. */
+    char screen[16];
+    m->any_screen = t48_json_str(t48_json_get(txt, e, "screen"), e, screen, sizeof screen) && !strcmp(screen, "any");
 
     for (const char *v = t48_json_first(t48_json_get(txt, e, "permissions"), e); v; v = t48_json_next(v, e)) {
         char p[32];

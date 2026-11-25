@@ -20,6 +20,7 @@
 
 static int sock = -1, closed;
 static int shell_api;              /* the level the shell said in HELLO */
+static unsigned hello_flags = T48_HELLO_TOUCH;   /* what a shell older than level 6 always had */
 static t48_surface screen;
 static unsigned char rx[4096];
 static size_t rx_n;
@@ -171,10 +172,11 @@ int t48_app_init(void)
             if (closed) return -1;
             fill_rx();
         }
-        if (type == T48_MSG_HELLO && len >= sizeof(struct t48_msg_hello)) {
-            struct t48_msg_hello h;
-            memcpy(&h, p, sizeof h);
+        if (type == T48_MSG_HELLO && len >= T48_HELLO_V1_SIZE) {
+            struct t48_msg_hello h = {0};
+            memcpy(&h, p, len < sizeof h ? len : sizeof h);
             shell_api = h.api;
+            if (len >= sizeof h) hello_flags = h.flags;
             if (h.format != T48_FORMAT_XRGB8888 || h.stride % 4) {
                 fprintf(stderr, "libt48: the shell offers a screen format this library does not know\n");
                 return -1;
@@ -185,6 +187,9 @@ int t48_app_init(void)
             screen.w = h.width;
             screen.h = h.height;
             screen.stride = (int)(h.stride / 4);
+            /* a screen smaller than the T48S's: the parts in their small sizes, and no touch keys without touch */
+            t48_ui_small(screen.w < 800 || screen.h < 480);
+            t48_kbd_keys_only = !(hello_flags & T48_HELLO_TOUCH);
         } else if (type == T48_MSG_SETTING && nsettings < NSETTINGS) {
             p[len] = 0;
             settings[nsettings++] = strdup((char *)p);
@@ -205,6 +210,8 @@ int t48_app_init(void)
 }
 
 t48_surface *t48_screen(void) { return &screen; }
+int t48_has_touch(void) { return (hello_flags & T48_HELLO_TOUCH) != 0; }
+int t48_has_softkeys(void) { return (hello_flags & T48_HELLO_SOFTKEYS) != 0; }
 int t48_fd(void) { return sock; }
 
 void t48_damage(int x, int y, int w, int h)

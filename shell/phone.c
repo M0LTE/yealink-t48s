@@ -36,7 +36,7 @@ enum reg { REG_NONE, REG_TRYING, REG_OK, REG_FAIL };
 #define SETTLE_MS 3000         /* after start: time for baresip and the audio service to say how things stand */
 #define VOL_SHOW_MS 1500
 #define HIST_MAX 50
-#define HIST_ROWS 6
+#define HIST_ROWS (SMALL ? SROWS : 6)
 
 #define MAX_ACCTS 6
 
@@ -1353,8 +1353,173 @@ static void acct_text(int i, char *out, size_t n)
     else snprintf(out, n, "%s@%s", A[i].user, A[i].domain);
 }
 
+/* ---------- the same screens on a small one (480x272): no keypad to touch, as the phone's own is
+ * the only way in, and the soft keys in place of the row of buttons ---------- */
+
+#define SM 12   /* the margin */
+
+static void draw_dial_small(void)
+{
+    ui_header("Dial", 0, 0);
+    ui_panel(SM, 38, SW - 2 * SM, 70);
+    if (P.number[0]) {
+        const char *n = contacts_name(P.number);
+        big_text(SW / 2, n ? 38 : 49, SW - 56, P.number, C_TEXT);
+        if (n) t48_text_centre(&ui, SW / 2, 82, &t48_font_normal, C_DIM, n);
+    } else {
+        t48_text_centre(&ui, SW / 2, 56, &t48_font_head, C_FAINT, "Number");
+    }
+    chips(-1, SM, 116);
+    if (!sipc_connected()) t48_text_right(&ui, SW - SM, 117, &t48_font_normal, C_BAD, "No service");
+    if (accts_on() > 1) {
+        char b[120], a[100];
+        enum reg r = A[P.dial_acct].reg;
+        struct row_ink ink;
+        acct_text(P.dial_acct, a, sizeof a);
+        snprintf(b, sizeof b, "From %s", a);
+        ui_tile(SM, 150, SW - 2 * SM, 34, 0, &ink);
+        ui_lamp(SM + 12, 150 + 11, r == REG_OK ? C_GOOD : r == REG_TRYING ? C_ACCENT : C_BAD);
+        t48_text_fit(&ui, SM + 34, 150 + (34 - t48_font_normal.height) / 2, SW - 2 * SM - 90, &t48_font_normal, ink.text, b);
+        ui_chevron(SW - SM - 40, 167, 7, -1, 3, ink.dim);
+        ui_chevron(SW - SM - 16, 167, 7, 1, 3, ink.dim);
+    }
+    ui_bar("Call", P.number[0] ? B_GO : B_OFF, "<x", P.number[0] ? B_PLAIN : B_OFF, accts_on() > 1 ? "From" : NULL, B_PLAIN, "Cancel", B_PLAIN);
+}
+
+static void draw_outgoing_small(void)
+{
+    char b[120];
+    ui_header(P.consult ? "Asking first" : "Calling", 0, B_LIT);
+    big_text(SW / 2, 40, SW - 32, who(), C_TEXT);
+    if (P.c.name[0]) t48_text_centre(&ui, SW / 2, 92, &t48_font_normal, C_DIM, P.c.peer);
+    t48_text_centre(&ui, SW / 2, 122, &t48_font_normal, C_DIM, P.c.ringing ? "Ringing" : "Connecting");
+    b[0] = 0;
+    if (P.o_st == O_HELD) snprintf(b, sizeof b, "On hold: %s", call_who(&P.o));
+    else if (accts_on() > 1) snprintf(b, sizeof b, "From %s", acct_label(P.c.acct));
+    if (b[0]) t48_text_centre(&ui, SW / 2, 150, &t48_font_normal, C_DIM, b);
+    chips(SW / 2, 0, 188);
+    ui_bar("Speaker", P.route == T48AC_ROUTE_SPEAKER ? B_LIT : B_PLAIN, NULL, 0, NULL, 0, "End", B_STOP);
+}
+
+static void draw_incoming_small(void)
+{
+    ui_header("Incoming call", 0, B_GO);
+    big_text(SW / 2, 46, SW - 32, who(), C_TEXT);
+    if (P.c.name[0]) t48_text_centre(&ui, SW / 2, 100, &t48_font_normal, C_DIM, P.c.peer);
+    if (accts_on() > 1) {
+        char b[120], a[100];
+        acct_text(P.c.acct, a, sizeof a);
+        snprintf(b, sizeof b, "For %s", a);
+        if (t48_text_width(&t48_font_normal, b) > SW - 24) t48_text_fit(&ui, 12, 130, SW - 24, &t48_font_normal, C_DIM, b);
+        else t48_text_centre(&ui, SW / 2, 130, &t48_font_normal, C_DIM, b);
+    }
+    if (!P.ring) ui_tag(SW / 2 - ui_tag_width("Silenced") / 2, 172, "Silenced", B_OFF);
+    ui_bar("Answer", B_GO, NULL, 0, NULL, 0, "Decline", B_STOP);
+}
+
+static void call_time(char *out, size_t n);
+
+static void draw_incall_small(void)
+{
+    char t[24], b[120];
+    struct row_ink ink;
+
+    call_time(t, sizeof t);
+    ui_header(P.xfer ? "Transfer to" : P.c.held ? "On hold" : "In call", 0, P.c.held ? B_LIT : B_GO);
+    if (P.xfer) {
+        ui_panel(SM, 38, SW - 2 * SM, 60);
+        if (P.number[0]) big_text(SW / 2, 44, SW - 56, P.number, C_TEXT);
+        else t48_text_centre(&ui, SW / 2, 52, &t48_font_head, C_FAINT, "Number");
+        t48_text_centre(&ui, SW / 2, 108, &t48_font_bold, C_TEXT, who());
+        t48_text_centre(&ui, SW / 2, 134, &t48_font_head, C_DIM, t);
+        chips(SW / 2, 0, 184);
+        ui_bar("Transfer", P.number[0] ? B_GO : B_OFF, "Ask first", P.number[0] ? B_FIRST : B_OFF,
+               "<x", P.number[0] ? B_PLAIN : B_OFF, "Cancel", B_PLAIN);
+        return;
+    }
+    big_text(SW / 2, 34, SW - 32, who(), C_TEXT);
+    if (P.c.name[0]) t48_text_centre(&ui, SW / 2, 84, &t48_font_normal, C_DIM, P.c.peer);
+    t48_text_centre(&ui, SW / 2, P.c.name[0] ? 108 : 94, &t48_font_big, P.c.held ? C_DIM : C_TEXT, t);
+    if (P.o_st) {
+        /* the line about the second call: who is waiting, or who is on hold */
+        snprintf(b, sizeof b, "%s: %s", P.o_st == O_WAITING ? "Call waiting" : "On hold", call_who(&P.o));
+        ui_tile(SM, 162, SW - 2 * SM, 34, 0, &ink);
+        ui_lamp(SM + 12, 162 + 11, P.o_st == O_WAITING ? C_GOOD : C_ACCENT);
+        t48_text_fit(&ui, SM + 34, 162 + (34 - t48_font_bold.height) / 2, SW - 2 * SM - 46, &t48_font_bold, ink.text, b);
+    } else if (P.note[0]) {
+        t48_text_centre(&ui, SW / 2, 168, &t48_font_normal, C_DIM, P.note);
+    } else if (P.c.dtmf[0]) {
+        /* the tones sent, as they are keyed */
+        ui_panel(SM, 162, SW - 2 * SM, 34);
+        t48_text_centre(&ui, SW / 2, 162 + (34 - t48_font_bold.height) / 2, &t48_font_bold, C_TEXT, P.c.dtmf);
+    } else if (P.parked) {
+        t48_text_centre(&ui, SW / 2, 168, &t48_font_normal, C_DIM, "Lift handset to resume");
+    }
+    chips(SW / 2, 0, 208);
+    if (P.o_st == O_WAITING) ui_bar("Answer", B_GO, "Decline", B_STOP, NULL, 0, "End", B_STOP);
+    else if (P.o_st == O_HELD && !P.joining) ui_bar("Swap", B_FIRST, "Join", B_FIRST, "Mute", P.muted ? B_LIT : B_PLAIN, "End", B_STOP);
+    else ui_bar("Mute", P.muted ? B_LIT : B_PLAIN, "Hold", P.c.held ? B_LIT : B_PLAIN, "Transfer", B_PLAIN, "End", B_STOP);
+}
+
+static void draw_ended_small(void)
+{
+    ui_header("Call", 0, 0);
+    big_text(SW / 2, 62, SW - 32, P.ended, C_TEXT);
+    if (hist[0].number[0] && nhist) {
+        const char *n = hist_name(&hist[0]);
+        t48_text_centre(&ui, SW / 2, 122, t48_text_width(&t48_font_head, n) > SW - 24 ? &t48_font_normal : &t48_font_head, C_DIM, n);
+    }
+    if (P.ended_detail[0]) t48_text_centre(&ui, SW / 2, 166, &t48_font_normal, C_DIM, P.ended_detail);
+}
+
+static void hang_up_now(void) { hang_up(); update_lamps(); changed(); }
+
+/* a soft key on the dialler or a call screen: what its label says */
+void phone_soft(int b)
+{
+    switch (P.st) {
+    case PH_DIAL:
+        if (b == 0) phone_key(T48_KEY_OK, 1);
+        else if (b == 1) { if (P.number[0]) phone_key(T48_KEY_BACK, 1); }
+        else if (b == 2) { if (accts_on() > 1) phone_key(T48_KEY_RIGHT, 1); }
+        else { go_idle(); changed(); }
+        break;
+    case PH_OUTGOING:
+        if (b == 0) phone_key(SK_SPEAKER, 1);
+        else if (b == 3) hang_up_now();
+        break;
+    case PH_INCOMING:
+        if (b == 0) phone_key(T48_KEY_OK, 1);
+        else if (b == 3) phone_key(T48_KEY_BACK, 1);
+        break;
+    case PH_INCALL:
+        if (P.xfer) {
+            if (b == 0) { if (P.number[0]) { do_transfer(); changed(); } }
+            else if (b == 1) phone_key(T48_KEY_OK, 1);
+            else if (b == 2) { delete_char(); changed(); }
+            else { P.xfer = 0; P.number[0] = 0; changed(); }
+        } else if (b == 3) {
+            hang_up_now();
+        } else if (P.o_st == O_WAITING) {
+            if (b == 0) answer_waiting(); else if (b == 1) decline_waiting(); else break;
+            update_lamps();
+            changed();
+        } else if (P.o_st == O_HELD && !P.joining) {
+            if (b == 0) swap_calls(); else if (b == 1) join_calls(); else { phone_key(SK_MUTE, 1); break; }
+            update_lamps();
+            changed();
+        } else {
+            phone_key(b == 0 ? SK_MUTE : b == 1 ? SK_HOLD : SK_TRANSFER, 1);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 static void draw_dial(void)
 {
+    if (SMALL) { draw_dial_small(); return; }
     ui_header("Dial", 0, 0);
     ui_panel(24, KP_Y, 448, 110);
     if (P.number[0]) {
@@ -1387,6 +1552,7 @@ static void draw_dial(void)
 static void draw_outgoing(void)
 {
     char b[120];
+    if (SMALL) { draw_outgoing_small(); return; }
     ui_header(P.consult ? "Asking first" : "Calling", 0, B_LIT);
     big_text(SW / 2, 104, 720, who(), C_TEXT);
     if (P.c.name[0]) t48_text_centre(&ui, SW / 2, 160, &t48_font_head, C_DIM, P.c.peer);
@@ -1405,6 +1571,7 @@ static void draw_outgoing(void)
 
 static void draw_incoming(void)
 {
+    if (SMALL) { draw_incoming_small(); return; }
     ui_header("Incoming call", 0, B_GO);
     big_text(SW / 2, 112, 720, who(), C_TEXT);
     if (P.c.name[0]) t48_text_centre(&ui, SW / 2, 172, &t48_font_head, C_DIM, P.c.peer);
@@ -1454,6 +1621,7 @@ static void draw_incall(void)
     int side = P.keypad || P.xfer;       /* the keypad takes the right of the screen */
     int cx = side ? 248 : SW / 2, maxw = side ? 440 : 720;
 
+    if (SMALL) { draw_incall_small(); return; }
     call_time(t, sizeof t);
     ui_header(P.xfer ? "Transfer to" : P.c.held ? "On hold" : "In call", 0, P.c.held ? B_LIT : B_GO);
     if (P.xfer) {
@@ -1501,6 +1669,7 @@ static void draw_incall(void)
 
 static void draw_ended(void)
 {
+    if (SMALL) { draw_ended_small(); return; }
     ui_header("Call", 0, 0);
     t48_text_centre(&ui, SW / 2, 120, &t48_font_big, C_TEXT, P.ended);
     if (hist[0].number[0] && nhist) t48_text_centre(&ui, SW / 2, 196, &t48_font_head, C_DIM, hist_name(&hist[0]));
@@ -1526,19 +1695,21 @@ void phone_draw_overlay(void)
     char b[8];
     struct row_ink ink;
     if (!P.vol_until) return;
-    int x = 200, y = 300, w = 400, h = 76, v = P.vol[P.vol_shown];
+    int w = SMALL ? 320 : 400, step = SMALL ? 19 : 24;
+    int x = SMALL ? (SW - w) / 2 : 200, y = SMALL ? BAR_Y - 84 : 300, h = 76, v = P.vol[P.vol_shown];
     ui_popup(x, y, w, h, B_PLAIN);
     ui_dialog_ink(&ink);
     t48_text(&ui, x + 20, y + 12, &t48_font_bold, ink.text, vol_labels[P.vol_shown]);
     snprintf(b, sizeof b, "%d", v);
     t48_text_right(&ui, x + w - 20, y + 12, &t48_font_bold, ink.text, b);
     for (int i = 0; i < T48AC_VOL_MAX; i++)
-        t48_fill(&ui, x + 20 + i * 24, y + 46, 20, 14, i < v ? ink.text : t48_mix(ink.text, ui_ground(), 200));
+        t48_fill(&ui, x + 20 + i * step, y + 46, step - 4, 14, i < v ? ink.text : t48_mix(ink.text, ui_ground(), 200));
 }
 
 void phone_touch(int x, int y)
 {
     int k;
+    if (SMALL) return;   /* the soft keys' labels are its buttons */
     switch (P.st) {
     case PH_DIAL:
         if ((k = keypad_hit(x, y))) phone_key(k, 1);
@@ -1630,7 +1801,8 @@ void phone_draw_history(void)
     ui_clear(C_BG);
     ui_header("Calls", 1, 0);
     if (!nhist) {
-        t48_text_centre(&ui, SW / 2, 200, &t48_font_head, C_DIM, "No calls");
+        t48_text_centre(&ui, SW / 2, SMALL ? (HEAD_H + BAR_Y - t48_font_head.height) / 2 : 200, &t48_font_head, C_DIM, "No calls");
+        ui_bar(NULL, 0, NULL, 0, NULL, 0, "Back", B_PLAIN);
         return;
     }
     if (P.hist_sel >= nhist) P.hist_sel = nhist - 1;
@@ -1646,6 +1818,16 @@ void phone_draw_history(void)
         localtime_r(&t, &tm);
         strftime(when, sizeof when, tm.tm_yday == today.tm_yday && tm.tm_year == today.tm_year ? "%H:%M" : "%e %b %H:%M", &tm);
         if (h->secs) snprintf(dur, sizeof dur, "%d:%02d", h->secs / 60, h->secs % 60);
+        if (SMALL) {
+            /* which way, who, when */
+            int ty = SROW_Y(r) + (SROW_H - t48_font_normal.height) / 2, ww = t48_text_width(&t48_font_small, when);
+            ui_row(8, SROW_Y(r), SW - 16, SROW_H, selected, &ink);
+            t48_text(&ui, 18, ty, &t48_font_bold, selected ? ink.text : h->kind == 'm' ? C_BAD : h->kind == 'o' ? C_DIM : C_GOOD,
+                     h->kind == 'm' ? "Missed" : h->kind == 'o' ? "Out" : "In");
+            t48_text_fit(&ui, 94, ty, SW - 94 - ww - 30, &t48_font_normal, ink.text, name);
+            t48_text_right(&ui, SW - 18, SROW_Y(r) + (SROW_H - t48_font_small.height) / 2, &t48_font_small, ink.dim, when);
+            continue;
+        }
         ui_row(16, y, SW - 32, 46, selected, &ink);
         t48_text(&ui, 36, y + 12, &t48_font_bold, selected ? ink.text : h->kind == 'm' ? C_BAD : h->kind == 'o' ? C_DIM : C_GOOD,
                  h->kind == 'm' ? "Missed" : h->kind == 'o' ? "Out" : "In");
@@ -1658,6 +1840,21 @@ void phone_draw_history(void)
             t48_text_fit(&ui, 392, y + 15, 150, &t48_font_small, ink.dim, acct_label(h->acct - 1));
         t48_text_right(&ui, 620, y + 12, &t48_font_normal, ink.dim, dur);
         t48_text_right(&ui, SW - 34, y + 12, &t48_font_normal, ink.dim, when);
+    }
+    if (SMALL) {
+        int known = contacts_name(hist[P.hist_sel].number) != NULL;
+        if (nhist > HIST_ROWS) {
+            char b[24];
+            snprintf(b, sizeof b, "%d/%d", P.hist_sel + 1, nhist);
+            t48_text_right(&ui, HEAD_NOTE_X, (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, T->on_head_dim, b);
+        }
+        if (P.hist_confirm) {
+            ui_ask("Clear all calls?", NULL, NULL, B_STOP);
+            ui_bar(NULL, 0, NULL, 0, "Cancel", B_PLAIN, "Clear", B_STOP);
+        } else {
+            ui_bar("Dial", B_GO, known ? "Saved" : "Add", known ? B_OFF : B_PLAIN, "Delete", B_PLAIN, "Clear", B_PLAIN);
+        }
+        return;
     }
     if (P.hist_confirm) {
         t48_text(&ui, 24, HIST_BTN_Y + (HIST_BTN_H - t48_font_bold.height) / 2, &t48_font_bold, C_TEXT, "Clear all calls?");
@@ -1709,10 +1906,41 @@ void phone_history_key(int code)
     changed();
 }
 
+/* the row of buttons under the list, or the soft keys: Dial, Add contact, Delete, Clear all */
+static void history_button(int b)
+{
+    if (b == 0) {
+        history_pick(P.hist_sel);
+    } else if (b == 1) {
+        if (!contacts_name(hist[P.hist_sel].number)) {
+            char n[64], name[64];
+            snprintf(n, sizeof n, "%s", hist[P.hist_sel].number);
+            snprintf(name, sizeof name, "%s", hist[P.hist_sel].name);
+            shell_show_history(0);
+            contacts_open_add(n, name);
+        }
+    } else if (b == 2) {
+        history_delete(P.hist_sel);
+        changed();
+    } else {
+        P.hist_confirm = 1;
+        changed();
+    }
+}
+
 void phone_history_touch(int x, int y)
 {
     int top = P.hist_sel >= HIST_ROWS ? P.hist_sel - HIST_ROWS + 1 : 0;
     if (!nhist) return;
+    if (SMALL) {
+        for (int r = 0; !P.hist_confirm && r < HIST_ROWS && top + r < nhist; r++)
+            if (ui_inside(x, y, 8, SROW_Y(r), SW - 16, SROW_STEP)) {
+                if (top + r == P.hist_sel) history_pick(top + r);
+                else { P.hist_sel = top + r; changed(); }
+                return;
+            }
+        return;
+    }
     if (P.hist_confirm) {
         if (ui_inside(x, y, 596, HIST_BTN_Y, 188, HIST_BTN_H)) phone_history_key(T48_KEY_OK);
         else if (ui_inside(x, y, 416, HIST_BTN_Y, 170, HIST_BTN_H)) phone_history_key(T48_KEY_BACK);
@@ -1725,24 +1953,23 @@ void phone_history_touch(int x, int y)
             else { P.hist_sel = top + r; changed(); }
             return;
         }
-    if (ui_inside(x, y, 16, HIST_BTN_Y, 180, HIST_BTN_H)) history_pick(P.hist_sel);
-    else if (ui_inside(x, y, 206, HIST_BTN_Y, 200, HIST_BTN_H)) {
-        if (!contacts_name(hist[P.hist_sel].number)) {
-            char n[64], name[64];
-            snprintf(n, sizeof n, "%s", hist[P.hist_sel].number);
-            snprintf(name, sizeof name, "%s", hist[P.hist_sel].name);
-            shell_show_history(0);
-            contacts_open_add(n, name);
-        }
-    }
-    else if (ui_inside(x, y, 416, HIST_BTN_Y, 170, HIST_BTN_H)) { history_delete(P.hist_sel); changed(); }
-    else if (ui_inside(x, y, 596, HIST_BTN_Y, 188, HIST_BTN_H)) { P.hist_confirm = 1; changed(); }
+    if (ui_inside(x, y, 16, HIST_BTN_Y, 180, HIST_BTN_H)) history_button(0);
+    else if (ui_inside(x, y, 206, HIST_BTN_Y, 200, HIST_BTN_H)) history_button(1);
+    else if (ui_inside(x, y, 416, HIST_BTN_Y, 170, HIST_BTN_H)) history_button(2);
+    else if (ui_inside(x, y, 596, HIST_BTN_Y, 188, HIST_BTN_H)) history_button(3);
 }
 
 /* a soft key is a touch on the button above it: Dial, Add contact, Delete, Clear all */
 void phone_history_soft(int b)
 {
     static const int mid[4] = {16 + 90, 206 + 100, 416 + 85, 596 + 94};
+    if (SMALL) {
+        /* as the labels say */
+        if (!nhist) { if (b == 3) shell_show_history(0); }
+        else if (P.hist_confirm) { if (b >= 2) phone_history_key(b == 3 ? T48_KEY_OK : T48_KEY_BACK); }
+        else history_button(b & 3);
+        return;
+    }
     phone_history_touch(mid[b & 3], HIST_BTN_Y + HIST_BTN_H / 2);
 }
 

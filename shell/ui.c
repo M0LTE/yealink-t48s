@@ -129,16 +129,52 @@ void ui_header_idle(void)
 {
     char net[80], acc[120];
     uint32_t acc_colour;
-    int up, y = (HEAD_H - t48_font_normal.height) / 2;
+    int up, y = (HEAD_H - t48_font_normal.height) / 2, m = SMALL ? 10 : 24;
 
     t48_ui_header_ground(&ui);
     ui_network_status(net, sizeof net, &up);
-    ui_lamp(24, HEAD_H / 2 - 6, up ? C_GOOD : C_BAD);
-    t48_text(&ui, 46, y, &t48_font_normal, T->on_head, net);
+    ui_lamp(m, HEAD_H / 2 - 6, up ? C_GOOD : C_BAD);
+    int nx = t48_text(&ui, m + 22, y, &t48_font_normal, T->on_head, net);
     phone_account_text(acc, sizeof acc, &acc_colour);
     int w = t48_text_width(&t48_font_normal, acc);
-    t48_text_right(&ui, SW - 24, y, &t48_font_normal, T->on_head, acc);
-    ui_lamp(SW - 24 - w - 22, HEAD_H / 2 - 6, acc_colour);
+    if (SMALL && w > SW - m - 22 - nx - 16) {
+        /* a small screen: the account gives way to the address */
+        w = SW - m - 22 - nx - 16;
+        t48_text_fit(&ui, SW - m - w, y, w, &t48_font_normal, T->on_head, acc);
+    } else {
+        t48_text_right(&ui, SW - m, y, &t48_font_normal, T->on_head, acc);
+    }
+    ui_lamp(SW - m - w - 22, HEAD_H / 2 - 6, acc_colour);
+}
+
+/* ---------- words over two lines ---------- */
+
+void ui_two_lines(int x, int y, int w, const t48_font *f, uint32_t c, const char *text)
+{
+    char line[220];
+    size_t n = strlen(text), cut = n;
+    snprintf(line, sizeof line, "%s", text);
+    while (cut > 0 && (line[cut] = 0, t48_text_width(f, line) > w)) {
+        do cut--; while (cut > 0 && text[cut] != ' ');
+    }
+    if (cut == 0) { t48_text_fit(&ui, x, y + f->height / 2, w, f, c, text); return; }
+    if (cut == n) { t48_text(&ui, x, y + f->height / 2 + 1, f, c, line); return; }
+    t48_text(&ui, x, y, f, c, line);
+    t48_text_fit(&ui, x, y + f->height + 2, w, f, c, text + cut + 1);
+}
+
+void ui_two_lines_centred(int cx, int y, int w, const t48_font *f, uint32_t c, const char *text)
+{
+    char line[220];
+    size_t n = strlen(text), cut = n;
+    snprintf(line, sizeof line, "%s", text);
+    while (cut > 0 && (line[cut] = 0, t48_text_width(f, line) > w)) {
+        do cut--; while (cut > 0 && text[cut] != ' ');
+    }
+    if (cut == 0 || cut == n) { t48_text_centre(&ui, cx, y + f->height / 2, f, c, cut ? line : text); return; }
+    t48_text_centre(&ui, cx, y, f, c, line);
+    if (t48_text_width(f, text + cut + 1) > w) t48_text_fit(&ui, cx - w / 2, y + f->height + 2, w, f, c, text + cut + 1);
+    else t48_text_centre(&ui, cx, y + f->height + 2, f, c, text + cut + 1);
 }
 
 /* ---------- a theme, small ---------- */
@@ -155,6 +191,23 @@ void ui_theme_preview(const t48_theme *t, int x, int y, int w, int h, int curren
 
     t48_theme_use(t, ui_fonts(t->font));
     t48_ui_clear(&box, t->bg);
+    if (SMALL) {
+        /* the same parts, closer together */
+        int ty = (HEAD_H - t48_font_bold.height) / 2;
+        t48_ui_header_ground(&box);
+        if (current) t48_ui_lamp(&box, 8, HEAD_H / 2 - 6, t->good);
+        t48_text(&box, current ? 26 : 8, ty, &t48_font_bold, t->on_head, "Calls");
+        t48_text_right(&box, w - 8, ty, &t48_font_bold, t->on_head_dim, "16:25");
+        t48_ui_row(&box, 6, 36, w - 12, 28, 0, &ink);
+        t48_text(&box, 14, 36 + (28 - t48_font_normal.height) / 2, &t48_font_normal, ink.text, "Alice");
+        t48_ui_row(&box, 6, 68, w - 12, 28, 1, &ink);
+        t48_text(&box, 14, 68 + (28 - t48_font_normal.height) / 2, &t48_font_normal, ink.text, "Bob");
+        t48_ui_btn(&box, 6, 104, w - 12, h - 110, "Call", T48_UI_GO);
+        t48_rect(&box, 0, 0, w, h, t->line);
+        t48_theme_use(&was, ui_fonts(was.font));
+        t48_ui_ground_is(ground);
+        return;
+    }
     t48_ui_header_ground(&box);
     if (current) t48_ui_lamp(&box, 14, HEAD_H / 2 - 6, t->good);
     t48_text(&box, current ? 36 : 14, (HEAD_H - t48_font_bold.height) / 2, &t48_font_bold, t->on_head, "Calls");
