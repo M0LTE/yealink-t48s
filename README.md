@@ -6,7 +6,7 @@ Open firmware for the Yealink SIP-T48S desk phone: Linux 6.18, a SIP phone with 
 
 ## What works
 
-On a T48S: calls on the handset and speaker; hold, mute, transfer, a second call, do not disturb, voicemail; the touchscreen, keys and lamps; Ethernet. The headset socket is untried. Installing, restoring Yealink's firmware and updating have all run on the author's phone, and on no other yet. A T46S can try a build over the network; nobody has started one ([docs/models.md](docs/models.md)). Where things stand and what is missing: [docs/status.md](docs/status.md).
+On a T48S: calls on the handset and speaker; hold, mute, transfer, a second call, do not disturb, voicemail; the touchscreen, keys and lamps; Ethernet. The headset socket is untried. Installing, restoring Yealink's firmware and updating have all run on the author's phone, and on no other yet. A T46S can try a build from a USB stick or over the network, [`t46s-live.zip`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest); nobody has started one ([docs/models.md](docs/models.md)). Where things stand and what is missing: [docs/status.md](docs/status.md).
 
 ## Start
 

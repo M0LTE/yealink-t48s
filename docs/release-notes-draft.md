@@ -21,7 +21,7 @@ A replacement for Yealink's firmware: Linux 6.18, a SIP phone, apps, a web setup
 ## Known limits
 
 - It has been installed on one phone, the author's. Yours would be the second. Install only a phone you could do without.
-- T48S only. A T46S build exists to try over the network and nobody has started it.
+- T48S only. A T46S build exists to try, `t46s-live.zip`, and nobody has started it.
 - A phone with a bad flash block where the firmware goes cannot be installed yet. The installer says so and writes nothing.
 - On the speaker, one side is heard at a time.
 - The headset socket is untried.

@@ -26,7 +26,7 @@ The T48S is a working desk phone on this firmware. All of the below has been don
 - **One kernel slot.** A system update falls back by itself; a kernel that does not start needs a start from the stick.
 - **Releases are not signed.** The updater checks SHA-256 sums fetched over HTTPS.
 - **Not yet tried by hand on the phone:** the restart when the stick comes out at the end of Install and Restore, as the page now does it (issue [#61](https://github.com/M0LTE/yealink-t48s/issues/61); the run of 2026-11-24 used the Restart button it replaced); the rescue menu from X held at a real power-on (issue [#32](https://github.com/M0LTE/yealink-t48s/issues/32); it has run on the phone's screen with keys injected); a stick pushed into a phone that was started from flash (issue [#60](https://github.com/M0LTE/yealink-t48s/issues/60)).
-- **T46S:** a try-only set over TFTP is built. Nobody has started it on a T46S, and the installer must not be used on one ([models.md](models.md), issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10)).
+- **T46S:** a try-only set is built with every build of `main`: `t46s-live.zip` in the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release. Nobody has started it on a T46S, and the installer must not be used on one ([models.md](models.md), issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10)).
 - **Linux 3.6** is still built as a fallback for one release, and the programs are built against its headers until it goes.
 
 Open work: the [issues](https://github.com/M0LTE/yealink-t48s/issues).

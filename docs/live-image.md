@@ -4,7 +4,7 @@ Issue [#7](https://github.com/M0LTE/yealink-t48s/issues/7). This is the "try it"
 
 **Where this stands (2026-11-24).** Works on the phone both ways: from a USB stick (menu option 2) and over TFTP (option 1), with Linux 6.18 and with Yealink's firmware never having run. The stick is the owner's route and the release's `t48s-stick.zip` is that stick ([guide.md](guide.md)). The USB freezes of 2026-11-22 and 23 were the power supply: on a supply that can give 1.5 A, U-Boot reads a stick ([Why the sticks froze](#why-the-sticks-froze)). The sections below are in the order the work was done, and the test plans in them are kept as the record.
 
-**Other models.** A set for the T46S (`T46S.rom`, `T46S.bin`, `T46S.rfs`) is built the same way with `MODEL=t46s` and `model=T46S`; it has not been started on a T46S yet. See [models.md](models.md), which also has the test plan for a T46S owner.
+**Other models.** A set for the T46S (`T46S.rom`, `T46S.bin`, `T46S.rfs`) is built the same way with `MODEL=t46s` and `model=T46S`; CI publishes it as `t46s-live.zip` in the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release. It has not been started on a T46S yet. See [models.md](models.md), which also has the test plan for a T46S owner.
 
 ## The stick
 

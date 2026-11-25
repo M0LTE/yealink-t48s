@@ -2,7 +2,7 @@
 
 Issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10). The T48S is the only phone this firmware has run on. This page is what we know of its sibling the SIP-T46S, how the firmware was made to tell the two apart, and how an owner can try it on a T46S without writing anything to the phone.
 
-**Where this stands (2026-11-24): try-only, and untried.** Nobody here has a T46S. Everything below was worked out from Yealink's and U-Boot's code, which is shared between the models and branches on a hardware id, and from Yealink's datasheet. A T46S live set is built and passes the same file checks as the T48S one. **It has never been started on a T46S.** The first start is the test plan at the end. The installer and the release's `t48s-stick.zip` are for the T48S only.
+**Where this stands (2026-11-25): try-only, and untried.** Nobody here has a T46S. Everything below was worked out from Yealink's and U-Boot's code, which is shared between the models and branches on a hardware id, and from Yealink's datasheet. A T46S live set is built with every build of `main` and passes the same file checks as the T48S one: download `t46s-live.zip` from the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release. **It has never been started on a T46S.** The first start is the test plan at the end. The installer and the release's `t48s-stick.zip` are for the T48S only.
 
 ## What the T46S is
 
@@ -110,11 +110,11 @@ ROOTFS=firststage.cpio MODEL=t46s LIVE=1 sh kernel6/build.sh W         # in the 
 tools/mkliveimage.py build OUT bin=W/T46S.bin system=system.img model=T46S kernel=6.18
 ```
 
-`MODEL=t46s` refuses anything but a live build. The set is `T46S.rom` (our 4 KB label, which already listed id 66), `T46S.bin` and `T46S.rfs`. The one built for the first test is in `dumps/t46s/live/` on the development machine, with its checksums. It is not in a release: build it as above, or ask for it on issue #10.
+`MODEL=t46s` refuses anything but a live build. The set is `T46S.rom` (our 4 KB label, which already listed id 66), `T46S.bin` and `T46S.rfs`. CI builds it the same way on every build of `main` and publishes it as `t46s-live.zip` in the rolling pre-release [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest): the three files, `SHA256SUMS` and a `README.txt` with the owner's steps (`tools/t46s-live-readme.txt`). A `v*` release carries the same zip.
 
 ## Test plan for a T46S owner
 
-**What this is.** A start of the open firmware from RAM, through the phone's own recovery mode, over the network. Nothing of ours is written to the phone: this kernel has no flash driver. Unplugging the power ends it.
+**What this is.** A start of the open firmware from RAM, through the phone's own recovery mode, over the network or from a USB stick. Nothing of ours is written to the phone: this kernel has no flash driver. Unplugging the power ends it.
 
 **What it costs.** One thing, and it is Yealink's doing, not ours: after a recovery start over the network, Yealink's firmware resets its own settings (account, passwords, language) the next time it starts. Use a phone whose settings you can lose, or export them first (Yealink's web page: Settings, Configuration, Export). The phone itself is not at risk: recovery mode lives in U-Boot, which nothing here touches.
 
@@ -122,7 +122,7 @@ Do not use the T48S's stick or its Install page on a T46S: the kernel it writes 
 
 **You need**
 
-- The three files `T46S.rom`, `T46S.bin`, `T46S.rfs` in one folder.
+- The three files `T46S.rom`, `T46S.bin`, `T46S.rfs` in one folder: unpack `t46s-live.zip` from the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release.
 - A PC on the same network as the phone, with a TFTP server serving that folder. On Linux or macOS: `sudo python3 tools/tftpd.py FOLDER 69 --rom-once` from this repository (it prints every file the phone asks for, which we want to see). On Windows, Tftpd64 pointed at the folder.
 - The PC's address, a free address for the phone, the netmask and the gateway.
 - A camera. If you have a 3.3 V USB serial adapter and are happy to open the phone, even better: see "Serial" below, but it is not needed.
@@ -135,6 +135,8 @@ Do not use the T48S's stick or its Install page on a T46S: the kernel it writes 
 4. Press **1**. Enter the phone's address, the netmask, the gateway and the PC's address, as it asks. Photograph what it shows next.
 5. The PC's TFTP server shows the phone fetching a `.rom`, a `.bin` and a `.rfs`. Keep that log.
 6. Within a minute the screen should show text scrolling, then a clock. Photograph the screen at each stage, whatever it shows, especially if it is upside down, has wrong colours, is shifted, or stays as it was.
+
+**From a USB stick instead.** The zip's `README.txt` has these steps. Copy the three files to the top folder of a FAT32 stick (one partition, MBR), put it in the phone, do steps 1 to 3, press **2** instead of 1, and carry on at step 6. Use a 5 V supply of 1.5 A or more ([live-image.md](live-image.md#the-stick)). There is no TFTP log this way, but Yealink's settings survive if the stick is out of the phone before its next start: with the stick left in, Yealink's firmware tries to update from it and resets them. All of that is known from the T48S; a T46S's U-Boot has not been seen reading a stick.
 
 **Checks, in this order; stop at the first that fails and tell us what you saw**
 
@@ -152,7 +154,7 @@ Do not use the T48S's stick or its Install page on a T46S: the kernel it writes 
 
 The line keys do nothing, and no key lamps light: that is expected in this set.
 
-**Going back.** Stop the TFTP server first (Yealink's firmware asks it for the `.rom` on its next start; with `--rom-once` ours already refuses). Unplug the power, plug it in, hold nothing. Yealink starts, with its settings reset as said above. If it sits at the logo for more than two minutes, unplug and plug in once more.
+**Going back.** From a stick: unplug the power, take the stick out, plug the power in. Over the network: stop the TFTP server first (Yealink's firmware asks it for the `.rom` on its next start; with `--rom-once` ours already refuses). Unplug the power, plug it in, hold nothing. Yealink starts, with its settings reset as said above. If it sits at the logo for more than two minutes, unplug and plug in once more.
 
 **If it goes wrong**
 
