@@ -49,8 +49,7 @@ shot shots/install-no-files.png
 # a phone whose flash the driver does not know (docs/models.md): nothing offered
 run sh -c "echo none > simdata/fw/backup; echo yes > simdata/fw/files; echo unknown > simdata/fw/layout"
 waitstate settings.rows 4 5000
-expectstate settings.row Flash
-expectstate settings.value Not_recognised
+expectstate settings.value Nothing_can_be_installed_on_this_phone
 shot shots/install-unknown-flash.png
 run sh -c "echo matches > simdata/fw/layout"
 waitstate settings.rows 5 5000
