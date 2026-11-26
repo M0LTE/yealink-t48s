@@ -28,16 +28,17 @@
 #include <unistd.h>
 #include "shell.h"
 #include "dialplan.h"
+#include "certs.h"
 
 #ifndef T48_VERSION
 #define T48_VERSION "development build"
 #endif
 
 enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_SIPADV, P_CODECS, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE,
-             P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL, P_ADVANCED, P_FWD, P_FEEDS, P_FEED };
+             P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL, P_ADVANCED, P_FWD, P_FEEDS, P_FEED, P_CERTS };
 static const char *const page_names[] = {"root", "accounts", "sip", "sipadvanced", "codecs", "network", "time", "timezone", "sound", "screen", "access", "about",
                                          "appsettings", "appconf", "store", "storeapp", "theme", "update", "install", "advanced", "forward",
-                                         "feeds", "feed"};
+                                         "feeds", "feed", "certs"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION,
                 R_HEAD };   /* a group's name above its rows: never chosen, the keys step over it */
@@ -48,7 +49,7 @@ enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16, F_
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_REMOVE, A_UPDATE_ALL,
               A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME,
               A_UPD_CHANNEL, A_UPD_CHECK, A_UPD_INSTALL, A_UPD_KERNEL, A_UPD_RESTART,
-              A_FW_BACKUP, A_FW_INSTALL, A_FW_RESTORE, A_KEYTEST, A_DND };
+              A_FW_BACKUP, A_FW_INSTALL, A_FW_RESTORE, A_KEYTEST, A_DND, A_CERT_REMOVE };
 
 struct row {
     int kind, flags;
@@ -889,6 +890,34 @@ static void build_advanced(void)
              cfg_str("phone", "dialplan", "")[0] ? "Empty for the default. " : "");
     /* issue #77: calls only from the accounts' servers; baresip reads it at start */
     add_stored(R_TOGGLE, "Block direct calls", "phone", "block_direct", "off", 0);
+    /* issue #78: roots added on the web setup page for SIP over TLS */
+    {
+        char dir[300], v[16];
+        struct cert list[CERT_MAX];
+        certs_dir(dir, sizeof dir);
+        int n = cert_list(dir, list, CERT_MAX);
+        if (n) snprintf(v, sizeof v, "%d", n);
+        else snprintf(v, sizeof v, "None");
+        add_menu("Certificates", P_CERTS, v);
+    }
+}
+
+/* the root certificates added for SIP over TLS, each removable; they are added on the web setup page */
+static void build_certs(void)
+{
+    char dir[300], date[16];
+    struct cert list[CERT_MAX];
+    long long now = (long long)time(NULL);
+    snprintf(title, sizeof title, "Certificates");
+    certs_dir(dir, sizeof dir);
+    int n = cert_list(dir, list, CERT_MAX);
+    for (int i = 0; i < n; i++) {
+        struct row *r = add_action(list[i].subject, A_CERT_REMOVE, list[i].id);
+        cert_date(list[i].not_after, date, sizeof date);
+        snprintf(r->value, sizeof r->value, "%s %s", list[i].not_after < now ? "Expired" : "Expires", date);
+        if (list[i].not_after < now) r->flags |= F_DANGER;
+    }
+    if (!n) snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "None. Add in Web setup");
 }
 
 /* what an account's forwarding comes to, for its row: Off, or the first kind that is on */
@@ -985,6 +1014,8 @@ static void build_sipadv(const char *arg)
     add_stored(R_CHOICE, "Session timer", f, "session_timer", "off", 0)->choices = "off|300|600|1800|3600";
     struct row *r = add_stored(R_CHOICE, "100rel", f, "100rel", "off", 0);
     r->choices = !strcmp(r->value, "required") ? "off|on|required" : "off|on";
+    /* media encryption (issue #78, docs/sip.md#srtp) */
+    add_stored(R_CHOICE, "SRTP", f, "srtp", "off", 0)->choices = "off|optional|compulsory|dtls";
 }
 
 /* the codecs an account offers, in order: each a switch, moved with Up and Down */
@@ -1517,6 +1548,7 @@ static void rebuild(void)
     case P_UPDATE: build_update(); break;
     case P_INSTALL: build_install(); break;
     case P_FWD: build_fwd(stack[depth].arg); break;
+    case P_CERTS: build_certs(); break;
     case P_ADVANCED: build_advanced(); break;
     case P_FEEDS: build_feeds(); break;
     case P_FEED: build_feed(stack[depth].arg); break;
@@ -1788,6 +1820,13 @@ static void do_action(const struct row *r)
         snprintf(ov.arg, sizeof ov.arg, "%s", r->def);
         snprintf(ov.title, sizeof ov.title, "Remove account %d?", atoi(stack[depth].arg) < 1 ? 1 : atoi(stack[depth].arg));
         break;
+    case A_CERT_REMOVE:
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_CONFIRM;
+        ov.act = A_CERT_REMOVE;
+        snprintf(ov.arg, sizeof ov.arg, "%s", r->arg);
+        snprintf(ov.title, sizeof ov.title, "Remove %s?", r->label);
+        break;
     case A_FORGET_KEYS:
         memset(&ov, 0, sizeof ov);
         ov.kind = O_CONFIRM;
@@ -1861,6 +1900,16 @@ static void confirmed(enum action act, const char *arg)
         break;
     case A_FW_INSTALL: fw_job("install", "Installing"); break;
     case A_FW_RESTORE: fw_job("restore", "Restoring"); break;
+    case A_CERT_REMOVE: {
+        char dir[300];
+        certs_dir(dir, sizeof dir);
+        if (cert_remove(dir, arg) == 0) {
+            logmsg("settings: certificate %s removed", arg);
+            snprintf(dirty, sizeof dirty, "sip");   /* baresip reads them at start */
+        }
+        rebuild();
+        break;
+    }
     case A_ACCOUNT_REMOVE: {
         char path[400];
         if (strncmp(arg, "sip", 3) || strchr(arg, '/')) break;
@@ -2247,6 +2296,7 @@ static const char *choice_text(const char *v)
                                              {"inband", "In-band"}, {"info", "SIP INFO"},
                                              {"standard", "Standard"}, {"long", "Long"}, {"chime", "Chime"}, {"pulse", "Pulse"},
                                              {"custom", "Custom"}, {"off", "Off"}, {"on", "On"}, {"required", "Required"},
+                                             {"optional", "Optional"}, {"compulsory", "Compulsory"}, {"dtls", "DTLS-SRTP"},
                                              {"300", "5 min"}, {"600", "10 min"}, {"1800", "30 min"}, {"3600", "1 h"}};
     for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
         if (!strcmp(v, map[i][0])) return map[i][1];

@@ -37,7 +37,9 @@ They are downloaded and built by CI, not kept here. Versions are pinned in `buil
 | GCC's runtime library (libgcc) | linked into every program | GPL-3.0-or-later with the GCC Runtime Library Exception |
 | dropbear | the system image | MIT, with parts under BSD-2-Clause and public domain |
 | curl | the system image | curl |
-| Mbed TLS | the system image | Apache-2.0 or GPL-2.0-or-later |
+| Mbed TLS | the system image (curl) | Apache-2.0 or GPL-2.0-or-later |
+| OpenSSL | the system image (baresip: SIP over TLS, SRTP) | Apache-2.0 |
+| zlib | the system image (curl links it since Buildroot's OpenSSL brings it in, #78) | Zlib |
 | ca-certificates (Mozilla's list) | the system image | MPL-2.0 |
 | baresip and re (libre) | the system image | BSD-3-Clause |
 | libg722 | the system image | BSD-2-Clause and public domain |
@@ -45,7 +47,7 @@ They are downloaded and built by CI, not kept here. Versions are pinned in `buil
 | GCC, binutils and the other host tools | the app SDK (`t48s-sdk.tar.gz`) | GPL-3.0-or-later, GPL-2.0-or-later and others: the host manifest lists each |
 | Buildroot, which builds all of the above | not shipped | GPL-2.0-or-later |
 
-The licence texts of baresip, re, libg722, libopus and Mbed TLS are also on the phone, in `/usr/share/t48/sip/licences`.
+The licence texts of baresip, re, libg722, libopus and OpenSSL are also on the phone, in `/usr/share/t48/sip/licences`.
 
 ## Source for the binaries
 

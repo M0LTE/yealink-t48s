@@ -51,7 +51,8 @@ python3 "$SIP/test/mwi.py" serve $W/mwi >$W/mwi.log 2>&1 &
 PIDS="$PIDS $!"
 sleep 1
 
-# side NAME USER PORT TRANSPORT DISPLAY-NAME SETTINGS-FILE [far]: one baresip, started by t48-sip as on the phone
+# side NAME USER PORT TRANSPORT DISPLAY-NAME SETTINGS-FILE [far [SETTING]]: one baresip, started by t48-sip
+# as on the phone; SETTING is one more key=value line for its settings file
 side() {
     d=$W/$1
     mkdir -p $d
@@ -66,6 +67,7 @@ side() {
         -e "s|^audio_player.*|audio_player\t\taufile,$d/heard.wav|" $d/config.in
     printf 'user=%s\npassword=test-only-%s\ndomain=127.0.0.1\ntransport=%s\ndisplay_name=%s\nregister_seconds=60\n' \
         "$2" "$2" "$4" "$5" > "$6"
+    [ -z "$8" ] || printf '%s\n' "$8" >> "$6"
     # t48-sip runs "$BARESIP -f DIR", so a wrapper carries the qemu prefix
     if [ "$7" = far ]; then bin=$BARESIP; else bin=$PHONE_BARESIP; fi
     printf '#!/bin/sh\nexec %s "$@"\n' "$bin" > $d/baresip
@@ -88,7 +90,8 @@ echo voicemail=1002 >> $W/phone-config/sip
 printf '#!/bin/sh\n[ "$1" = sip ] || exit 0\npkill -f -- "-f %s/phone/run"\nsleep 1\n%s/phone/start &\n' $W $W > $W/apply
 chmod +x $W/apply
 side bob 1002 5072 tcp "Bob Example" $W/bob.sip far
-side carol 1003 5073 udp "Carol Example" $W/carol.sip far
+# carol takes SRTP when offered and calls in plain RTP when not (issue #78, 28-srtp.script)
+side carol 1003 5073 udp "Carol Example" $W/carol.sip far srtp=optional
 
 export FAR="python3 $SIP/test/far.py" STRANGER="python3 $SIP/test/stranger.py" DTMF="python3 $SIP/test/dtmf.py"
 export PHONE=$W/phone/run/ctrl.sock BOB=$W/bob/run/ctrl.sock CAROL=$W/carol/run/ctrl.sock

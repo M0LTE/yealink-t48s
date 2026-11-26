@@ -3,7 +3,8 @@
 so that the call screens can be reached with no SIP service. Every account is registered. A
 call that is dialled rings for a second and a half and is answered. A line written to
 SOCKET.cmd is done and the file removed:
-    incoming NUMBER [NAME]    a call comes in"""
+    incoming NUMBER [NAME]    a call comes in
+    secure                    every call's audio is now SRTP (CALL_MENC, issue #78)"""
 import json
 import os
 import select
@@ -56,6 +57,9 @@ while True:
                 os.unlink(cmd)
                 if words and words[0] == "incoming":
                     send(c, type="CALL_INCOMING", **new_call("incoming", words[1], " ".join(words[2:])))
+                elif words and words[0] == "secure":
+                    for call in calls.values():
+                        send(c, type="CALL_MENC", **dict(call, param="0,audio,AES_CM_128_HMAC_SHA1_80"))
             if not select.select([c], [], [], 0.05)[0]:
                 continue
             d = c.recv(4096)

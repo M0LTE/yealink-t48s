@@ -2,8 +2,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # baresip (docs/sip.md). Waits, quietly, for three things: an account (the owner
 # enters it under Settings, Phone account), the audio service, and an address.
+# And a fourth when an account uses TLS or DTLS-SRTP (issue #78): the clock. The
+# phone has no clock that runs while it is off, so until NTP sets it the date is
+# 1970, every certificate looks not yet valid, and DTLS-SRTP would make its own
+# certificate dated then. Set means at least the year this image was built.
 exec 2>&1 </dev/null
 [ -s /data/config/sip ] || { sleep 5; exit 0; }
 [ -S /run/t48-audiod/call.sock ] || { sleep 1; exit 0; }
 ifconfig eth0 2>/dev/null | grep -q 'inet addr' || { sleep 2; exit 0; }
+if cat /data/config/sip* 2>/dev/null | grep -q -e '^transport=tls' -e '^srtp=dtls'; then
+    built=$(sed -n 's/^built=\([0-9]\{4\}\).*/\1/p' /etc/t48-release 2>/dev/null)
+    [ "$(date +%Y)" -ge "${built:-2026}" ] || { sleep 2; exit 0; }
+fi
 exec t48-sip

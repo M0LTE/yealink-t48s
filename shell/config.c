@@ -353,6 +353,11 @@ void ringtone_path(const char *acct_file, char *out, size_t n)
     snprintf(out, n, "%s/ringtones/%s.s16", opt.state, acct_file);
 }
 
+void certs_dir(char *out, size_t n)
+{
+    snprintf(out, n, "%s/certs", opt.config);
+}
+
 /* a forwarding target that is the account itself: its user, user@server,
  * or sip:user@server. A call sent there would come straight back. */
 int forward_to_self(const char *target, const char *user, const char *domain)

@@ -2,11 +2,11 @@
 config BR2_PACKAGE_LIBRE
 	bool "libre"
 	depends on BR2_INSTALL_LIBSTDCPP # CMake checks atomics in C++
-	select BR2_PACKAGE_MBEDTLS
+	select BR2_PACKAGE_OPENSSL
 	help
 	  libre, baresip's SIP, RTP and networking library, built as in
-	  sip/build.sh: static, mbedTLS for the hashes SIP digest login
-	  and STUN need (no TLS), and the patch in sip/patches for our
-	  3.6 kernel headers. Staging only.
+	  sip/build.sh: static, with OpenSSL for SIP over TLS, SRTP and
+	  the hashes digest login and STUN need, and the patch in
+	  sip/patches for our 3.6 kernel headers. Staging only.
 
 	  https://github.com/baresip/re

@@ -10,7 +10,7 @@ BARESIP_SOURCE = v$(BARESIP_VERSION).tar.gz
 BARESIP_SITE = https://github.com/baresip/baresip/archive/refs/tags
 BARESIP_LICENSE = BSD-3-Clause
 BARESIP_LICENSE_FILES = LICENSE
-BARESIP_DEPENDENCIES = libre libg722 opus mbedtls
+BARESIP_DEPENDENCIES = libre libg722 opus openssl
 
 BARESIP_SIP = $(BR2_EXTERNAL_T48S_PATH)/../sip
 
@@ -35,8 +35,8 @@ BARESIP_CONF_OPTS = \
 	-DRE_INCLUDE_DIR=$(STAGING_DIR)/usr/include/re \
 	-DRE_LIBRARY=$(STAGING_DIR)/usr/lib/libre.a \
 	-Dre_DIR=$(STAGING_DIR)/usr/lib/cmake/re \
-	-DUSE_OPENSSL=OFF -DUSE_MBEDTLS=ON \
-	-DCMAKE_C_STANDARD_LIBRARIES=$(STAGING_DIR)/usr/lib/libmbedcrypto.a
+	-DUSE_OPENSSL=ON -DUSE_MBEDTLS=OFF \
+	-DOPENSSL_ROOT_DIR=$(STAGING_DIR)/usr -DOPENSSL_USE_STATIC_LIBS=ON
 
 # only the program: the static and shared libraries are not wanted
 BARESIP_BUILD_OPTS = --target baresip_exe
@@ -50,7 +50,7 @@ define BARESIP_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0644 $(LIBRE_DIR)/LICENSE $(TARGET_DIR)/usr/share/t48/sip/licences/re.LICENSE
 	$(INSTALL) -D -m 0644 $(LIBG722_DIR)/LICENSE $(TARGET_DIR)/usr/share/t48/sip/licences/libg722.LICENSE
 	$(INSTALL) -D -m 0644 $(OPUS_DIR)/COPYING $(TARGET_DIR)/usr/share/t48/sip/licences/opus.LICENSE
-	$(INSTALL) -D -m 0644 $(MBEDTLS_DIR)/LICENSE $(TARGET_DIR)/usr/share/t48/sip/licences/mbedtls.LICENSE
+	$(INSTALL) -D -m 0644 $(LIBOPENSSL_DIR)/LICENSE.txt $(TARGET_DIR)/usr/share/t48/sip/licences/openssl.LICENSE
 endef
 
 $(eval $(cmake-package))

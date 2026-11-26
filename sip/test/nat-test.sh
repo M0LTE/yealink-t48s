@@ -13,8 +13,8 @@
 #   2. the router restarts (all bindings gone): alice's next OPTIONS comes
 #      back with a new public port, she registers again, and bob's call
 #      reaches her
-#      (meanwhile carol, on TLS in a build without it, cannot send her
-#      REGISTER at all, and must be tried again every 30 to 60 s)
+#      (meanwhile carol, on TCP with TCP left out of her config, cannot send
+#      her REGISTER at all, and must be tried again every 30 to 60 s)
 #   3. keepalive=off: the binding goes after 40 s and bob's call does not
 #      reach alice (the NAT stand-in is real)
 #
@@ -52,6 +52,8 @@ instance() {
         -e "s|^audio_player.*|audio_player\t\taufile,/dev/null|" \
         "$SIP/config/config" > $d/config.in
     printf 'net_interface\t\t127.0.0.1\n' >> $d/config.in
+    # carol's transport (TCP) is left out of the config, so her REGISTER cannot be sent at all
+    [ "$1" != carol ] || sed -i "s/^sip_transports.*/sip_transports\t\tudp/" $d/config.in
     printf 'user=%s\npassword=test-only-%s\ndomain=%s\ntransport=%s\nregister_seconds=600\nmwi=off\n%s\n' \
         "$1" "$1" "$4" "$3" "$5" > $d/sip
     T48_SIP_SETTINGS=$d/sip T48_SIP_CONFIG=$d/config.in T48_SIP_RUN=$d/run BARESIP=$HOST_BARESIP \
@@ -80,7 +82,7 @@ sys.exit(0 if rang else 1)
 echo "== 1. keepalives on, 130 s"
 instance alice 5071 udp 127.0.0.1:5090
 instance bob 5072 tcp 127.0.0.1
-instance carol 5073 tls 127.0.0.1
+instance carol 5073 tcp 127.0.0.1
 sleep 130
 grep -h "t48keepalive" $W/alice/log $W/bob/log | sed 's/^/  log: /'
 for who in alice bob; do

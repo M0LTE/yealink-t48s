@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Issue #78 on the screens: an account's SRTP setting under Advanced, and the root certificates added for SIP over TLS,
+# listed under Accounts, Advanced with their expiry, each removable. They are added in Web setup (webconfig/tests).
+run ./t48-config --config simdata/config set sip user 1001
+run ./t48-config --config simdata/config set sip domain pbx.example.org
+wait 1500
+expect idle
+key down
+expect settings
+key ok
+expectstate settings.page accounts
+# ---- the account's SRTP, last on its Advanced page: off unless set ----
+key ok
+expectstate settings.page sip
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Advanced
+key ok
+expectstate settings.page sipadvanced
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row SRTP
+expectstate settings.value off
+expectstate cfg.sip.srtp (unset)
+# OK steps through Optional, Compulsory, DTLS-SRTP and back to Off
+key ok
+expectstate cfg.sip.srtp optional
+key ok
+expectstate cfg.sip.srtp compulsory
+wait 200
+shot shots/settings-account-srtp.png
+key ok
+expectstate cfg.sip.srtp dtls
+key ok
+expectstate cfg.sip.srtp off
+key left
+expectstate cfg.sip.srtp dtls
+key left
+key left
+expectstate cfg.sip.srtp optional
+key x
+expectstate settings.page sip
+key x
+expectstate settings.page accounts
+# ---- certificates: none yet ----
+key down
+key down
+expectstate settings.row Advanced
+key ok
+expectstate settings.page advanced
+key down
+key down
+key down
+expectstate settings.row Certificates
+expectstate settings.value None
+key ok
+expectstate settings.page certs
+expectstate settings.rows 1
+wait 200
+shot shots/settings-certs-none.png
+key x
+key x
+# two kept, as the web setup page writes them: one current, one expired
+run mkdir -p simdata/config/certs
+run cp ../tests/certs/test-root.pem simdata/config/certs/1111111111111111.pem
+run cp ../tests/certs/expired-root.pem simdata/config/certs/2222222222222222.pem
+# a file that is not one of ours is not listed
+run cp ../tests/certs/test-root.pem simdata/config/certs/notours.pem
+run printf 'junk' > simdata/config/certs/3333333333333333.pem
+key ok
+expectstate settings.page advanced
+key down
+key down
+key down
+expectstate settings.row Certificates
+expectstate settings.value 2
+key ok
+expectstate settings.page certs
+expectstate settings.rows 2
+# sorted by name: Old Test Root, then T48 Test Root
+expectstate settings.row Old_Test_Root
+expectstate settings.value Expired_2020-02-01
+key down
+expectstate settings.row T48_Test_Root
+expectstate settings.value Expires_2036-11-23
+wait 200
+shot shots/settings-certs.png
+# Remove asks first; Cancel keeps it
+key ok
+expectstate overlay confirm
+expectstate overlay.title Remove_T48_Test_Root?
+wait 200
+shot shots/settings-certs-remove.png
+key x
+expectstate settings.rows 2
+key ok
+expectstate overlay confirm
+key ok
+expectstate settings.rows 1
+expectstate settings.row Old_Test_Root
+run test ! -e simdata/config/certs/1111111111111111.pem
+run test -e simdata/config/certs/2222222222222222.pem
+key x
+expectstate settings.page advanced
+expectstate settings.value 1
+quit

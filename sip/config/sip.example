@@ -11,7 +11,8 @@ password=change-me
 domain=sip.example.com
 # auth_user=1001
 # display_name=Front desk
-# transport=udp
+# transport=udp           udp, tcp or tls (TLS: the server's certificate is checked
+#                         against the image's CA list and the added roots in certs/)
 # outbound_proxy=proxy.example.com     host, host:port or a sip: URI
 # register_seconds=600    registration expiry, 60 to 86400, 0 not to register (not set: 600)
 # enabled=off             keep the account but do not use it
@@ -24,6 +25,8 @@ domain=sip.example.com
 # codecs=g722,opus,-pcmu,pcma   offered in this order; - in front: off (not set: all, Opus first)
 # session_timer=1800      session timer (RFC 4028) every this many seconds (90 or more); off by default
 # 100rel=off              reliable provisional responses (PRACK): off, on or required
+# srtp=optional           media encryption: off (not set), optional (SRTP when the far
+#                         end takes it), compulsory (no call without SRTP) or dtls (DTLS-SRTP)
 # ringtone=chime          standard, long, chime, pulse, or custom (the web setup page)
 # forward_always=on       call forwarding, each kind on or off with its own number
 # forward_always_to=1003
