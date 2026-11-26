@@ -24,12 +24,10 @@
  * deals with an outage, and the address check catches a new binding once
  * answers come back.
  *
- * A registration that fails before anything is sent (REGISTER_FAIL straight
- * after REGISTERING, in the same turn of the main loop) leaves libre no
- * request to retry, and baresip does not retry it either. That is tried
- * again here every 30 to 60 s, for every account, until one goes out. A
- * REGISTER that was sent and failed is retried by libre itself. While an
- * account is not registered no OPTIONS are sent.
+ * A registration that fails is retried by libre alone, with its back-off
+ * (sip/patches/re-0002 covers one that could not be sent). Nothing here
+ * registers while an account is not registered, as that would start the
+ * back-off again from the top; and no OPTIONS are sent then.
  *
  * An account opts out with ;keepalive=no (t48-sip writes that for
  * keepalive=off).
@@ -41,16 +39,6 @@
 enum {
 	UDP_INTERVAL = 29,       /* seconds, RFC 5626 section 4.4.1 */
 	STREAM_INTERVAL = 120,   /* TCP and TLS */
-	RETRY_MS = 30000,        /* a registration that could not be sent */
-};
-
-/* every account: is a registration being started right now */
-struct start {
-	struct le le;
-	struct tmr settle;        /* clears starting on the next loop turn */
-	struct tmr retry;
-	struct ua *ua;            /* not a reference, as for struct ka */
-	bool starting;
 };
 
 struct ka {
@@ -69,49 +57,7 @@ struct ka {
 };
 
 static struct list kal;
-static struct list startl;
 static unsigned next_id;
-
-
-static void start_destructor(void *arg)
-{
-	struct start *st = arg;
-
-	tmr_cancel(&st->settle);
-	tmr_cancel(&st->retry);
-	list_unlink(&st->le);
-}
-
-
-static struct start *start_find(const struct ua *ua)
-{
-	struct le *le;
-
-	for (le = startl.head; le; le = le->next) {
-		struct start *st = le->data;
-
-		if (st->ua == ua)
-			return st;
-	}
-
-	return NULL;
-}
-
-
-static void settled(void *arg)
-{
-	struct start *st = arg;
-
-	st->starting = false;
-}
-
-
-static void retry(void *arg)
-{
-	struct start *st = arg;
-
-	(void)ua_register(st->ua);
-}
 
 
 static void ka_destructor(void *arg)
@@ -302,7 +248,6 @@ static void start(struct ua *ua)
 static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 {
 	struct ua *ua = bevent_get_ua(event);
-	struct start *st;
 	struct ka *ka;
 	(void)arg;
 
@@ -314,21 +259,6 @@ static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 		else if (ua)
 			start(ua);
 		break;
-	case BEVENT_REGISTERING:
-		st = start_find(ua);
-		if (!st && ua) {
-			st = mem_zalloc(sizeof(*st), start_destructor);
-			if (!st)
-				break;
-			st->ua = ua;
-			list_append(&startl, &st->le, st);
-		}
-		if (!st)
-			break;
-		st->starting = true;
-		tmr_cancel(&st->retry);
-		tmr_start(&st->settle, 0, settled, st);
-		break;
 	case BEVENT_REGISTER_FAIL:
 		/* kept: keepalives wait for the next REGISTER_OK */
 		ka = ka_find(ua);
@@ -336,22 +266,12 @@ static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 			ka->registered = false;
 			tmr_cancel(&ka->tmr);
 		}
-		st = start_find(ua);
-		if (st && st->starting) {
-			info("t48keepalive: %s: registration not sent (%s),"
-			     " trying again\n", account_aor(ua_account(ua)),
-			     bevent_get_text(event));
-			tmr_start(&st->retry, RETRY_MS + rand_u16() % RETRY_MS,
-				  retry, st);
-		}
 		break;
 	case BEVENT_UNREGISTERING:
 		mem_deref(ka_find(ua));
-		mem_deref(start_find(ua));
 		break;
 	case BEVENT_SHUTDOWN:
 		list_flush(&kal);
-		list_flush(&startl);
 		break;
 	default:
 		break;
@@ -362,7 +282,6 @@ static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 static int module_init(void)
 {
 	list_init(&kal);
-	list_init(&startl);
 	return bevent_register(event_handler, NULL);
 }
 
@@ -371,7 +290,6 @@ static int module_close(void)
 {
 	bevent_unregister(event_handler);
 	list_flush(&kal);
-	list_flush(&startl);
 	return 0;
 }
 

@@ -1,0 +1,39 @@
+Registration back-off for a REGISTER that could not be sent, issue #77,
+docs/sip.md.
+
+libre retries a REGISTER that was sent and failed (no answer, an error
+response) after 30 to 60 s, doubling to 15 to 30 min (RFC 5626 section
+4.5), and starts again from the top on success. One that could not be sent
+at all (no network yet, no transport) was not retried by anyone. Now it is
+given the same back-off; unregistering still returns the error.
+
+SPDX-License-Identifier: BSD-3-Clause
+
+diff -u a/src/sipreg/reg.c b/src/sipreg/reg.c
+--- a/src/sipreg/reg.c
++++ b/src/sipreg/reg.c
+@@ -413,10 +413,23 @@
+ 
+ int sipreg_send(struct sipreg *reg)
+ {
++	int err;
++
+ 	if (!reg)
+ 		return EINVAL;
+ 
+-	return request(reg, true);
++	err = request(reg, true);
++
++	/* A REGISTER that could not be sent (no network, no transport) is
++	 * retried with the same back-off as one that failed, instead of not
++	 * at all. Unregistering (expires 0) still returns the error. */
++	if (err && reg->expires) {
++		tmr_start(&reg->tmr, failwait(++reg->failc), tmr_handler, reg);
++		reg->resph(err, NULL, reg->arg);
++		return 0;
++	}
++
++	return err;
+ }
+ 
+ 

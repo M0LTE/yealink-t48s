@@ -52,7 +52,7 @@ baresip's memory, measured running the ARM binary natively (32-bit, on a Cortex-
 
 So a phone with a TLS account uses about 3.5 MB more than before (1.1 MB image, 2.4 MB baresip), and about 3 MB with UDP alone. The program pages are page cache from the system image, which the kernel can drop and read again; the heap is what is really taken. That fits the T46S's 64 MB as well as the T48S's 128 MB. `t48-sip` leaves out the TLS transport and the SRTP modules when no account uses them, because `dtls_srtp` alone makes a key and a certificate as it loads (0.7 MB).
 
-Two patches ([`sip/patches`](../sip/patches)). libre reads an address flag (`IFA_FLAGS`) that arrived in Linux 3.14, and we build against our 3.6.11 kernel's headers, whose kernel never sends it. baresip gets four small hooks for `t48timer`: a call's setup message, its SIP session, a way to set its custom headers, and those headers on the 2xx that answers it.
+Three patches ([`sip/patches`](../sip/patches)). libre reads an address flag (`IFA_FLAGS`) that arrived in Linux 3.14, and we build against our 3.6.11 kernel's headers, whose kernel never sends it. libre gives a REGISTER that could not be sent the same back-off as one that failed ([below](#registration-back-off)). baresip gets four small hooks for `t48timer`: a call's setup message, its SIP session, a way to set its custom headers, and those headers on the 2xx that answers it.
 
 ## Building
 
@@ -109,13 +109,21 @@ While an account is registered, our module `t48keepalive` sends its server an OP
 
 - **The server sees a new public address or port** (its `received` and `rport` on our Via): the router lost the binding and made a new one, so the account registers again and calls follow. The test below finds this within one interval of a router restart.
 - **No answer at all over TCP or TLS** (32 s: the connection has gone): the account registers again, once per run of failures. Over UDP no answer only means packets are being lost; libre's own refresh deals with an outage, and the address check catches a new binding when answers resume.
-- **A registration that fails before anything is sent** (no network yet, say) gets no retry from libre or baresip. The module tries it again every 30 to 60 s until one goes out, for every account. One that was sent and failed is retried by libre.
+- **A registration that fails** is left to libre's back-off ([below](#registration-back-off)); the module does not register an account that is not registered, which would start the back-off again.
 
 libre's own keepalives are not used: it starts them only when the registrar does SIP outbound (RFC 5626), which most providers do not; over UDP they are STUN requests that most SIP servers ignore; and over TCP it closes the connection when the server does not answer the CRLF ping.
 
 On by default for every account. The **NAT keepalive** switch under Advanced on the account's page (phone and web setup) turns them off, for a server that objects; it writes `keepalive=off` in the account's file. A custom `/data/local/sip/config` replaces the whole config, so it must load `t48keepalive.so` (before `account.so`) to keep them.
 
 Every account follows a 3xx answer to a call it makes (`sip_autoredirect`): call forwarding at the far end ([phone.md](phone.md#call-forwarding)).
+
+### Registration back-off
+
+A REGISTER that fails (no answer, a 403 or 5xx, or one that could not be sent at all) is tried again after 30 to 60 s, then 60 to 120 s, doubling each time to 15 to 30 min, where it stays: RFC 5626's back-off, random within each range. A successful registration starts it again from the top, and then the account refreshes on its own interval (`register_seconds`, 600 s unless set). A network change, or saving the account (which restarts baresip), registers at once.
+
+Over UDP a single REGISTER with no answer is sent 11 times in 32 s (0.5, 1, 2, then every 4 s; RFC 3261's retransmissions) before it counts as failed. On the wire that looks like a REGISTER every few seconds; they are one attempt, with the same CSeq. Until 26 Nov 2026 libre already backed off between attempts, but a REGISTER that could not be sent was retried by `t48keepalive` every 30 to 60 s with no back-off, which also restarted libre's when it had one of its own; now libre does both (`sip/patches/re-0002`).
+
+`sip/test/regbackoff-test.sh` checks this on libre itself with a fake clock, in about a second: the retransmissions, every wait to the cap at the lowest and the highest jitter, a REGISTER that cannot be sent, and a new registration going at once.
 
 ### Block direct calls
 
@@ -318,7 +326,6 @@ Result on 2026-11-23, all passing (Opus rows 2026-11-25):
 | bob calls alice after 130 s | alice rang |
 | The router restarts (every binding gone) | alice's next OPTIONS showed a new port, she registered again (26 s after the restart); bob's call rang |
 | alice with `keepalive=off` | the binding went after 40 s and bob's call did not reach her |
-| carol, whose REGISTER cannot be sent (TCP, with TCP left out of her config; until #78 it was TLS on a build without it) | tried again every 30 to 60 s |
 
 `sip/test/tls-test.sh` (in the build container, about 3 minutes; issue #78) makes a test CA and certificates when it starts, gives the test Kamailio a TLS listener on 5061 with a certificate for `sip.test`, and answers `_sips._tcp.sip.test` from a DNS server of its own on loopback ([`dns.py`](../sip/test/dns.py)). alice and bob run through `t48-sip` with the test CA as an added root. Calls are checked by [`srtp_call.py`](../sip/test/srtp_call.py): encrypted or not (the `CALL_MENC` event and `"secure"` in a catch-up), and each side hears the other's tone. Result on 2026-11-26, all passing:
 
@@ -351,4 +358,4 @@ Result on 2026-11-23, all passing (Opus rows 2026-11-25):
 
 ## Licences
 
-baresip, libre and libopus are BSD-3-Clause, libg722 BSD-2-Clause and public domain, OpenSSL Apache-2.0. Their sources are used unmodified apart from the two patches above, and their licence texts are installed with the binary. Our files in `sip/` are AGPL-3.0-or-later.
+baresip, libre and libopus are BSD-3-Clause, libg722 BSD-2-Clause and public domain, OpenSSL Apache-2.0. Their sources are used unmodified apart from the patches above, and their licence texts are installed with the binary. Our files in `sip/` are AGPL-3.0-or-later.
