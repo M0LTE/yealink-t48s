@@ -57,7 +57,7 @@ host_ok() {
 # $line. Returns 1 (and says why) if the file does not make an account.
 account() {
     f=$1
-    user= password= domain= auth_user= display_name= transport=udp proxy= regint= enabled=on mwi=on keepalive=on
+    user= password= domain= auth_user= display_name= transport=udp proxy= regint= enabled=on mwi=on keepalive=on rel100=off timer=off
     dtmf=rfc2833 codecs=
     while IFS= read -r l || [ -n "$l" ]; do
         case "$l" in ''|'#'*) continue ;; esac
@@ -75,6 +75,8 @@ account() {
             enabled) enabled=$val ;;
             mwi) mwi=$val ;;
             keepalive) keepalive=$val ;;
+            100rel) rel100=$val ;;
+            session_timer) timer=$val ;;
             dtmf) dtmf=$val ;;
             codecs) codecs=$val ;;
             label|voicemail|ringtone|forward_*) ;;    # the shell's business
@@ -153,6 +155,20 @@ account() {
     line="$line;regint=$regint;answermode=manual;mwi=$mwi;sip_autoredirect=yes;dtmfmode=$dtmfmode"
     [ -n "$aucodecs" ] && line="$line;audio_codecs=$aucodecs"
     case "$keepalive" in off|no|false|0) line="$line;keepalive=no" ;; esac
+    # reliable provisional responses (RFC 3262): off, on or required
+    case "$rel100" in
+        off|no|false|0) ;;
+        on|yes|true|1) line="$line;100rel=yes" ;;
+        required) line="$line;100rel=required" ;;
+        *) echo "t48-sip: $f: 100rel: off, on or required; using off" >&2 ;;
+    esac
+    # session timer (RFC 4028, the t48timer module): off, or seconds (at least 90)
+    case "$timer" in
+        off|no|false|0) ;;
+        on|yes|true) line="$line;timer=1800" ;;
+        ''|*[!0-9]*) echo "t48-sip: $f: session_timer: off or seconds; using off" >&2 ;;
+        *) [ ${#timer} -le 5 ] || timer=86400; [ "$timer" -ge 90 ] || timer=90; line="$line;timer=$timer" ;;
+    esac
     # no registration, no server address to hold its calls to (Block direct calls)
     [ "$regint" != 0 ] || line="$line;check_origin=no"
     return 0

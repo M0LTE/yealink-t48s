@@ -723,6 +723,45 @@ class Paired(unittest.TestCase):
         self.ok("/accounts/remove", {"n": "3", "sure": "yes"}, "/accounts")
         self.assertFalse(os.path.exists(os.path.join(p.state, "ringtones", "sip3.s16")))
 
+    def test_13_account_interop(self):
+        # an account's Advanced part: session timer and 100rel, both off by default (issue #77)
+        b, p = self.b, self.p
+        base = {"n": "3", "user": "4004", "domain": "pbx.example.org", "transport": "udp", "enabled": "on"}
+        self.ok("/accounts/save", dict(base, session_timer="off", **{"100rel": "off"}), "/accounts")
+        self.assertIsNone(p.get("sip3", "session_timer"))          # the defaults are not written
+        self.assertIsNone(p.get("sip3", "100rel"))
+        page = b.get("/accounts").body
+        self.assertIn("<span>Session timer</span>", page)
+        self.assertIn("<option value='off' selected>Off</option><option value='300'>5 min</option>", page)
+        self.assertNotIn("value='90'", page)
+        self.assertNotIn("value='required'", page)
+        self.assertIn("<details class='sub'><summary>Advanced</summary>", page)   # closed while all is usual
+        self.ok("/accounts/save", dict(base, session_timer="1800", **{"100rel": "on"}), "/accounts")
+        self.assertEqual(p.get("sip3", "session_timer"), "1800")
+        self.assertEqual(p.get("sip3", "100rel"), "on")
+        page = b.get("/accounts").body
+        self.assertIn("<option value='1800' selected>30 min</option>", page)
+        self.assertIn("<option value='on' selected>On</option>", page)
+        self.assertIn("<details class='sub' open><summary>Advanced</summary>", page)
+        # values not on the list are refused and the stored ones kept, as is a form without the part
+        self.ok("/accounts/save", dict(base, session_timer="5", **{"100rel": "maybe"}), "/accounts")
+        self.ok("/accounts/save", base, "/accounts")
+        self.assertEqual(p.get("sip3", "session_timer"), "1800")
+        self.assertEqual(p.get("sip3", "100rel"), "on")
+        # set by hand in the file: shown, and kept by a save that leaves them as they are
+        p.set("sip3", "session_timer", "1200")
+        p.set("sip3", "100rel", "required")
+        page = b.get("/accounts").body
+        self.assertIn("<option value='1200' selected>1200 s</option>", page)
+        self.assertIn("<option value='required' selected>Required</option>", page)
+        self.ok("/accounts/save", dict(base, session_timer="1200", **{"100rel": "required"}), "/accounts")
+        self.assertEqual(p.get("sip3", "session_timer"), "1200")
+        self.assertEqual(p.get("sip3", "100rel"), "required")
+        self.ok("/accounts/save", dict(base, session_timer="off", **{"100rel": "off"}), "/accounts")
+        self.assertIsNone(p.get("sip3", "session_timer"))
+        self.assertIsNone(p.get("sip3", "100rel"))
+        self.ok("/accounts/remove", {"n": "3", "sure": "yes"}, "/accounts")
+
     def test_20_network(self):
         b, p = self.b, self.p
         before = len(p.applied_list())

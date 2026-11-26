@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# An account's Advanced page: session timer and 100rel, after the account's other advanced settings (issue #77, docs/sip.md#interoperability).
+wait 200
+expect idle
+touch 700 420
+expect settings
+key ok
+expectstate settings.page accounts
+key ok
+expectstate settings.page sip
+# Advanced is after Ringtone, Call forwarding and Enabled
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Advanced
+key ok
+expectstate settings.page sipadvanced
+# after Registration expiry, DTMF, Codecs and NAT keepalive
+key down
+key down
+key down
+key down
+# the defaults, with nothing in the file: both off
+expectstate settings.row Session_timer
+expectstate settings.value off
+shot shots/settings-account-interop.png
+# OK and Right step through the intervals, Left goes back
+key ok
+expectstate settings.value 300
+expectstate cfg.sip.session_timer 300
+key right
+expectstate settings.value 600
+key right
+key right
+expectstate settings.value 3600
+key right
+expectstate settings.value off
+key left
+key left
+expectstate settings.value 1800
+expectstate cfg.sip.session_timer 1800
+key down
+expectstate settings.row 100rel
+expectstate settings.value off
+key ok
+expectstate cfg.sip.100rel on
+expectstate settings.value on
+shot shots/settings-account-interop-changed.png
+key ok
+expectstate cfg.sip.100rel off
+# required, set by hand in the file, is shown and is one of the steps
+key x
+expectstate settings.page sip
+run ./t48-config --config simdata/config set sip 100rel required
+wait 1500
+key ok
+expectstate settings.page sipadvanced
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row 100rel
+expectstate settings.value required
+key ok
+expectstate cfg.sip.100rel off
+key x
+expectstate settings.page sip

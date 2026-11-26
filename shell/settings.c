@@ -905,6 +905,10 @@ static void build_sipadv(const char *arg)
         if (on[i]) { size_t at = strlen(v); snprintf(v + at, sizeof v - at, "%s%s", at ? ", " : "", sip_codec_names[order[i]]); }
     snprintf(add_menu("Codecs", P_CODECS, v)->arg, sizeof rows[0].arg, "%d", n);
     add_stored(R_TOGGLE, "NAT keepalive", f, "keepalive", "on", 0);
+    /* interoperability (docs/sip.md#interoperability); 100rel's required is offered only to a file that already says it */
+    add_stored(R_CHOICE, "Session timer", f, "session_timer", "off", 0)->choices = "off|300|600|1800|3600";
+    struct row *r = add_stored(R_CHOICE, "100rel", f, "100rel", "off", 0);
+    r->choices = !strcmp(r->value, "required") ? "off|on|required" : "off|on";
 }
 
 /* the codecs an account offers, in order: each a switch, moved with Up and Down */
@@ -2017,7 +2021,8 @@ static const char *choice_text(const char *v)
                                              {"stable", "Stable"}, {"testing", "Testing"}, {"rfc2833", "RFC 2833"},
                                              {"inband", "In-band"}, {"info", "SIP INFO"},
                                              {"standard", "Standard"}, {"long", "Long"}, {"chime", "Chime"}, {"pulse", "Pulse"},
-                                             {"custom", "Custom"}};
+                                             {"custom", "Custom"}, {"off", "Off"}, {"on", "On"}, {"required", "Required"},
+                                             {"300", "5 min"}, {"600", "10 min"}, {"1800", "30 min"}, {"3600", "1 h"}};
     for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
         if (!strcmp(v, map[i][0])) return map[i][1];
     return v;

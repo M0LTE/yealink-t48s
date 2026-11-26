@@ -13,6 +13,12 @@ BARESIP_LICENSE_FILES = LICENSE
 BARESIP_DEPENDENCIES = libre libg722 opus mbedtls
 
 BARESIP_SIP = $(BR2_EXTERNAL_T48S_PATH)/../sip
+
+# the patches are shared with sip/build.sh
+define BARESIP_APPLY_SIP_PATCHES
+	$(APPLY_PATCHES) $(@D) $(BARESIP_SIP)/patches baresip-\*.patch
+endef
+BARESIP_POST_PATCH_HOOKS += BARESIP_APPLY_SIP_PATCHES
 # one list of modules, kept in sip/build.sh
 BARESIP_MODULES = $(shell sed -n 's/^MODULES="\(.*\)"$$/\1/p' $(BARESIP_SIP)/build.sh)
 BARESIP_APP_MODULES = $(shell sed -n 's/^APP_MODULES="\(.*\)"$$/\1/p' $(BARESIP_SIP)/build.sh)

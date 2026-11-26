@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# A small screen: an account's Advanced page, session timer and 100rel (issue #77).
+wait 2500
+expect idle
+key soft4
+expect settings
+key soft1
+expectstate settings.page accounts
+key soft1
+expectstate settings.page sip
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Advanced
+expectstate soft1 Open
+key soft1
+expectstate settings.page sipadvanced
+key down
+key down
+key down
+key down
+expectstate settings.row Session_timer
+expectstate settings.value off
+expectstate soft1 Change
+shot shots/t46s-settings-account-interop.png
+key soft1
+expectstate cfg.sip.session_timer 300
+key down
+expectstate settings.row 100rel
+key soft1
+expectstate cfg.sip.100rel on
+shot shots/t46s-settings-account-interop-changed.png
+key soft4
+expectstate settings.page sip

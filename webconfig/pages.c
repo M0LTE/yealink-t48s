@@ -287,8 +287,13 @@ static int keepalive_on(const char *f)
     return strcmp(v, "off") && strcmp(v, "no") && strcmp(v, "false") && strcmp(v, "0");
 }
 
-/* An account's Advanced part (issue #77): registration expiry, DTMF, the
- * codecs in the order offered, NAT keepalive. Open when any is not the default. */
+/* An account's Advanced part (issue #77): registration expiry, DTMF, the codecs in the order offered,
+ * NAT keepalive, session timer and 100rel (docs/sip.md#interoperability). Open when any is not the default. */
+static const char *const session_timers[][2] = {{"off", "Off"}, {"300", "5 min"}, {"600", "10 min"}, {"1800", "30 min"}, {"3600", "1 h"}};
+#define NTIMERS ((int)(sizeof session_timers / sizeof session_timers[0]))
+/* required is listed only for a file that already says it */
+static const char *const rel100s[][2] = {{"off", "Off"}, {"on", "On"}, {"required", "Required"}};
+
 static void account_advanced(const char *f)
 {
     static const char *const dtmf[][2] = {{"rfc2833", "RFC 2833"}, {"inband", "In-band"}, {"info", "SIP INFO"}};
@@ -297,8 +302,9 @@ static void account_advanced(const char *f)
     char keys[40] = "", usual[40];
     sip_codecs(val(f, "codecs", ""), order, on);
     sip_codecs_str(order, on, usual, sizeof usual);
+    const char *st = val(f, "session_timer", "off"), *rel = val(f, "100rel", "off");
     int changed = val(f, "register_seconds", "")[0] || strcmp(d, "rfc2833") || strcmp(usual, "opus,g722,pcmu,pcma") ||
-                  !keepalive_on(f);
+                  !keepalive_on(f) || strcmp(st, "off") || strcmp(rel, "off");
     int known = 0;
     H("<details class='sub'%r><summary>Advanced</summary><div class='fields'>", changed ? " open" : "");
     field("Registration expiry", "register_seconds", val(f, "register_seconds", ""),
@@ -321,8 +327,20 @@ static void account_advanced(const char *f)
           k, sip_codec_names[order[i]], i < T48_CODECS - 1 ? "" : " disabled");
     }
     H("</ol><input type='hidden' name='codec_order' value='%s'></div>", keys);
-    H("<label class='check'><input type='checkbox' name='keepalive' value='on'%r> NAT keepalive</label></details>",
+    H("<label class='check'><input type='checkbox' name='keepalive' value='on'%r> NAT keepalive</label>",
       keepalive_on(f) ? " checked" : "");
+    known = 0;
+    H("<div class='fields'><label class='field'><span>Session timer</span><select name='session_timer'>");
+    for (int i = 0; i < NTIMERS; i++) {
+        known |= !strcmp(st, session_timers[i][0]);
+        H("<option value='%s'%r>%s</option>", session_timers[i][0], !strcmp(st, session_timers[i][0]) ? " selected" : "", session_timers[i][1]);
+    }
+    if (!known) H("<option value='%s' selected>%s s</option>", st, st);   /* set by hand in the file: kept */
+    H("</select></label><label class='field'><span>100rel</span><select name='100rel'>");
+    for (int i = 0; i < 3; i++)
+        if (i < 2 || !strcmp(rel, "required"))
+            H("<option value='%s'%r>%s</option>", rel100s[i][0], !strcmp(rel, rel100s[i][0]) ? " selected" : "", rel100s[i][1]);
+    H("</select></label></div></details>");
 }
 
 /* The Advanced part of a saved form, checked; 0 and the reason if it will not do */
@@ -534,6 +552,14 @@ static void post_account_save(struct req *r)
         return;
     }
     if (strcmp(tr, "udp") && strcmp(tr, "tcp") && strcmp(tr, "tls")) tr = "udp";
+    /* the Advanced part: off, the default, is not written; a value set by hand in the file comes back as it was;
+     * anything else (or a form without the part) leaves the file alone */
+    const char *st = form(r, "session_timer"), *rel = form(r, "100rel");
+    int st_ok = !strcmp(st, val(f, "session_timer", "off")), rel_ok = !strcmp(rel, val(f, "100rel", "off"));
+    for (int i = 0; i < NTIMERS; i++) st_ok |= !strcmp(st, session_timers[i][0]);
+    rel_ok |= !strcmp(rel, "off") || !strcmp(rel, "on");
+    st = !st_ok ? NULL : !strcmp(st, "off") ? "" : st;
+    rel = !rel_ok ? NULL : !strcmp(rel, "off") ? "" : rel;
     /* the Advanced part: only from a form that has it */
     char regint[8] = "", codecs[64] = "";
     const char *why = NULL, *dtmf = form(r, "dtmf");
@@ -562,6 +588,8 @@ static void post_account_save(struct req *r)
         }
     }
     for (int i = 0; i < 7 && ok; i++) ok = set(f, keys[i], v[i]) == 0;
+    if (ok && st) ok = set(f, "session_timer", st) == 0;
+    if (ok && rel) ok = set(f, "100rel", rel) == 0;
     if (ok && adv) ok = set(f, "register_seconds", regint) == 0 && set(f, "dtmf", dtmf) == 0 && set(f, "codecs", codecs) == 0 &&
                         set(f, "keepalive", !strcmp(form(r, "keepalive"), "on") ? NULL : "off") == 0;
     if (ok) ok = cfg_set(f, "transport", tr) == 0 && cfg_set(f, "enabled", !strcmp(form(r, "enabled"), "on") ? "on" : "off") == 0;

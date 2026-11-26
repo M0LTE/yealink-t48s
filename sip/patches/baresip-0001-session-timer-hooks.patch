@@ -1,0 +1,108 @@
+Session timers (RFC 4028) for the t48timer module, issue #77, docs/sip.md.
+
+baresip has no session timers. From a call the module needs the message
+that set it up (the INVITE of an incoming call, the 2xx of an outgoing
+one), its SIP session (to send refreshes in its dialog), a way to set its
+custom headers (baresip keeps call_set_custom_hdrs internal), and those
+headers on the 2xx that answers an incoming call (Session-Expires).
+
+SPDX-License-Identifier: BSD-3-Clause
+
+diff -ru a/include/baresip.h b/include/baresip.h
+--- a/include/baresip.h
++++ b/include/baresip.h
+@@ -288,6 +288,9 @@
+ struct call  *call_find_id_pl(const struct list *calls, const struct pl *id);
+ void call_set_current(struct list *calls, struct call *call);
+ const struct list *call_get_custom_hdrs(const struct call *call);
++const struct sip_msg *call_setup_msg(const struct call *call);
++struct sipsess *call_sipsess(const struct call *call);
++void call_set_custom_hdrs(struct call *call, const struct list *hdrs);
+ void call_set_media_direction(struct call *call, enum sdp_dir a,
+ 			     enum sdp_dir v);
+ void call_set_mdir(struct call *call, enum sdp_dir a, enum sdp_dir v);
+diff -ru a/src/call.c b/src/call.c
+--- a/src/call.c
++++ b/src/call.c
+@@ -63,6 +63,7 @@
+ 	bool got_offer;           /**< Got SDP Offer from Peer              */
+ 	bool on_hold;             /**< True if call is on hold (local)      */
+ 	bool ans_queued;          /**< True if an (auto) answer is queued   */
++	const struct sip_msg *setup_msg; /**< INVITE in, or 2xx out (t48)   */
+ 	bool progr_queued;        /**< True if a progress response is queued*/
+ 	struct mnat_sess *mnats;  /**< Media NAT session                    */
+ 	bool mnat_wait;           /**< Waiting for MNAT to establish        */
+@@ -344,6 +345,7 @@
+ 
+ 	call_stream_stop(call);
+ 	list_unlink(&call->le);
++	mem_deref((void *)call->setup_msg);
+ 	tmr_cancel(&call->tmr_dtmf);
+ 	tmr_cancel(&call->tmr_answ);
+ 	tmr_cancel(&call->tmr_reinv);
+@@ -1032,6 +1034,33 @@
+ 
+ 
+ /**
++ * Get the message that set up the call: the INVITE of an incoming call, or
++ * the 2xx that answered an outgoing one (NULL until then)
++ *
++ * @param call Call object
++ *
++ * @return SIP message, or NULL
++ */
++const struct sip_msg *call_setup_msg(const struct call *call)
++{
++	return call ? call->setup_msg : NULL;
++}
++
++
++/**
++ * Get the SIP session of the call
++ *
++ * @param call Call object
++ *
++ * @return SIP session, or NULL
++ */
++struct sipsess *call_sipsess(const struct call *call)
++{
++	return call ? call->sess : NULL;
++}
++
++
++/**
+  * Connect an outgoing call to a given SIP uri
+  *
+  * @param call  Call Object
+@@ -1398,8 +1427,9 @@
+ 	if (scode >= 200 && scode < 300) {
+ 		err = sipsess_answer(call->sess, scode, "Answering", desc,
+ 				"Allow: %H\r\n"
+-				"%H", ua_print_allowed, call->ua,
+-				ua_print_supported, call->ua);
++				"%H%H", ua_print_allowed, call->ua,
++				ua_print_supported, call->ua,
++				custom_hdrs_print, &call->custom_hdrs);
+ 	}
+ 	else {
+ 		err = sipsess_answer(call->sess, scode, "Answering", desc,
+@@ -2079,6 +2109,11 @@
+ 	if (call->state == CALL_STATE_ESTABLISHED)
+ 		return;
+ 
++	if (call->outgoing) {
++		mem_deref((void *)call->setup_msg);
++		call->setup_msg = mem_ref((void *)msg);
++	}
++
+ 	set_state(call, CALL_STATE_ESTABLISHED);
+ 
+ 	if (call->got_offer)
+@@ -2435,6 +2470,7 @@
+ 		return EINVAL;
+ 
+ 	call->outgoing = false;
++	call->setup_msg = mem_ref((void *)msg);
+ 	if (pl_isset(&msg->from.dname)) {
+ 		err = pl_strdup(&call->peer_name, &msg->from.dname);
+ 		if (err)
