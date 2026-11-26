@@ -113,17 +113,19 @@ While an account is registered, our module `t48keepalive` sends its server an OP
 
 libre's own keepalives are not used: it starts them only when the registrar does SIP outbound (RFC 5626), which most providers do not; over UDP they are STUN requests that most SIP servers ignore; and over TCP it closes the connection when the server does not answer the CRLF ping.
 
-On by default for every account. The **NAT keepalive** switch under Advanced on the account's page (phone and web setup) turns them off, for a server that objects; it writes `keepalive=off` in the account's file. A custom `/data/local/sip/config` replaces the whole config, so it must load `t48keepalive.so` (before `account.so`) to keep them.
+On by default for every account. The **NAT keepalive** switch under Advanced on the account's page (phone and web setup) turns them off, for a server that objects; it writes `keepalive=off` in the account's file. A custom `/data/local/sip/config` replaces the whole config, so it must load `t48keepalive.so` to keep them, and to register again when the cable comes back ([below](#registration-back-off)).
 
 Every account follows a 3xx answer to a call it makes (`sip_autoredirect`): call forwarding at the far end ([phone.md](phone.md#call-forwarding)).
 
 ### Registration back-off
 
-A REGISTER that fails (no answer, a 403 or 5xx, or one that could not be sent at all) is tried again after 30 to 60 s, then 60 to 120 s, doubling each time to 15 to 30 min, where it stays: RFC 5626's back-off, random within each range. A successful registration starts it again from the top, and then the account refreshes on its own interval (`register_seconds`, 600 s unless set). A network change, or saving the account (which restarts baresip), registers at once.
+A REGISTER that fails (no answer, a 403 or 5xx, or one that could not be sent at all) is tried again after 30 to 60 s, then 60 to 120 s, doubling each time to 15 to 30 min, where it stays: RFC 5626's back-off, random within each range. A successful registration starts it again from the top, and then the account refreshes on its own interval (`register_seconds`, 600 s unless set). Three things register at once instead of waiting: the Ethernet link coming back (carrier up, whatever the address; `t48keepalive` watches the links on a netlink socket, so a cable put back after an outage does not wait out up to 30 min), a new address from DHCP or the Network page, and saving the account (both restart baresip).
 
 Over UDP a single REGISTER with no answer is sent 11 times in 32 s (0.5, 1, 2, then every 4 s; RFC 3261's retransmissions) before it counts as failed. On the wire that looks like a REGISTER every few seconds; they are one attempt, with the same CSeq. Until 26 Nov 2026 libre already backed off between attempts, but a REGISTER that could not be sent was retried by `t48keepalive` every 30 to 60 s with no back-off, which also restarted libre's when it had one of its own; now libre does both (`sip/patches/re-0002`).
 
-`sip/test/regbackoff-test.sh` checks this on libre itself with a fake clock, in about a second: the retransmissions, every wait to the cap at the lowest and the highest jitter, a REGISTER that cannot be sent, and a new registration going at once.
+`sip/test/regbackoff-test.sh` checks this on libre itself with a fake clock, in about a second: the retransmissions, every wait to the cap at the lowest and the highest jitter, a REGISTER that cannot be sent, a new registration going at once with one failure carried over as baresip does, and an unregister that cannot be sent returning its error. `sip/test/link-test.sh` (in the build container with `--cap-add NET_ADMIN`, a few seconds) takes a dummy link's carrier down and up: a registered account and one in back-off both register at once, and an MTU change registers no one.
+
+DHCP: `udhcpc` stays running and renews the lease (until 26 Nov 2026 it ran with `-q`, exited after the first lease and never renewed it, so the phone kept the address after the lease ran out). It does not watch the link itself, so a phone moved to another network keeps its old address until the lease is renewed.
 
 ### Block direct calls
 

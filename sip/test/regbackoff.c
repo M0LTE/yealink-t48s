@@ -12,7 +12,11 @@
 //      30 to 60 s later, doubling each time to 15 to 30 min, and stays there
 //   2. a REGISTER that cannot be sent (no transport): the same back-off,
 //      where before (no sip/patches/re-0002) it was never tried again
-//   3. a new registration (a network change, the account saved) goes at once
+//   3. a new registration (a network change, the account saved) goes at once;
+//      after failures baresip carries one failure over (sipreg_incfailc), so
+//      if it fails too the wait is the second one, 60 to 120 s
+//   4. unregistering (expires 0) that cannot be sent still returns the error
+//      and is not retried
 //
 // Build and run: sip/test/regbackoff-test.sh
 #define _GNU_SOURCE
@@ -92,12 +96,12 @@ static uint64_t wait_ms(unsigned n)
 	return (base < 1800 ? base : 1800) * (500 + rand_value % 501);
 }
 
-static struct sipreg *reg_new(struct sip *sip)
+static struct sipreg *reg_new(struct sip *sip, uint32_t expires)
 {
 	struct sipreg *reg = NULL;
 	int err = sipreg_alloc(&reg, sip, "sip:127.0.0.1:5199;transport=udp",
 			       "sip:t@127.0.0.1", NULL, "sip:t@127.0.0.1",
-			       600, "t", NULL, 0, 0, NULL, NULL, false,
+			       expires, "t", NULL, 0, 0, NULL, NULL, false,
 			       resp_handler, NULL, NULL, NULL);
 	if (err) {
 		printf("FAIL sipreg_alloc: %d\n", err);
@@ -132,7 +136,7 @@ static void silent_server(uint16_t r)
 		exit(1);
 	}
 
-	reg = reg_new(sip);
+	reg = reg_new(sip, 600);
 	t0 = now_ms;
 	check(sipreg_send(reg) == 0, "REGISTER goes out");
 	while (fails < 1)
@@ -160,13 +164,23 @@ static void silent_server(uint16_t r)
 	check(wait_ms(9) == (r ? 1800000 : 900000),
 	      r ? "longest wait 30 min" : "shortest wait at the cap 15 min");
 
-	/* 3. what a network change or a saved account does: a new
-	 *    registration, sent straight away */
+	/* 3. what a network change or a saved account does: baresip's
+	 *    reg_register makes a new registration, carries one failure over
+	 *    from the old, and sends it straight away */
 	mem_deref(reg);
 	first = sends;
-	reg = reg_new(sip);
-	check(sipreg_send(reg) == 0 && sends == first + 1,
-	      "new registration sent at once");
+	n = fails;
+	reg = reg_new(sip, 600);
+	sipreg_incfailc(reg);
+	check(sipreg_send(reg) == 0 && sends == first + 1 &&
+	      send_at[first] == now_ms, "new registration sent at once");
+	while (fails < n + 1)
+		step();
+	first = sends;
+	while (sends == first)
+		step();
+	check(send_at[first] - fail_at[n] == wait_ms(2),
+	      "after it fails too: the second wait, one failure carried over");
 
 	mem_deref(reg);
 	sip_close(sip, true);
@@ -188,7 +202,7 @@ static void cannot_send(void)
 		exit(1);
 	}
 	/* no transport at all: nothing can be sent */
-	reg = reg_new(sip);
+	reg = reg_new(sip, 600);
 	err = sipreg_send(reg);
 	check(err == 0 && fails == 1 && sends == 0,
 	      "REGISTER that cannot be sent: reported as a failure");
@@ -205,6 +219,21 @@ static void cannot_send(void)
 	}
  out:
 	mem_deref(reg);
+
+	/* 4. unregistering cannot be sent either: the error comes back, once,
+	 *    and nothing is left to try again */
+	{
+		uint32_t timers = tmrl_count(re_tmrl_get());
+		struct sipreg *un = reg_new(sip, 0);
+
+		n = fails;
+		check(sipreg_send(un) != 0 && fails == n,
+		      "expires 0 that cannot be sent: sipreg_send returns the error");
+		sipreg_unregister(un);
+		check(fails == n + 1 && tmrl_count(re_tmrl_get()) == timers,
+		      "unregister that cannot be sent: reported once, not retried");
+		mem_deref(un);
+	}
 	sip_close(sip, true);
 	mem_deref(sip);
 }

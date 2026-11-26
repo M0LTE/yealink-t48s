@@ -13,7 +13,11 @@ T=${T:-$HOME/src-build/t48s}
 P=${HOST_PREFIX:-$T/sip-host/prefix}
 W=/tmp/t48-regbackoff
 mkdir -p $W
-[ -f "$P/lib/libre.a" ] || { echo "no $P/lib/libre.a: run TARGET=host sip/build.sh first" >&2; exit 1; }
+# a host build from before #78 has mbedTLS, not OpenSSL, and no re-0002
+if [ ! -f "$P/lib/libre.a" ] || [ ! -f "$P/lib/libssl.a" ]; then
+    echo "regbackoff-test: no host build with OpenSSL in $P; run TARGET=host sip/build.sh (or set HOST_PREFIX)" >&2
+    exit 1
+fi
 
 clang -O1 -g -I"$P/include/re" -DHAVE_THREADS -DHAVE_PTHREAD -DHAVE_INTTYPES_H -DHAVE_STDBOOL_H \
     "$SIP/test/regbackoff.c" -o $W/regbackoff \

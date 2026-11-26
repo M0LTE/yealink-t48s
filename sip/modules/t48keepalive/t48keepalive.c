@@ -27,14 +27,27 @@
  * A registration that fails is retried by libre alone, with its back-off
  * (sip/patches/re-0002 covers one that could not be sent). Nothing here
  * registers while an account is not registered, as that would start the
- * back-off again from the top; and no OPTIONS are sent then.
+ * back-off again from the top; and no OPTIONS are sent then. The one
+ * exception: when a network link comes back (carrier up, on a netlink
+ * socket), every account registers at once, so a cable put back in is not
+ * left waiting out a back-off of up to 30 min. The address may be the same
+ * one, so baresip is not restarted for it.
  *
  * An account opts out with ;keepalive=no (t48-sip writes that for
  * keepalive=off).
  */
 #include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <net/if.h>
 #include <re.h>
 #include <baresip.h>
+
+#ifndef IFF_LOWER_UP
+#define IFF_LOWER_UP 0x10000     /* carrier: linux/if.h, not in net/if.h */
+#endif
 
 enum {
 	UDP_INTERVAL = 29,       /* seconds, RFC 5626 section 4.4.1 */
@@ -58,6 +71,13 @@ struct ka {
 
 static struct list kal;
 static unsigned next_id;
+
+/* links seen on the netlink socket: was each one's carrier up */
+enum { KA_LINKS = 8 };
+static struct { int index; bool up; } links[KA_LINKS];
+static unsigned nlinks;
+static re_sock_t nlfd = RE_BAD_SOCK;
+static struct re_fhs *nlfhs;
 
 
 static void ka_destructor(void *arg)
@@ -245,6 +265,117 @@ static void start(struct ua *ua)
 }
 
 
+/* a link's carrier came back: every account registers now */
+static void link_up(const char *name)
+{
+	struct le *le;
+
+	info("t48keepalive: %s up, registering again\n", name);
+	for (le = list_head(uag_list()); le; le = le->next) {
+		struct ua *ua = le->data;
+
+		if (account_regint(ua_account(ua)))
+			(void)ua_register(ua);
+	}
+}
+
+
+/* true if this link's carrier was seen down and is now up */
+static bool carrier_back(int index, bool up)
+{
+	unsigned i;
+	bool back;
+
+	for (i = 0; i < nlinks && links[i].index != index; i++)
+		;
+	if (i == nlinks) {
+		/* first sight: nothing to compare with */
+		if (nlinks == KA_LINKS)
+			return false;
+		links[nlinks].index = index;
+		links[nlinks++].up = up;
+		return false;
+	}
+	back = up && !links[i].up;
+	links[i].up = up;
+	return back;
+}
+
+
+static void netlink_handler(int flags, void *arg)
+{
+	static char buf[16384];
+	ssize_t n;
+	(void)flags;
+	(void)arg;
+
+	while ((n = recv(nlfd, buf, sizeof buf, 0)) > 0) {
+		struct nlmsghdr *h = (struct nlmsghdr *)(void *)buf;
+		size_t len = (size_t)n;
+
+		for (; NLMSG_OK(h, len); h = NLMSG_NEXT(h, len)) {
+			struct ifinfomsg *ifi = NLMSG_DATA(h);
+			char name[IF_NAMESIZE] = "link";
+
+			if (h->nlmsg_type != RTM_NEWLINK ||
+			    (ifi->ifi_flags & IFF_LOOPBACK))
+				continue;
+			if (!carrier_back(ifi->ifi_index,
+					  (ifi->ifi_flags & IFF_UP) &&
+					  (ifi->ifi_flags & IFF_LOWER_UP)))
+				continue;
+			(void)if_indextoname((unsigned)ifi->ifi_index, name);
+			link_up(name);
+		}
+	}
+}
+
+
+static void netlink_open(void)
+{
+	struct sockaddr_nl sa;
+	struct {
+		struct nlmsghdr h;
+		struct rtgenmsg g;
+	} dump;
+
+	memset(&sa, 0, sizeof sa);
+	sa.nl_family = AF_NETLINK;
+	sa.nl_groups = RTMGRP_LINK;
+	nlfd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+	if (nlfd == RE_BAD_SOCK) {
+		warning("t48keepalive: cannot watch network links\n");
+		return;
+	}
+	if (net_sockopt_blocking_set(nlfd, false) ||
+	    bind(nlfd, (struct sockaddr *)&sa, sizeof sa) < 0 ||
+	    fd_listen(&nlfhs, nlfd, FD_READ, netlink_handler, NULL)) {
+		warning("t48keepalive: cannot watch network links\n");
+		(void)close(nlfd);
+		nlfd = RE_BAD_SOCK;
+		return;
+	}
+
+	/* every link's state now, so the first change is seen as one */
+	memset(&dump, 0, sizeof dump);
+	dump.h.nlmsg_len = sizeof dump;
+	dump.h.nlmsg_type = RTM_GETLINK;
+	dump.h.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+	dump.g.rtgen_family = AF_UNSPEC;
+	(void)send(nlfd, &dump, sizeof dump, 0);
+}
+
+
+static void netlink_close(void)
+{
+	nlfhs = fd_close(nlfhs);
+	if (nlfd != RE_BAD_SOCK)
+		(void)close(nlfd);
+	nlfd = RE_BAD_SOCK;
+	nlinks = 0;
+}
+
+
 static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 {
 	struct ua *ua = bevent_get_ua(event);
@@ -282,6 +413,7 @@ static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 static int module_init(void)
 {
 	list_init(&kal);
+	netlink_open();
 	return bevent_register(event_handler, NULL);
 }
 
@@ -289,6 +421,7 @@ static int module_init(void)
 static int module_close(void)
 {
 	bevent_unregister(event_handler);
+	netlink_close();
 	list_flush(&kal);
 	return 0;
 }

@@ -29,14 +29,16 @@ network)
         : > /etc/resolv.conf
         [ -n "$dns" ] && echo "nameserver $dns" >> /etc/resolv.conf
         # no DHCP to name a time server: the public pool
-        killall ntpd 2>/dev/null
+        killall ntpd 2>/dev/null; rm -f /run/t48-ntp
         ntpd -p pool.ntp.org
         echo "network: $IF $addr (fixed)" > /dev/console
         # baresip listens on the address it found when it started (with DHCP
         # the udhcpc script does this, when the lease brings another address)
         [ "$was" = "$addr" ] || "$0" sip
     else
-        udhcpc -b -q -t 10 -i $IF -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 &
+        # stays running to renew the lease (no -q: with it the lease was
+        # never renewed and the address kept after it ran out)
+        udhcpc -b -t 10 -i $IF -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 &
     fi ;;
 sip)
     # baresip reads the account when it starts. Under runit (the phone) the
