@@ -12,7 +12,7 @@ The T48S is a working desk phone on this firmware. All of the below has been don
 - **The phone.** Six SIP accounts, calls on handset and speaker, hold, mute, transfer, a second call, contacts, the call list, do not disturb, voicemail, call forwarding, a ringtone per account, calls only through the accounts' servers ([phone.md](phone.md)). Forwarding, ringtones and Block direct calls are tested off the phone only so far (issue [#77](https://github.com/M0LTE/yealink-t48s/issues/77)).
 - **Apps** from a feed, three themes, the web setup page, SSH that is off until turned on at the screen ([apps.md](apps.md), [design](design/README.md), [web.md](web.md), [access.md](access.md)).
 - **Games can flip.** An app draws whole pictures in the screen's own spare frames and they are shown at the screen's 67.8 a second, with no tearing and no copy; keys and touches carry their times ([app-protocol.md](app-protocol.md#flipping)). Measured on the phone; nobody has looked at the glass yet.
-- **Updates** over the network into two system slots, with a fallback by itself when an update does not start. Stable and testing channels ([install.md](install.md#updates-and-fallback)).
+- **Updates** over the network into two system slots, with a fallback by itself when an update does not start. Stable and testing channels, and a daily check that shows a notice on the home screen and the web setup page and installs nothing ([install.md](install.md#the-daily-check)).
 - **USB** needs a proper power supply and nothing else. The freezes of 2026-11-22 and 23 were Yealink's 0.6 A adapter: the phone draws up to 0.9 A (issue [#58](https://github.com/M0LTE/yealink-t48s/issues/58)).
 
 ## Known limits

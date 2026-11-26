@@ -47,8 +47,11 @@ t48-app install /tmp/my-0.1.0.t48app    # a file copied to the phone: no checksu
 t48-app update                # everything the feed has a newer version of
 t48-app update hello
 t48-app remove hello
+t48-app check                 # how many installed apps the feed has newer: the daily check's question
 t48-app --feed https://example.org/apps/index.json list
 ```
+
+Each time `t48-app` reads the feed it keeps what the feed offers in `/data/phone/app-offers`. The home screen and the web setup page count updates from that against what is installed, so the count goes as soon as an app is updated or removed. The daily check ([install.md](install.md#the-daily-check)) runs `t48-app check` once a night; nothing is installed by itself.
 
 `t48-app` is the shell's own program under another name. The Apps screen runs it as a separate process and reads its progress, so a slow download never holds up the screen or a call.
 
@@ -78,5 +81,4 @@ Two faults in the image showed up only here and are fixed: curl had no CA bundle
 
 - One feed at a time. Several feeds, and signed feeds, are for later.
 - While `/data` is in RAM (#29), installed apps are lost at power off. Fetching a list of apps again at boot is not written.
-- No automatic check for updates: open the screen (or run `t48-app update`).
 - The image's `/dev/random` is pointed at the non-blocking pool so that HTTPS works at all on this kernel (see `rcS`); its randomness just after boot is weak until a seed can be kept across boots (#29).

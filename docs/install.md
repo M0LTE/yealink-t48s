@@ -73,9 +73,19 @@ t48-update kernel                           # the channel's kernel, only when as
 t48-update install FILE-or-URL [SHA256]     # by hand
 t48-update kernel FILE-or-URL SHA256
 t48-update switch                           # try the other slot once
+t48-update daily [now|due]                  # the daily check (below)
 ```
 
-Nothing is automatic: the phone checks when asked and installs when asked.
+Nothing is installed by itself: the phone installs when asked. It checks when asked, and once a day.
+
+### The daily check
+
+Issue [#80](https://github.com/M0LTE/yealink-t48s/issues/80). The runit service `update-check` runs `t48-update daily`, which asks the phone's channel for its newest release (as `check` does: stable the newest release, testing `system-latest`, a URL its `VERSION`) and the app feed for newer versions of installed apps (`t48-app check`, [apps.md](apps.md)). It never installs.
+
+- **When.** Once a night at the phone's own time, chosen at random between 01:00 and 05:00 in its time zone and kept in `/data/phone/update-check`, so phones spread out. And three minutes after a start when the last check is over a day old, which also covers a night the phone was off. Not before the clock has been set.
+- **What it tells.** The home screen's notices (`Update available`, `2 app updates`: [settings.md](settings.md#update)) and the web setup page's overview. What it found is kept in `/data/phone/update-latest` with the version it was compared with, so it survives a restart and stops counting once that release runs.
+- **Failures are quiet.** No notice, no status on the Update page, and what the last check found stays. Each check is one line in `/var/log/t48/update-check/current`: `daily check: firmware 20261126-1a2b3c4 available, 2 app updates`, or `daily check: firmware not reached, apps not reached (cannot reach the server)`. The next try is the next night.
+- **Off** under Settings, Update, Daily check, on the web setup page's Update page, or `daily=off` in `/data/config/update`. The only traffic is two small files from the channel and the feed's index.
 
 **Channels.** A channel is a folder on a web server with four files: `VERSION` (one line), `SHA256SUMS`, `system.img` and `T48S-kernel.uimg`.
 
