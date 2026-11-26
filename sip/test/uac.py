@@ -25,7 +25,7 @@ the audio.
     slow-update         answer UPDATE with 100 Trying, then 200 half a second later
     hold=SECONDS        how long to wait for refreshes and the BYE (default 10)
 """
-import random, re, socket, sys, time
+import random, re, socket, sys, threading, time
 
 SDP = ("v=0\r\no=uac 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
        "m=audio %d RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\na=sendrecv\r\n")
@@ -62,6 +62,26 @@ class Peer:
         self.rtp = port + 1000
         self.slow_update = False
 
+    def send_audio(self, sdp):
+        """PCMU silence to the media address in sdp every 20 ms, from now on:
+        without it the phone ends the call at its RTP timeout (60 s)."""
+        c = re.search(r"^c=IN IP4 (\S+)", sdp, re.M)
+        m = re.search(r"^m=audio (\d+)", sdp, re.M)
+        if not (c and m) or getattr(self, "audio", None):
+            return
+        self.audio = (c.group(1), int(m.group(1)))
+
+        def run():
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.bind(("127.0.0.1", self.rtp))
+            seq, ts, ssrc = 0, 0, random.getrandbits(32)
+            while True:
+                s.sendto(bytes([0x80, 0, seq >> 8, seq & 255]) + ts.to_bytes(4, "big")
+                         + ssrc.to_bytes(4, "big") + b"\xff" * 160, self.audio)
+                seq, ts = (seq + 1) & 0xffff, (ts + 160) & 0xffffffff
+                time.sleep(0.02)
+        threading.Thread(target=run, daemon=True).start()
+
     def send(self, text, dest):
         self.s.sendto(text.encode(), dest)
 
@@ -79,7 +99,9 @@ class Peer:
             to += ";tag=" + self.tag
         text = ("SIP/2.0 %d %s\r\n" % (code, reason) + "".join("Via: %s\r\n" % v for v in h["via"])
                 + "From: %s\r\nTo: %s\r\nCall-ID: %s\r\nCSeq: %s\r\n" % (hdr(h, "from"), to, hdr(h, "call-id"), hdr(h, "cseq"))
-                + "Contact: <sip:uac@127.0.0.1:%d>\r\n" % self.port + extra)
+                + "Contact: <sip:uac@127.0.0.1:%d>\r\n" % self.port
+                + ("".join("Record-Route: %s\r\n" % r for r in h.get("record-route", [])) if code > 100 else "")
+                + extra)
         if body:
             text += "Content-Type: application/sdp\r\n"
         text += "Content-Length: %d\r\n\r\n%s" % (len(body), body)
@@ -219,6 +241,7 @@ def call(target, port, o):
     route_set = list(reversed(h.get("record-route", [])))
     routes = "".join("Route: %s\r\n" % x for x in route_set)
     request("ACK", remote, extra=routes, cseq=icseq)
+    p.send_audio(body)
     t0 = time.time()
     time.sleep(1)
     for kind in o["refresh"]:
@@ -276,6 +299,7 @@ def answer(port, o):
                     print("got PRACK rack=%s" % hdr(r2[1], "rack"), flush=True)
             body200 = "" if o["rel100"] else SDP % p.rtp
             p.reply(first, h, src, 200, "OK", extra + "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, UPDATE, PRACK\r\n", body200)
+            p.send_audio(body)
             end = time.time() + hold
             continue
         m = p.answer_request(first, h, body, src)
