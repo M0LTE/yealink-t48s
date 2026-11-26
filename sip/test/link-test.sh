@@ -11,8 +11,9 @@
 #      (TCP, nothing listening), so he is in libre's back-off of 30 s or
 #      more. The link's MTU changes (not the carrier: nothing happens), then
 #      the carrier goes down and up: alice refreshes her registration, bob
-#      tries again at once, and the link-up command (t48-apply link-up on the
-#      phone; a stand-in here) runs once in each
+#      tries again at once; and t48-linkd, watching d0, runs the link-up
+#      command once (t48-apply link-up on the phone; a stand-in here) without
+#      passing on any descriptor of its own
 #   2. down and up again at once: put off to 30 s after the first (the line
 #      saying so is the event waited for; nothing else has happened)
 #
@@ -61,15 +62,24 @@ instance() {
         -e "s|^audio_source.*|audio_source\t\tausine,440|" \
         -e "s|^audio_player.*|audio_player\t\taufile,/dev/null|" \
         "$SIP/config/config" > $d/config.in
-    printf 'net_interface\t\t127.0.0.1\nt48keepalive_linkup\t%s\n' "$W/linkup-$1" >> $d/config.in
-    printf '#!/bin/sh\necho "$*" >> %s\n' "$d/linkup.log" > "$W/linkup-$1"
-    chmod +x "$W/linkup-$1"
+    printf 'net_interface\t\t127.0.0.1\n' >> $d/config.in
     printf 'user=%s\npassword=test-only-%s\ndomain=%s\ntransport=%s\nmwi=off\n' \
         "$1" "$1" "$4" "$3" > $d/sip
     T48_SIP_SETTINGS=$d/sip T48_SIP_CONFIG=$d/config.in T48_SIP_RUN=$d/run BARESIP=$HOST_BARESIP \
         "$SIP/t48-sip" >>$d/log 2>&1 &
     PIDS="$PIDS $!"
 }
+
+# t48-linkd, built here, with a stand-in for t48-apply that logs its argument
+# and any socket it was given (the netlink one would show)
+cc -O1 -I"$SIP/../native" -o $W/t48-linkd "$SIP/../native/t48-linkd.c"
+printf '#!/bin/sh\necho "$*" >> %s\nls -l /proc/$$/fd | grep socket: | sed "s/^/fd /" >> %s\n' \
+    "$W/linkup.log" "$W/linkup.log" > $W/apply
+chmod +x $W/apply
+: > $W/linkup.log
+$W/t48-linkd -i d0 -c $W/apply > $W/linkd.log 2>&1 &
+PIDS="$PIDS $!"
+wait_count $W/linkd.log "watching d0" 1 || true
 
 # Kamailio's socket first
 i=0
@@ -84,7 +94,7 @@ ip link set d0 mtu 1400
 cycle
 if wait_count $W/kamailio.log "REGISTER alice .*saved" 2; then pass "alice registers again when the carrier is back"; else fail "alice registers again when the carrier is back"; fi
 if wait_count $W/bob/log "Register: Connection refused" 2; then pass "bob tries again at once, not after his back-off"; else fail "bob tries again at once, not after his back-off"; fi
-if wait_count $W/alice/linkup.log "^link-up$" 1 && wait_count $W/bob/linkup.log "^link-up$" 1; then pass "link-up command run"; else fail "link-up command run"; fi
+if wait_count $W/linkup.log "^link-up$" 1 && [ "$(grep -c "^fd" $W/linkup.log)" -eq 0 ]; then pass "t48-linkd runs link-up, passing no descriptors"; else fail "t48-linkd runs link-up, passing no descriptors"; sed 's/^/  /' $W/linkup.log; fi
 n=$(grep -c "t48keepalive: d0 up, registering again" $W/alice/log || true)
 if [ "$n" -eq 1 ]; then pass "once: the MTU change did nothing"; else fail "once: the MTU change did nothing ($n)"; fi
 grep -h "t48keepalive: d0" $W/alice/log | sed 's/^/  log: /'
@@ -93,12 +103,14 @@ echo "== 2. down and up again at once"
 cycle
 if wait_count $W/alice/log "d0 up again soon after, waiting" 1 &&
    [ "$(grep -c "d0 up, registering again" $W/alice/log)" -eq 1 ] &&
-   [ "$(grep -c "^link-up$" $W/alice/linkup.log)" -eq 1 ]; then
+   wait_count $W/linkd.log "d0 up again soon after, waiting" 1 &&
+   [ "$(grep -c "^link-up$" $W/linkup.log)" -eq 1 ]; then
     pass "put off, not acted on"
 else
     fail "put off, not acted on"
 fi
 grep -h "soon after" $W/alice/log | sed 's/^/  log: /'
+sed 's/^/  linkd: /' $W/linkd.log
 
 [ $FAILS -eq 0 ] && echo "all passed" || echo "$FAILS failed"
 exit $FAILS

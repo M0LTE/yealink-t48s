@@ -15,6 +15,23 @@
 #   restart   restart the phone (Settings, Update, after an install)
 get() { t48-config get "$1" "$2" 2>/dev/null || echo "$3"; }
 R=${T48_ROOT:-}    # moves /run, /etc and /dev, for tools/test-link.sh
+# run a daemon with nothing but 0, 1 and 2: it outlives us and must not keep
+# whatever we were given (a parent's sockets, our lock)
+daemon() {
+    (
+        # busybox ash takes "exec 12>&-"; a shell that does not would run "12"
+        big=; ( eval 'exec 10>&-' ) 2>/dev/null && big=1
+        for f in /proc/self/fd/*; do    # ours: the caller may be gone
+            n=${f##*/}
+            case $n in
+            0|1|2|*[!0-9]*) ;;
+            [3-9]) eval "exec $n>&-" 2>/dev/null ;;
+            *) [ -z "$big" ] || eval "exec $n>&-" 2>/dev/null ;;
+            esac
+        done
+        exec "$@"
+    )
+}
 
 # DHCP, or the fixed address. Serialised: two at once (the Network page and
 # a cable put back) would start two udhcpc. $1 = kick: the cable came back,
@@ -40,7 +57,7 @@ network() {
         [ -n "$dns" ] && echo "nameserver $dns" >> "$R/etc/resolv.conf"
         # no DHCP to name a time server: the public pool
         killall ntpd 2>/dev/null; rm -f "$R/run/t48-ntp"
-        ntpd -p pool.ntp.org 9>&-
+        daemon ntpd -p pool.ntp.org
         echo "network: $IF $addr (fixed)" > "$R/dev/console"
         # baresip listens on the address it found when it started (with DHCP
         # the udhcpc script does this, when the lease brings another address)
@@ -50,7 +67,7 @@ network() {
         # stays running to renew the lease (no -q: with it the lease was
         # never renewed and the address kept after it ran out), and asks for
         # the address it has, if any
-        udhcpc -b -t 10 -i $IF ${was:+-r $was} -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 9>&- &
+        daemon udhcpc -b -t 10 -i $IF ${was:+-r $was} -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 &
     fi
 }
 

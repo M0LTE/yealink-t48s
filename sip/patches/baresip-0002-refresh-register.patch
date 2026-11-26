@@ -33,11 +33,12 @@ diff -u a/src/core.h b/src/core.h
 diff -u a/src/reg.c b/src/reg.c
 --- a/src/reg.c
 +++ b/src/reg.c
-@@ -308,6 +308,16 @@
+@@ -308,6 +308,17 @@
  }
  
  
-+/* send a REGISTER now on the same registration; ENOENT if there is none */
++/* send a REGISTER now on the same registration; ENOENT if there is none
++ * (never started, or stopped) */
 +int reg_refresh(struct reg *reg)
 +{
 +	if (!reg || !reg->sipreg)
@@ -59,8 +60,8 @@ diff -u a/src/ua.c b/src/ua.c
  /**
 + * Register again now without starting over: each registration that exists
 + * sends a REGISTER at once (a refresh, or the next try of one backing off),
-+ * so the old one is not unregistered first. Where there is none, a new
-+ * registration.
++ * so the old one is not unregistered first. One that does not exist (never
++ * started, or stopped with ua_stop_register) is left alone.
 + *
 + * @param ua User-Agent
 + *
@@ -69,19 +70,19 @@ diff -u a/src/ua.c b/src/ua.c
 +int ua_refresh_register(struct ua *ua)
 +{
 +	struct le *le;
++	int err = 0;
 +
 +	if (!ua)
 +		return EINVAL;
 +
-+	if (list_isempty(&ua->regl))
-+		return ua_register(ua);
-+
 +	for (le = ua->regl.head; le; le = le->next) {
-+		if (reg_refresh(le->data))
-+			return ua_register(ua);
++		int e = reg_refresh(le->data);
++
++		if (e && e != ENOENT)
++			err = e;
 +	}
 +
-+	return 0;
++	return err;
 +}
 +
 +

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// t48keepalive's link decisions (sip/modules/t48keepalive/linkwatch.h, issue
+// t48keepalive's link decisions (native/linkwatch.h, shared by t48-linkd and t48keepalive; issue
 // #77) on a fake clock: the time is a number passed in, nothing waits.
 //
 //   the first word about a link is only noted; a carrier coming back is acted
@@ -10,7 +10,7 @@
 //
 // Build and run: sip/test/regbackoff-test.sh
 #include <stdio.h>
-#include "../modules/t48keepalive/linkwatch.h"
+#include "../../native/linkwatch.h"
 
 static int failures;
 

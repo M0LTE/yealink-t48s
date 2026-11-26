@@ -1,14 +1,15 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * linkwatch: what t48keepalive does with a link's carrier (issue #77), apart
- * from netlink and timers so it can be tested on a fake clock
+ * linkwatch: what to do when a link's carrier changes (issue #77), for
+ * t48-linkd (a new DHCP lease) and baresip's t48keepalive (registering
+ * again). Apart from netlink and timers so it can be tested on a fake clock
  * (sip/test/linkwatch.c). The caller says what each link is doing and when;
  * this says whether to act on a cable put back, and when.
  *
  * A link's carrier coming back up is acted on, at most once in DAMP_MS: an up
  * edge sooner than that after the last action is put off until DAMP_MS has
- * passed, so a flapping cable gives one registration and one DHCP request,
- * made once it has had time to settle. A carrier that goes down again
+ * passed, so a flapping cable gives one action, made once it has had time to
+ * settle. A carrier that goes down again
  * cancels what was put off. The first word about a link is only noted.
  */
 #ifndef T48_LINKWATCH_H

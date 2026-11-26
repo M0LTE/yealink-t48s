@@ -91,9 +91,8 @@ module			ausine.so
 # is the shell's way in: JSON commands and events on a Unix socket that only
 # root can open (docs/sip.md), so apps cannot place calls. t48-sip sets
 # t48ctrl_socket to ctrl.sock in its run directory.
-# NAT keepalives, and the cable put back: registering again and a new DHCP
-# lease through t48keepalive_linkup (default /usr/bin/t48-apply, run with
-# link-up). docs/sip.md.
+# NAT keepalives, and registering again when the cable is put back
+# (docs/sip.md).
 module_app		t48keepalive.so
 module_app		account.so
 module_app		menu.so

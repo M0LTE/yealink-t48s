@@ -162,6 +162,7 @@ struct t48s_eth {
 
 	struct delayed_work guard;	/* keeps an eye on the IMP port's settings */
 	unsigned int imp_fixes;		/* times the guard had to put them back */
+	bool link_seen;			/* an external port has read link up: carrier follows */
 };
 
 static u8 t48s_mac[ETH_ALEN] = { 0x80, 0x5e, 0xc0, 0x03, 0x1c, 0x05 };
@@ -512,11 +513,22 @@ static void esw_imp_enable(struct t48s_eth *p, int on)
  * external ports instead (link register bits 0 and 1, the LAN and PC jacks):
  * on while either has a link, so a cable pulled and put back is seen as a
  * carrier change (issue #77: the phone registers and asks DHCP again).
+ *
+ * Fail-safe: the carrier is on from the start, and only follows the register
+ * once it has read a link on an external port. A register that never reads
+ * right (another model, another kernel) leaves it on, as before, rather than
+ * taking the network away.
  */
 static void link_follow(struct t48s_eth *p)
 {
 	bool up = esw_rd(p, ESW_LINK) & ESW_LINK_EXT;
 
+	if (!p->link_seen) {
+		if (!up)
+			return;
+		p->link_seen = true;
+		netdev_info(p->dev, "switch: external link up, carrier follows it from now\n");
+	}
 	if (up == netif_carrier_ok(p->dev))
 		return;
 	netdev_info(p->dev, "switch: external link %s\n", up ? "up" : "down");
@@ -612,7 +624,7 @@ static int t48s_open(struct net_device *dev)
 	dmac_start(p, CH_RX, p->rx_lli_dma);
 	netdev_info(dev, "switch: imp ctrl now 0x%02x, gblmgmt 0x%02x\n",
 		    esw_rd(p, ESW_IMPCTRL), esw_rd(p, ESW_GBLMGMT));
-	netif_carrier_off(dev);
+	netif_carrier_on(dev);
 	link_follow(p);
 	netif_start_queue(dev);
 	schedule_delayed_work(&p->guard, HZ);

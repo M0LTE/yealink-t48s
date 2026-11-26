@@ -31,27 +31,24 @@
  * (ua_refresh_register, sip/patches/baresip-0002), never a new one, which
  * would unregister the old first and could cross with it at the server.
  *
- * The phone's one watcher of the network link: when a carrier comes back
- * (a cable put back; a netlink socket, so no polling), every account
- * registers at once instead of waiting out a back-off of up to 30 min, and
- * t48keepalive_linkup runs with "link-up" (default /usr/bin/t48-apply:
- * a new DHCP lease, so a phone moved to another network takes its address
- * there; baresip is then started again on it). At most once in 30 s: a
- * sooner one is put off to then (linkwatch.h).
+ * When a network link's carrier comes back (a cable put back; a netlink
+ * socket, so no polling), every account registers at once instead of
+ * waiting out a back-off of up to 30 min. At most once in 30 s: a sooner one
+ * is put off to then (native/linkwatch.h). The new DHCP lease is t48-linkd's
+ * part, which runs whether or not baresip does.
  *
  * An account opts out with ;keepalive=no (t48-sip writes that for
  * keepalive=off).
  */
 #include <string.h>
 #include <unistd.h>
-#include <sys/wait.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <net/if.h>
 #include <re.h>
 #include <baresip.h>
-#include "linkwatch.h"
+#include "../../../native/linkwatch.h"   /* shared with t48-linkd */
 
 #ifndef IFF_LOWER_UP
 #define IFF_LOWER_UP 0x10000     /* carrier: linux/if.h, not in net/if.h */
@@ -83,7 +80,6 @@ static unsigned next_id;
 static struct linkwatch lw;
 static struct tmr lw_tmr;         /* an up put off by linkwatch */
 static char lw_name[IF_NAMESIZE];
-static char linkup_cmd[256] = "/usr/bin/t48-apply";   /* run with "link-up" */
 static re_sock_t nlfd = RE_BAD_SOCK;
 static struct re_fhs *nlfhs;
 
@@ -273,35 +269,12 @@ static void start(struct ua *ua)
 }
 
 
-/* run "t48-apply link-up", not waiting for it: forked twice, so it is
- * nobody's child here and leaves no zombie. Without it (a PC) nothing. */
-static void run_linkup(void)
-{
-	pid_t pid;
-
-	if (!linkup_cmd[0] || access(linkup_cmd, X_OK))
-		return;
-	pid = fork();
-	if (pid < 0)
-		return;
-	if (pid == 0) {
-		if (fork() == 0) {
-			execl(linkup_cmd, linkup_cmd, "link-up", (char *)NULL);
-			_exit(127);
-		}
-		_exit(0);
-	}
-	(void)waitpid(pid, NULL, 0);
-}
-
-
-/* a link's carrier came back: every account registers now, and DHCP asks */
+/* a link's carrier came back: every account registers now */
 static void link_up(void)
 {
 	struct le *le;
 
 	info("t48keepalive: %s up, registering again\n", lw_name);
-	run_linkup();
 	for (le = list_head(uag_list()); le; le = le->next) {
 		struct ua *ua = le->data;
 
@@ -380,7 +353,7 @@ static void netlink_open(void)
 	memset(&sa, 0, sizeof sa);
 	sa.nl_family = AF_NETLINK;
 	sa.nl_groups = RTMGRP_LINK;
-	nlfd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+	nlfd = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
 	if (nlfd == RE_BAD_SOCK) {
 		warning("t48keepalive: cannot watch network links\n");
 		return;
@@ -452,8 +425,6 @@ static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 static int module_init(void)
 {
 	list_init(&kal);
-	(void)conf_get_str(conf_cur(), "t48keepalive_linkup", linkup_cmd,
-			   sizeof linkup_cmd);
 	netlink_open();
 	return bevent_register(event_handler, NULL);
 }

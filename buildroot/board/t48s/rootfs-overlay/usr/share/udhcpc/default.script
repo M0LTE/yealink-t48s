@@ -3,6 +3,23 @@
 # busybox udhcpc hook: apply the lease. T48_ROOT moves /run, /etc and /dev
 # for tools/test-link.sh.
 R=${T48_ROOT:-}
+# run a daemon with nothing but 0, 1 and 2: it outlives us and must not keep
+# whatever we were given (a parent's sockets, our lock)
+daemon() {
+    (
+        # busybox ash takes "exec 12>&-"; a shell that does not would run "12"
+        big=; ( eval 'exec 10>&-' ) 2>/dev/null && big=1
+        for f in /proc/self/fd/*; do    # ours: the caller may be gone
+            n=${f##*/}
+            case $n in
+            0|1|2|*[!0-9]*) ;;
+            [3-9]) eval "exec $n>&-" 2>/dev/null ;;
+            *) [ -z "$big" ] || eval "exec $n>&-" 2>/dev/null ;;
+            esac
+        done
+        exec "$@"
+    )
+}
 addr() { ifconfig "$interface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p'; }
 case "$1" in
 deconfig)
@@ -34,7 +51,7 @@ bound|renew)
     srv=""; for n in ${ntpsrv:-pool.ntp.org}; do srv="$srv -p $n"; done
     if [ "$srv" != "$(cat "$R/run/t48-ntp" 2>/dev/null)" ] || ! pidof ntpd >/dev/null; then
         killall ntpd 2>/dev/null
-        ntpd $srv
+        daemon ntpd $srv
         echo "$srv" > "$R/run/t48-ntp"
     fi
     # baresip listens on the address it found when it started: on another
