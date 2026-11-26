@@ -61,7 +61,7 @@ run $FAR $BOB waitcall none 2
 key x
 waitstate phone idle 3000
 # ---- DTLS-SRTP, carol too: the keys never travel in clear ----
-run sh -c "sed -i 's/^srtp=.*/srtp=dtls/' carol.sip; pkill -f -- '-f $PWD/carol/run'; sleep 1; carol/start &"
+run sh -c "sed -i 's/^srtp=.*/srtp=dtls/' carol.sip; pkill -f -- '-f $PWD/carol/ru[n]'; sleep 1; carol/start &"
 run $CONFIG set sip srtp dtls
 run ./apply sip
 wait 2500
@@ -83,7 +83,7 @@ run $FAR $CAROL cmd hangup
 waitstate phone ended 5000
 key x
 waitstate phone idle 3000
-run sh -c "sed -i 's/^srtp=.*/srtp=optional/' carol.sip; pkill -f -- '-f $PWD/carol/run'; sleep 1; carol/start &"
+run sh -c "sed -i 's/^srtp=.*/srtp=optional/' carol.sip; pkill -f -- '-f $PWD/carol/ru[n]'; sleep 1; carol/start &"
 # ---- back to off ----
 run $CONFIG unset sip srtp
 run ./apply sip
