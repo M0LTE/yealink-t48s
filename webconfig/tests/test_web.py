@@ -16,6 +16,7 @@ BUILD = os.path.abspath(sys.argv.pop(1) if len(sys.argv) > 1 else "build")
 SHELL_BUILD = os.environ.get("SHELL_BUILD") or os.path.join(HERE, "..", "..", "shell", os.path.basename(BUILD))
 RUNNER = os.environ.get("RUNNER", "").split()
 WEB = os.path.join(BUILD, "t48-web")
+CERTS = os.path.join(HERE, "..", "..", "shell", "tests", "certs")   # test-only certificates; their keys were thrown away
 KEY1 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOeStCLCiE0njMGEkRNUHaNmd+dNxoLC9NECKxV/wLQ9 tom@desk"
 KEY2 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFf1h3n4kq0m3Qy0dJm1o0mC2aQy8vHk1W9cJ8H2Yb7Q laptop"
 
@@ -793,6 +794,123 @@ class Paired(unittest.TestCase):
         self.ok("/accounts/save", dict(base, forward_always="on", forward_always_to="1009", enabled=""), "/accounts")
         self.assertNotIn(pill, b.get("/").body)
         self.ok("/accounts/remove", {"n": "5", "sure": "yes"}, "/accounts")
+
+    def test_15_srtp(self):
+        # an account's SRTP, under its Advanced: off by default and not written (issue #78)
+        b, p = self.b, self.p
+        base = {"n": "3", "user": "4004", "domain": "pbx.example.org", "transport": "tls", "enabled": "on"}
+        self.ok("/accounts/save", dict(base, srtp="off"), "/accounts")
+        self.assertIsNone(p.get("sip3", "srtp"))
+        page = b.get("/accounts").body
+        self.assertIn("<span>SRTP</span><select name='srtp'><option value='off' selected>Off</option><option value='optional'>Optional</option>"
+                      "<option value='compulsory'>Compulsory</option><option value='dtls'>DTLS-SRTP</option></select>", page)
+        self.assertIn("<details class='sub'><summary>Advanced</summary>", page)
+        for v in ("optional", "compulsory", "dtls"):
+            self.ok("/accounts/save", dict(base, srtp=v), "/accounts")
+            self.assertEqual(p.get("sip3", "srtp"), v)
+        page = b.get("/accounts").body
+        self.assertIn("<option value='dtls' selected>DTLS-SRTP</option>", page)
+        self.assertIn("<details class='sub' open><summary>Advanced</summary>", page)
+        # not on the list: refused, the stored one kept; so is a form without it
+        self.ok("/accounts/save", dict(base, srtp="sdes;x=1"), "/accounts")
+        self.ok("/accounts/save", base, "/accounts")
+        self.assertEqual(p.get("sip3", "srtp"), "dtls")
+        # the phone's own setting, written there, is what the page shows
+        p.set("sip3", "srtp", "compulsory")
+        self.assertIn("<option value='compulsory' selected>Compulsory</option>", b.get("/accounts").body)
+        self.ok("/accounts/save", dict(base, srtp="off"), "/accounts")
+        self.assertIsNone(p.get("sip3", "srtp"))
+        self.ok("/accounts/remove", {"n": "3", "sure": "yes"}, "/accounts")
+
+    def test_16_certificates(self):
+        # root certificates for SIP over TLS: added, listed, removed; hostile files refused and nothing kept (issue #78)
+        b, p = self.b, self.p
+        d = os.path.join(p.config, "certs")
+        def readb(path):
+            with open(path, "rb") as f:
+                return f.read()
+        root, expired, leaf = (readb(os.path.join(CERTS, n)) for n in ("test-root.pem", "expired-root.pem", "test-server.pem"))
+
+        def add(content, name="ca.pem"):
+            r = b.upload_bytes("/accounts/cert", {}, "cert", name, content)
+            self.assertEqual(r.status, 303, r.body)
+            return b.flash("/accounts")
+
+        def kept():
+            return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+        page = b.get("/accounts").body
+        self.assertIn("<h3>Certificates</h3><p class='dim'>None</p>", page)
+        self.assertIn("name='cert' accept=", page)
+        before = len(p.applied_list())
+        self.assertEqual(add(b"Some text first\n" + root), (False, "Added: T48 Test Root."))
+        self.assertEqual(len(kept()), 1)
+        self.assertEqual(p.applied_list()[before:], ["sip"])          # baresip reads them at start
+        stored = readb(os.path.join(d, kept()[0]))
+        self.assertTrue(stored.startswith(b"-----BEGIN CERTIFICATE-----\n") and b"Some text" not in stored)
+        self.assertEqual(stored.replace(b"\n", b""), root.replace(b"\n", b""))   # the same certificate, written out again
+        self.assertEqual(add(root), (False, "Already added."))
+        page = b.get("/accounts").body
+        self.assertIn("<tr><td>T48 Test Root<br><span class='dim small'>Issued by T48 Test Root</span></td><td class='dim'>Expires 2036-11-23</td>", page)
+        self.assertIn("<details class='card' id='advanced' open>", page)
+        # DER, and one that has expired (kept, and shown as such)
+        der = subprocess.run(["base64", "-d"], input=b"".join(l for l in expired.splitlines(True) if not l.startswith(b"-----")),
+                             capture_output=True).stdout
+        self.assertEqual(add(der, "old.cer"), (False, "Added: Old Test Root."))
+        self.assertIn("<td class='bad'>Expired 2020-02-01</td>", b.get("/accounts").body)
+        self.assertEqual(len(kept()), 2)
+        # refused, and nothing new kept
+        for content, why in (
+                (b"", "no file"),
+                (b"hello", "No certificate in file"),
+                (root + b"-----BEGIN PRIVATE KEY-----\nMIGHAgEA\n-----END PRIVATE KEY-----\n", "File holds a private key; not added"),
+                (b"-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n", "File holds a private key; not added"),
+                (leaf, "sip.test is issued by T48 Test Root, not a root"),
+                (root[:200], "Malformed PEM"),
+                (root.replace(b"MIIB", b"M!IB"), "Malformed PEM"),
+                (root.replace(b"MIIBxjCC", b"MIIBxzCC"), "Not a certificate"),
+                (b"-----BEGIN CERTIFICATE-----\n" + b"A" * 70000 + b"\n-----END CERTIFICATE-----\n", "File too large"),
+                (b"\x30\x84\xff\xff\xff\xff" + b"\0" * 64, "Not a certificate"),
+                (b"-----BEGIN " + b"X" * 300, "Malformed PEM"),
+                (root * 17, "Too many certificates in file")):
+            bad, text = add(content)
+            self.assertEqual((bad, text), (True, "Certificate not added: %s." % why), content[:40])
+        self.assertEqual(len(kept()), 2)
+        for f in kept():
+            self.assertNotIn(b"PRIVATE", readb(os.path.join(d, f)))
+        # remove: by its id only
+        cid = kept()[0][:-4]
+        self.assertEqual(self.bad("/accounts/cert-remove", {"id": "../../config/sip"}, "/accounts"), "Certificate not found.")
+        self.assertEqual(self.bad("/accounts/cert-remove", {"id": "../sip"}, "/accounts"), "Certificate not found.")
+        self.assertEqual(self.ok("/accounts/cert-remove", {"id": cid}, "/accounts"), "Certificate removed.")
+        self.assertEqual(len(kept()), 1)
+        self.assertEqual(b.post("/accounts/cert-remove", {"id": kept()[0][:-4]}, csrf=False).status, 403)
+        self.assertEqual(len(kept()), 1)
+        # names come from the file: shown as text, never as markup; at most 16 kept
+        if shutil.which("openssl"):
+            tmp = tempfile.mkdtemp()
+            try:
+                def make(cn):
+                    k, c = os.path.join(tmp, "k"), os.path.join(tmp, "c")
+                    subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
+                                    "-keyout", k, "-out", c, "-days", "2", "-subj", "/CN=" + cn.replace("/", "\\/")], check=True, capture_output=True)
+                    return readb(c)
+                self.assertEqual(add(make("<script>x</script>")), (False, "Added: &lt;script&gt;x&lt;/script&gt;."))
+                page = b.get("/accounts").body
+                self.assertIn("<td>&lt;script&gt;x&lt;/script&gt;<br>", page)
+                self.assertNotIn("<script>x", page)
+                many = b"".join(make("Root %d" % i) for i in range(14))
+                self.assertEqual(add(many), (False, "14 certificates added."))
+                self.assertEqual(len(kept()), 16)
+                self.assertNotIn("name='cert' accept=", b.get("/accounts").body)   # full: no form to add more
+                self.assertEqual(add(make("One more")), (True, "Certificate not added: 16 certificates at most."))
+                self.assertEqual(len(kept()), 16)
+            finally:
+                shutil.rmtree(tmp)
+        for f in kept():
+            self.ok("/accounts/cert-remove", {"id": f[:-4]}, "/accounts")
+        self.assertEqual(kept(), [])
+        self.assertIn("<h3>Certificates</h3><p class='dim'>None</p>", b.get("/accounts").body)
 
     def test_20_network(self):
         b, p = self.b, self.p

@@ -117,9 +117,35 @@ expectstate accounts 0
 run $B post /accounts/save n=1 user=1001 domain=pbx.example.org password=hunter2 transport=udp enabled=on label=Home
 waitstate accounts 1 3000
 shot shots/web-phone-idle-account.png
+# SRTP and a root certificate for SIP over TLS (issue #78): set on the page, as the phone reads them
+run $B post /accounts/save n=1 user=1001 domain=pbx.example.org transport=tls enabled=on label=Home adv=1 codec_opus=on codec_g722=on codec_pcmu=on codec_pcma=on keepalive=on srtp=compulsory
+expectstate cfg.sip.srtp compulsory
+expectstate cfg.sip.transport tls
+run $B upload /accounts/cert cert $T48_TESTS/../../shell/tests/certs/test-root.pem
+run $B expect /accounts "<td>T48 Test Root<br>"
 touch 700 420
 expectstate settings.row Accounts
 expectstate settings.value 1001@pbx.example.org
+# the certificate added on the page is on the phone's list
+key ok
+expectstate settings.page accounts
+key down
+key down
+expectstate settings.row Advanced
+key ok
+key down
+key down
+key down
+expectstate settings.row Certificates
+expectstate settings.value 1
+key ok
+expectstate settings.page certs
+expectstate settings.row T48_Test_Root
+shot shots/web-phone-certs.png
+key x
+key x
+key x
+expectstate settings.row Accounts
 # while Settings is showing: the ringer level and the brightness follow under the owner's eyes
 key down
 key down

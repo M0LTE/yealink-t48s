@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include "web.h"
 #include "dialplan.h"
+#include "certs.h"
 #include "zones.h"
 
 #ifndef T48_VERSION
@@ -327,6 +328,9 @@ static const char *const session_timers[][2] = {{"off", "Off"}, {"300", "5 min"}
 #define NTIMERS ((int)(sizeof session_timers / sizeof session_timers[0]))
 /* required is listed only for a file that already says it */
 static const char *const rel100s[][2] = {{"off", "Off"}, {"on", "On"}, {"required", "Required"}};
+/* media encryption (issue #78, docs/sip.md#srtp) */
+static const char *const srtps[][2] = {{"off", "Off"}, {"optional", "Optional"}, {"compulsory", "Compulsory"}, {"dtls", "DTLS-SRTP"}};
+#define NSRTP ((int)(sizeof srtps / sizeof srtps[0]))
 
 static void account_advanced(const char *f)
 {
@@ -336,9 +340,9 @@ static void account_advanced(const char *f)
     char keys[40] = "", usual[40];
     sip_codecs(val(f, "codecs", ""), order, on);
     sip_codecs_str(order, on, usual, sizeof usual);
-    const char *st = val(f, "session_timer", "off"), *rel = val(f, "100rel", "off");
+    const char *st = val(f, "session_timer", "off"), *rel = val(f, "100rel", "off"), *sr = val(f, "srtp", "off");
     int changed = val(f, "register_seconds", "")[0] || strcmp(d, "rfc2833") || strcmp(usual, "opus,g722,pcmu,pcma") ||
-                  !keepalive_on(f) || strcmp(st, "off") || strcmp(rel, "off");
+                  !keepalive_on(f) || strcmp(st, "off") || strcmp(rel, "off") || strcmp(sr, "off");
     int known = 0;
     H("<details class='sub'%r><summary>Advanced</summary><div class='fields'>", changed ? " open" : "");
     field("Registration expiry", "register_seconds", val(f, "register_seconds", ""),
@@ -374,6 +378,13 @@ static void account_advanced(const char *f)
     for (int i = 0; i < 3; i++)
         if (i < 2 || !strcmp(rel, "required"))
             H("<option value='%s'%r>%s</option>", rel100s[i][0], !strcmp(rel, rel100s[i][0]) ? " selected" : "", rel100s[i][1]);
+    H("</select></label><label class='field'><span>SRTP</span><select name='srtp'>");
+    known = 0;
+    for (int i = 0; i < NSRTP; i++) {
+        known |= !strcmp(sr, srtps[i][0]);
+        H("<option value='%s'%r>%s</option>", srtps[i][0], !strcmp(sr, srtps[i][0]) ? " selected" : "", srtps[i][1]);
+    }
+    if (!known) H("<option value='%s' selected>%s</option>", sr, sr);   /* set by hand in the file: kept */
     H("</select></label></div></details>");
 }
 
@@ -470,6 +481,8 @@ static void account_sound(struct req *r, int n)
     }
 }
 
+static void account_certs(struct req *r);
+
 static void page_accounts(struct req *r)
 {
     int used = 0, def = atoi(val("phone", "default_account", "1"));
@@ -536,7 +549,10 @@ static void page_accounts(struct req *r)
     /* what is set for all the accounts and seldom changed */
     const char *dp = val("phone", "dialplan", "");
     int block = !strcmp(val("phone", "block_direct", "off"), "on");
-    H("<details class='card' id='advanced'%r><summary><h2>Advanced</h2></summary>", dp[0] || block ? " open" : "");
+    char certs[300];
+    struct cert cl[CERT_MAX];
+    certs_dir(certs, sizeof certs);
+    H("<details class='card' id='advanced'%r><summary><h2>Advanced</h2></summary>", dp[0] || block || cert_list(certs, cl, CERT_MAX) ? " open" : "");
     form_begin(r, "/accounts/advanced", NULL);
     H("<label class='field'><span>Dial plan</span><input name='dialplan' value='%s' maxlength='%d' "
       "autocomplete='off' autocapitalize='none' spellcheck='false' placeholder='%s'><small>Empty for the default: <code>%s</code>. 999 and 112 always dial at once.</small></label>"
@@ -546,8 +562,98 @@ static void page_accounts(struct req *r)
     form_begin(r, "/accounts/block", "class='sub'");
     H("<label class='check'><input type='checkbox' name='block_direct' value='on'%r> Block direct calls</label>"
       "<small class='dim'>Only calls through an account's server or outbound proxy ring.</small>"
-      "<div class='actions'><button type='submit'>Save</button></div></form></details>", block ? " checked" : "");
+      "<div class='actions'><button type='submit'>Save</button></div></form>", block ? " checked" : "");
+    account_certs(r);
+    H("</details>");
     page_end(r);
+}
+
+/* ---------- root certificates for SIP over TLS (issue #78, docs/sip.md#certificates) ---------- */
+
+/* the list, each with Remove, and a file to add: inside the Accounts page's Advanced */
+static void account_certs(struct req *r)
+{
+    char dir[300], date[16];
+    struct cert c[CERT_MAX];
+    long long now = (long long)time(NULL);
+    certs_dir(dir, sizeof dir);
+    int n = cert_list(dir, c, CERT_MAX);
+    H("<div class='sub' id='certs'><h3>Certificates</h3>");
+    if (!n) H("<p class='dim'>None</p>");
+    else H("<table class='list'><tbody>");
+    for (int i = 0; i < n; i++) {
+        cert_date(c[i].not_after, date, sizeof date);
+        H("<tr><td>%s%r<br><span class='dim small'>Issued by %s</span></td><td class='%r'>%r %s</td><td class='acts'>", c[i].subject,
+          c[i].ca ? "" : " <span class='dim small'>(not a CA)</span>", c[i].issuer, c[i].not_after < now ? "bad" : "dim",
+          c[i].not_after < now ? "Expired" : "Expires", date);
+        form_begin(r, "/accounts/cert-remove", "class='inline'");
+        H("<input type='hidden' name='id' value='%s'><button type='submit' class='small bad' data-ask='Remove this certificate?'>Remove</button></form></td></tr>",
+          c[i].id);
+    }
+    if (n) H("</tbody></table>");
+    if (n < CERT_MAX) {
+        form_begin(r, "/accounts/cert", "enctype='multipart/form-data' class='sub'");
+        H("<label class='field'><span>Add certificate</span><input type='file' name='cert' accept='.pem,.crt,.cer,application/x-pem-file' required>"
+          "<small>PEM or DER root, trusted for TLS beside the built-in list</small></label>"
+          "<div class='actions'><button class='primary' type='submit'>Add</button></div></form>");
+    }
+    H("</div>");
+}
+
+static void post_account_cert(struct req *r)
+{
+    size_t len = 0;
+    const unsigned char *in = (const unsigned char *)form_bytes(r, "cert", &len);
+    unsigned char *der[CERT_MAX];
+    size_t dlen[CERT_MAX];
+    struct cert have[CERT_MAX], c;
+    char dir[300], text[200], last[80] = "";
+    const char *why = "no file", *bad = NULL;
+    int n, kept, added = 0;
+    certs_dir(dir, sizeof dir);
+    kept = cert_list(dir, have, CERT_MAX);
+    n = in && len ? cert_read(in, len, der, dlen, CERT_MAX, &why) : -1;
+    if (n < 0) { flash(r, 1, "Certificate not added: %s.", why); redirect(r, "/accounts#certs"); return; }
+    /* each must be a root (issuer and subject the same) before any is kept */
+    for (int i = 0; i < n && !bad; i++) {
+        cert_info(der[i], dlen[i], &c, &why);
+        if (!c.self_signed) {
+            snprintf(text, sizeof text, "%s is issued by %s, not a root", c.subject, c.issuer);
+            bad = text;
+        }
+    }
+    for (int i = 0; i < n && !bad; i++) {
+        int dup = 0;
+        cert_info(der[i], dlen[i], &c, &why);
+        for (int k = 0; k < kept; k++) dup |= !strcmp(have[k].id, c.id);
+        if (dup) continue;
+        if (kept + added >= CERT_MAX) { snprintf(text, sizeof text, "%d certificates at most", CERT_MAX); bad = text; break; }
+        if (cert_save(dir, der[i], dlen[i], c.id) < 0) { bad = strerror(errno); break; }
+        logmsg("certificate added: %s (%s)", c.subject, c.id);
+        snprintf(last, sizeof last, "%s", c.subject);
+        added++;
+    }
+    for (int i = 0; i < n; i++) free(der[i]);
+    if (added) run_apply("sip", 0, 0);
+    if (bad && added) flash(r, 1, "%d added, the rest not: %s.", added, bad);
+    else if (bad) flash(r, 1, "Certificate not added: %s.", bad);
+    else if (!added) flash(r, 0, "Already added.");
+    else if (added == 1) flash(r, 0, "Added: %s.", last);
+    else flash(r, 0, "%d certificates added.", added);
+    redirect(r, "/accounts#certs");
+}
+
+static void post_account_cert_remove(struct req *r)
+{
+    char dir[300];
+    certs_dir(dir, sizeof dir);
+    if (cert_remove(dir, form(r, "id")) < 0) flash(r, 1, "Certificate not found.");
+    else {
+        logmsg("certificate removed: %s", form(r, "id"));
+        run_apply("sip", 0, 0);
+        flash(r, 0, "Certificate removed.");
+    }
+    redirect(r, "/accounts#certs");
 }
 
 /* the digit map that says when a number is complete (docs/phone.md#dial-plan) */
@@ -600,6 +706,10 @@ static void post_account_save(struct req *r)
     rel_ok |= !strcmp(rel, "off") || !strcmp(rel, "on");
     st = !st_ok ? NULL : !strcmp(st, "off") ? "" : st;
     rel = !rel_ok ? NULL : !strcmp(rel, "off") ? "" : rel;
+    const char *sr = form(r, "srtp");
+    int sr_ok = !strcmp(sr, val(f, "srtp", "off"));
+    for (int i = 0; i < NSRTP; i++) sr_ok |= !strcmp(sr, srtps[i][0]);
+    sr = !sr_ok ? NULL : !strcmp(sr, "off") ? "" : sr;
     /* the Advanced part: only from a form that has it */
     char regint[8] = "", codecs[64] = "";
     const char *why = NULL, *dtmf = form(r, "dtmf");
@@ -630,6 +740,7 @@ static void post_account_save(struct req *r)
     for (int i = 0; i < 7 && ok; i++) ok = set(f, keys[i], v[i]) == 0;
     if (ok && st) ok = set(f, "session_timer", st) == 0;
     if (ok && rel) ok = set(f, "100rel", rel) == 0;
+    if (ok && sr) ok = set(f, "srtp", sr) == 0;
     if (ok && adv) ok = set(f, "register_seconds", regint) == 0 && set(f, "dtmf", dtmf) == 0 && set(f, "codecs", codecs) == 0 &&
                         set(f, "keepalive", !strcmp(form(r, "keepalive"), "on") ? NULL : "off") == 0;
     if (ok) ok = cfg_set(f, "transport", tr) == 0 && cfg_set(f, "enabled", !strcmp(form(r, "enabled"), "on") ? "on" : "off") == 0;
@@ -2098,6 +2209,8 @@ const struct route routes[] = {
     {"POST", "/accounts/default", post_account_default},
     {"POST", "/accounts/advanced", post_account_advanced},
     {"POST", "/accounts/block", post_account_block},
+    {"POST", "/accounts/cert", post_account_cert},
+    {"POST", "/accounts/cert-remove", post_account_cert_remove},
     {"POST", "/accounts/ringtone", post_account_ringtone},
     {"POST", "/accounts/dnd", post_dnd},
     {"POST", "/accounts/ringtone-remove", post_account_ringtone_remove},

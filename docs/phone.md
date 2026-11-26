@@ -59,6 +59,7 @@ Other things worth knowing:
 - Missed calls are counted on the idle screen until the history has been looked at. History is the last 50 calls, in `/data/phone/history`. Picking one puts its number in the dialler. Its buttons: Dial, Add contact (for a number not in the list yet), Delete (that line) and Clear all (asks first).
 - If the shell is restarted in the middle of a call, the call carries on (it lives in baresip and the audio service) and the new shell picks it up: same screen, same timer, same route and mute.
 - If baresip stops, the idle screen says "No phone service" and a call in progress ends as "Call lost".
+- A call whose audio is SRTP shows **Encrypted** beside the route and Muted (issue #78, [sip.md](sip.md#srtp)).
 
 Not done: a three-way conference; speed-dial line keys.
 

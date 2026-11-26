@@ -11,7 +11,7 @@ CFLAGS ?= -O2
 AUDIOD_INCLUDE ?= ../audiod/include
 CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections -I../libt48/include -I$(AUDIOD_INCLUDE)
 LIB ?= ../libt48/$(O)/libt48.a
-SRC = main.c ui.c fit.c app.c manifest.c phone.c contacts.c sipc.c audioc.c leds.c backlight.c be_fb.c be_sim.c config.c settings.c pkg.c watch.c keytest.c dialplan.c
+SRC = main.c ui.c fit.c app.c manifest.c phone.c contacts.c sipc.c audioc.c leds.c backlight.c be_fb.c be_sim.c config.c settings.c pkg.c watch.c keytest.c dialplan.c certs.c
 # what About shows; Buildroot passes it in, as its copy of the source has no git
 T48_VERSION ?= $(shell git describe --always --dirty 2>/dev/null)
 ifneq ($(T48_VERSION),)
@@ -26,7 +26,7 @@ $(LIB): FORCE
 	$(MAKE) -C ../libt48 CC="$(CC)" O=$(O)
 endif
 
-$(O)/t48-shell: $(SRC) shell.h zones.h dialplan.h $(LIB)
+$(O)/t48-shell: $(SRC) shell.h zones.h dialplan.h certs.h $(LIB)
 	@mkdir -p $(O)
 	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@ $(SRC) $(LIB)
 
@@ -71,8 +71,14 @@ $(O)/test_dialplan: tests/test_dialplan.c dialplan.c dialplan.h
 	@mkdir -p $(O)
 	$(CC) $(CFLAGS) -o $@ tests/test_dialplan.c dialplan.c
 
-check: all $(O)/apps $(O)/extra $(O)/feeds $(O)/test_dialplan
+# the certificate reader on its own, with hostile files (issue #78)
+$(O)/test_certs: tests/test_certs.c certs.c certs.h
+	@mkdir -p $(O)
+	$(CC) $(CFLAGS) -o $@ tests/test_certs.c certs.c
+
+check: all $(O)/apps $(O)/extra $(O)/feeds $(O)/test_dialplan $(O)/test_certs
 	$(O)/test_dialplan
+	$(O)/test_certs
 	@mkdir -p $(O)/shots
 	cd $(O) && for t in ../tests/*.script; do echo "== $$t"; rm -rf simdata; \
 		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(SIM) --script $$t 2>sim.log || { cat sim.log; exit 1; }; cat sim.log; \

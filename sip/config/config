@@ -5,11 +5,17 @@
 
 poll_method		epoll
 
-# SIP: UDP and TCP on the usual port. The tls transport needs the TLS build.
+# SIP: UDP and TCP on the usual port, TLS on the next (issue #78; t48-sip
+# leaves tls out when no account uses it). A TLS
+# server's certificate must chain to a root in the image's CA list, looked up
+# by hash in sip_capath so the whole list is never loaded, or to one the owner
+# added (t48-sip adds sip_cafile for those), and name the server host.
 sip_listen		0.0.0.0:5060
-sip_transports		udp,tcp
+sip_transports		udp,tcp,tls
 sip_trans_def		udp
 sip_tos			160
+sip_capath		/etc/ssl/certs
+sip_verify_server	yes
 
 # Calls: the shell decides when to answer. Two calls at most: the one the
 # owner is on, and a second that is waiting, on hold, or being asked before
@@ -67,6 +73,11 @@ opus_complexity		3
 opus_inbandfec		yes
 opus_packet_loss	10
 opus_dtx		no
+
+# Media encryption, chosen per account (mediaenc, from the srtp setting):
+# SDES-SRTP keys in the SDP (srtp, srtp-mand) and DTLS-SRTP (issue #78)
+module			srtp.so
+module			dtls_srtp.so
 
 # Resampling between the 16 kHz device and 8 kHz G.711
 module			auresamp.so

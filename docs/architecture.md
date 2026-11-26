@@ -58,7 +58,7 @@ Four long-running programs, each replaceable: the shell, baresip, the audio serv
 | Audio hook | audio source and player are small plug-in modules | custom audio device in its media layer | |
 | Use | ready-made program with a control interface | a library: we would write the phone logic inside our process | |
 
-baresip wins on being small, permissive and already a complete program: we add one module of our own rather than building a SIP application around a library. G.711 is built in, G.722 comes from sippy's small BSD libg722 and Opus from libopus (BSD), built fixed point (see docs/sip.md). Current release is v4.13.0 (2026-11-04). TLS and SRTP come later through libre's OpenSSL support if wanted; plain UDP SIP and RTP first.
+baresip wins on being small, permissive and already a complete program: we add one module of our own rather than building a SIP application around a library. G.711 is built in, G.722 comes from sippy's small BSD libg722 and Opus from libopus (BSD), built fixed point (see docs/sip.md). Current release is v4.13.0 (2026-11-04). SIP over TLS and SRTP came with #78, through libre's OpenSSL support (docs/sip.md).
 
 Our baresip module does two jobs: audio in and out through the audio service, and call control and events for the shell on a Unix socket only root can open (baresip's stock TCP control port would let any app place calls).
 
@@ -156,7 +156,7 @@ Sized for a hobby phone: apps are trusted about as much as programs you install 
 
 - Contents: surface and drawing (fill, blend, text with built-in fonts, images), input, event loop, timers, WebSocket client (ws and wss), a small JSON reader, the on-screen keyboard, settings access. Most of it is lifted out of `native/waterfall.c`.
 - The real contract is the protocol (`docs/app-protocol.md`, versioned by an API level). The library is a convenience, linked statically, so an app never breaks because the phone's copy changed.
-- The SDK is a release file from this repo's CI: cross compiler and musl (Buildroot's relocatable SDK), libt48, mbedTLS, fonts, the PC simulator, a packaging tool and a sample Makefile.
+- The SDK is a release file from this repo's CI: cross compiler and musl (Buildroot's relocatable SDK), libt48, mbedTLS, OpenSSL, fonts, the PC simulator, a packaging tool and a sample Makefile.
 
 ### The apps repository
 

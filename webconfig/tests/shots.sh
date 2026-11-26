@@ -22,6 +22,11 @@ cfg sip display_name "Tom M0LTE"; cfg sip label Home; cfg sip voicemail "*97"; c
 cfg sip2 user tom; cfg sip2 domain sip.club.example; cfg sip2 password another; cfg sip2 transport tls
 cfg sip2 label Club; cfg sip2 enabled on
 cfg sip2 forward_always on; cfg sip2 forward_always_to 2001
+cfg sip2 srtp optional
+# two roots added for SIP over TLS (issue #78): test-only certificates, one expired
+mkdir -p "$T/config/certs"
+cp "$HERE/../../shell/tests/certs/test-root.pem" "$T/config/certs/1111111111111111.pem"
+cp "$HERE/../../shell/tests/certs/expired-root.pem" "$T/config/certs/2222222222222222.pem"
 cfg phone default_account 1; cfg phone dnd on
 cfg system timezone Europe/London
 cfg audio ringer 9; cfg audio handset 10; cfg audio speaker 12; cfg audio headset 8

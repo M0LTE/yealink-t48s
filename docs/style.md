@@ -50,8 +50,11 @@ One voice for the phone's screen ([`shell/`](../shell), [`libt48/`](../libt48)) 
 | An app that ships in the image | Built in | Part of the firmware |
 | SSH public keys | Keys, Add key, Host key | Keys that can log in |
 | Address source | DHCP, Static | From the network, a fixed address |
-| Account fields | User, Password, Server host, Outbound proxy, Auth user, Display name, Transport, Account name, Voicemail; under Advanced: Registration expiry, DTMF, Codecs, NAT keepalive, Session timer, 100rel | Domain, Proxy, SIP server, Server or proxy (optional), Login name, if not the user, Label |
+| Account fields | User, Password, Server host, Outbound proxy, Auth user, Display name, Transport, Account name, Voicemail; under Advanced: Registration expiry, DTMF, Codecs, NAT keepalive, Session timer, 100rel, SRTP | Domain, Proxy, SIP server, Server or proxy (optional), Login name, if not the user, Label |
 | DTMF modes | RFC 2833, In-band, SIP INFO | RFC2833, Inband, SIP-Info |
+| SRTP settings | Off, Optional, Compulsory, DTLS-SRTP | Disabled, Mandatory, Opportunistic |
+| A call whose audio is SRTP | Encrypted | Secure, SRTP, a padlock |
+| Root certificates added for TLS | Certificates; Add certificate | CA, trusted roots, custom CAs |
 | The settings file download | Backup; Download, Restore | Save the settings to a file, Put a saved file back |
 
 ## Capitals and punctuation

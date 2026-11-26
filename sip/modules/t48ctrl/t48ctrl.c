@@ -16,7 +16,8 @@
  *    marked "sync":true: one REGISTER_OK, REGISTER_FAIL or REGISTERING for
  *    each account, and one CALL_INCOMING, CALL_OUTGOING, CALL_RINGING or
  *    CALL_ESTABLISHED for each call. So a restarted shell picks a call back
- *    up. The command "sync" asks for the same again.
+ *    up. The command "sync" asks for the same again. A call's "secure"
+ *    says its audio is SRTP, as the CALL_MENC event did (issue #78).
  *  - A command may name an account, "account":"sip:user@domain". It is then
  *    run for that account: "dial" calls out from it. Without one baresip
  *    picks, which with a single account is that account.
@@ -220,6 +221,10 @@ static bool sync_one(struct client *c, struct ua *ua, struct call *call,
 				       call_is_onhold(call));
 		err |= odict_entry_add(od, "duration", ODICT_INT,
 				       (int64_t)call_duration(call));
+		/* the audio is SRTP (issue #78): the CALL_MENC event, again */
+		err |= odict_entry_add(od, "secure", ODICT_BOOL,
+				       stream_is_secure(
+					       audio_strm(call_audio(call))));
 	}
 	alive = err ? true : client_send(c, od);
 	mem_deref(od);

@@ -55,6 +55,7 @@ struct call {
     int acct;                  /* which account it is on, 0 to MAX_ACCTS - 1 */
     int outgoing, answered, ringing, rejected;
     int held, remote_held;
+    int secure;                /* its audio is SRTP (issue #78): CALL_MENC, or "secure" in a sync */
     long long t_established;
     long long fwd_at;          /* ringing: when No answer forwarding sends it on, 0 never */
     int redirects;             /* out: how many times the far end has forwarded it (3xx) */
@@ -812,6 +813,13 @@ void phone_sip_response(const char *token, int ok, const char *data)
 }
 
 /* "Messages-Waiting: yes ... Voice-Message: 2/8": how many new ones; -1 for yes without a number */
+/* a CALL_MENC event's param, "0,audio,AES_CM_128_HMAC_SHA1_80": baresip's
+ * MENC_EVENT_SECURE (0) for the audio stream, so the call's audio is SRTP */
+static int menc_secure(const char *param)
+{
+    return param[0] == '0' && param[1] == ',' && strstr(param, "audio") != NULL;
+}
+
 static int mwi_count(const char *body)
 {
     const char *p = strstr(body, "Messages-Waiting:"), *v = strstr(body, "Voice-Message:");
@@ -869,7 +877,9 @@ void phone_sip_event(const char *type, const char *j, const char *e)
     int free_now = P.st == PH_IDLE || P.st == PH_ENDED || P.st == PH_DIAL;
 
     if (others) {
-        if (!strcmp(type, "CLOSED")) {
+        if (!strcmp(type, "MENC")) {
+            P.o.secure |= menc_secure(param);
+        } else if (!strcmp(type, "CLOSED")) {
             other_closed();
             update_lamps();
             changed();
@@ -957,6 +967,7 @@ void phone_sip_event(const char *type, const char *j, const char *e)
         P.c.acct = acct;
         P.c.outgoing = out;
         P.c.held = t48_json_true(t48_json_get(j, e, "onhold"), e);
+        P.c.secure = t48_json_true(t48_json_get(j, e, "secure"), e);
         logmsg("phone: picking up a call that was already there (%s)", type);
         if (!strcmp(type, "ESTABLISHED")) {
             established();
@@ -980,6 +991,7 @@ void phone_sip_event(const char *type, const char *j, const char *e)
         P.o.answered = 1;
         P.o.t_established = t48_now_ms() - (long long)(secs * 1000);
         P.o.held = 1;
+        P.o.secure = t48_json_true(t48_json_get(j, e, "secure"), e);
         P.o_st = O_HELD;
         /* the one the owner was talking to is the one in front */
         if (P.c.held && !t48_json_true(t48_json_get(j, e, "onhold"), e)) {
@@ -1000,8 +1012,15 @@ void phone_sip_event(const char *type, const char *j, const char *e)
         return;
     }
     if (!ours) return;
+    if (sync) P.c.secure = t48_json_true(t48_json_get(j, e, "secure"), e);
 
-    if (!strcmp(type, "RINGING")) {
+    if (!strcmp(type, "MENC")) {
+        if (menc_secure(param) && !P.c.secure) {
+            P.c.secure = 1;
+            logmsg("phone: the call's audio is encrypted (%s)", param);
+            changed();
+        }
+    } else if (!strcmp(type, "RINGING")) {
         P.c.ringing = 1;
         set_tone(T48AC_TONE_RINGBACK);
         changed();
@@ -1545,13 +1564,14 @@ static int keypad_hit(int x, int y)
 /* the tags that say where the sound is and what is switched off; centred on cx, or from x if cx < 0 */
 static void chips(int cx, int x, int y)
 {
-    const char *t[4];
-    int role[4], n = 0, w = 0;
+    const char *t[5];
+    int role[5], n = 0, w = 0;
 
     if (P.route) { t[n] = route_labels[P.route]; role[n++] = B_GO; }
     if (P.muted) { t[n] = "Muted"; role[n++] = B_STOP; }
     if (P.c.held) { t[n] = "On hold"; role[n++] = B_LIT; }
     if (P.c.remote_held) { t[n] = "Held remotely"; role[n++] = B_LIT; }
+    if (P.c.secure) { t[n] = "Encrypted"; role[n++] = B_GO; }
     for (int i = 0; i < n; i++) w += ui_tag_width(t[i]) + (i ? (SMALL ? 14 : 20) : 0);
     if (cx >= 0) x = cx - w / 2;
     for (int i = 0; i < n; i++) x = ui_tag(x, y, t[i], role[i]);
@@ -2261,6 +2281,7 @@ const char *phone_state(const char *key)
     if (!strcmp(key, "route")) return route_names[P.route];
     if (!strcmp(key, "mute")) return P.muted ? "1" : "0";
     if (!strcmp(key, "hold")) return P.c.held ? "1" : "0";
+    if (!strcmp(key, "secure")) return P.c.secure ? "1" : "0";
     if (!strcmp(key, "keypad")) return P.keypad ? "1" : "0";
     if (!strcmp(key, "xfer")) return P.xfer ? "1" : "0";
     if (!strcmp(key, "number")) return P.number[0] ? P.number : "-";

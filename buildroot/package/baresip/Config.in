@@ -5,7 +5,8 @@ config BR2_PACKAGE_BARESIP
 	select BR2_PACKAGE_LIBRE
 	select BR2_PACKAGE_LIBG722
 	select BR2_PACKAGE_OPUS # fixed point, as the target is soft-float
-	select BR2_PACKAGE_MBEDTLS
+	select BR2_PACKAGE_OPENSSL
+	select BR2_PACKAGE_CA_CERTIFICATES # servers' certificates for SIP over TLS
 	help
 	  baresip built as in sip/build.sh: static, with the modules
 	  listed there compiled in, including our t48audio from

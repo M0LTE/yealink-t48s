@@ -13,7 +13,7 @@
 #   2. the router restarts (all bindings gone): alice's next OPTIONS comes
 #      back with a new public port, she registers again, and bob's call
 #      reaches her
-#      (meanwhile carol, on TLS in a build without it, cannot send her
+#      (meanwhile carol, on TLS to a port where nothing listens, cannot send her
 #      REGISTER at all, and must be tried again every 30 to 60 s)
 #   3. keepalive=off: the binding goes after 40 s and bob's call does not
 #      reach alice (the NAT stand-in is real)

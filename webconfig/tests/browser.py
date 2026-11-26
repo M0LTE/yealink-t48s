@@ -7,6 +7,7 @@ run, its cookies kept in a file between runs.
   browser.py JAR URL finish STATUS     type the code (read from the status file the screen shows it from)
   browser.py JAR URL finish-refused STATUS   the same, and expect to be turned away
   browser.py JAR URL post PATH k=v...  send a form, as a paired browser; fails unless the phone says it worked
+  browser.py JAR URL upload PATH FIELD FILE   send FILE as a form's file field, as post does
   browser.py JAR URL expect PATH TEXT  the page must hold TEXT
   browser.py JAR URL absent PATH TEXT  the page must not hold TEXT
 """
@@ -28,10 +29,20 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), NoRedirect)
 
 
-def go(path, fields=None):
+def go(path, fields=None, files=None):
     data = urllib.parse.urlencode(fields).encode() if fields is not None else None
+    headers = {}
+    if files:
+        b = "t48browser"
+        data = b"".join(b'--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (b.encode(), k.encode(), v.encode())
+                        for k, v in fields.items())
+        for k, (name, content) in files.items():
+            data += b'--%s\r\nContent-Disposition: form-data; name="%s"; filename="%s"\r\n\r\n' % (b.encode(), k.encode(), name.encode())
+            data += content + b"\r\n"
+        data += b"--%s--\r\n" % b.encode()
+        headers["Content-Type"] = "multipart/form-data; boundary=" + b
     try:
-        r = opener.open(urllib.request.Request(base + path, data=data), timeout=120)
+        r = opener.open(urllib.request.Request(base + path, data=data, headers=headers), timeout=120)
     except urllib.error.HTTPError as e:
         r = e
     body = r.read().decode("utf-8", "replace")
@@ -56,15 +67,20 @@ elif cmd in ("finish", "finish-refused"):
     want = "/" if cmd == "finish" else "/?e=gone"
     if (st, loc) != (303, want):
         sys.exit("typed the code, got %s %s, wanted %s" % (st, loc, want))
-elif cmd == "post":
+elif cmd in ("post", "upload"):
     path = args[0]
-    fields = dict(a.split("=", 1) for a in args[1:])
+    fields, files = {}, None
+    if cmd == "post":
+        fields = dict(a.split("=", 1) for a in args[1:])
+    else:
+        with open(args[2], "rb") as f:
+            files = {args[1]: (args[2].rsplit("/", 1)[-1], f.read())}
     _, _, page = go("/")
     m = re.search(r"name='csrf' value='([0-9a-f]+)'", page)
     if not m:
         sys.exit("not paired")
     fields["csrf"] = m.group(1)
-    st, loc, _ = go(path, fields)
+    st, loc, _ = go(path, fields, files)
     if st != 303:
         sys.exit("%s: got %s" % (path, st))
     _, _, page = go(loc.split("#")[0])

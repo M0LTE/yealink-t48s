@@ -4,7 +4,8 @@ Issue [#25](https://github.com/M0LTE/yealink-t48s/issues/25). Design: [architect
 
 ## Summary
 
-- baresip 4.13.0 and libre 4.13.0 (both BSD-3-Clause, current releases) build as one static ARMv6 musl soft-float binary of **1.2 MB**, with only the modules we need. With SIP over TLS it is about **3.8 MB**, because TLS in libre means OpenSSL.
+- baresip 4.13.0 and libre 4.13.0 (both BSD-3-Clause, current releases) build as one static ARMv6 musl soft-float binary of **4.2 MB**, with only the modules we need. It was 1.3 MB before SIP over TLS and SRTP (#78), which in libre mean OpenSSL; the system image grew by 1.1 MB ([Sizes](#sizes-and-memory)).
+- **SIP over TLS** with the server's certificate checked against the image's CA list and any root certificates the owner adds, **SRTP** per account (Off, Optional, Compulsory, DTLS-SRTP), and **Encrypted** on the call screen when the audio is SRTP ([SIP over TLS](#sip-over-tls), [SRTP](#srtp), [Certificates](#certificates)).
 - Calls offer **Opus, G.722, G.711**, in that order. Opus runs wideband at the audio service's 16 kHz, with in-band FEC for lossy links. CPU on the phone is measured below ([Codecs](#codecs)).
 - Proved off the phone, through a throwaway Kamailio registrar on loopback: two instances **register with a password** (one over UDP, one over TCP; a wrong password is refused), one **dials**, the other **answers**, both **hear the other's tone**, in G.711 and in G.722. The **ARM binary does the same under qemu-arm**: registers, calls, sends and receives audio.
 - Calls are driven with JSON in netstrings: commands in, answers and events out. That is the protocol of baresip's ctrl_tcp module, served by our own module **t48ctrl** on a Unix socket only root can open, so apps cannot place calls. The shell speaks it ([phone.md](phone.md)).
@@ -17,6 +18,7 @@ Issue [#25](https://github.com/M0LTE/yealink-t48s/issues/25). Design: [architect
 | `account` | reads the accounts file that `t48-sip` writes |
 | `menu` | the call commands (`dial`, `accept`, `hangup`, `reginfo`, ...) that t48ctrl runs |
 | `t48keepalive` | ours: NAT keepalives while an account is registered ([NAT keepalives](#nat-keepalives)) |
+| `srtp`, `dtls_srtp` | media encryption, per account: SDES-SRTP and DTLS-SRTP ([SRTP](#srtp)). Loaded only when an account uses them |
 | `t48timer` | ours: session timers, RFC 4028 ([Interoperability](#interoperability)) |
 | `t48mwi` | ours: asks each account's server about waiting voicemail (RFC 3842) and passes the answer on as an event, for the message lamp. baresip's own `mwi` module is not built: it can spin for ever at start when an account registers before its start-up timer runs (seen against a server on the same machine), and it delays shutdown by half a second |
 | `opus`, `g711`, `libg722` | codecs: Opus, G.711 (PCMU, PCMA) and G.722 ([Codecs](#codecs)). Neither Opus nor G.722 is inside baresip: `opus` wraps [libopus](https://opus-codec.org) 1.6.1 (BSD-3-Clause), built fixed point; `libg722` wraps sippy's [libg722](https://github.com/sippy/libg722) (two C files, BSD-2-Clause and public domain) |
@@ -26,15 +28,29 @@ Issue [#25](https://github.com/M0LTE/yealink-t48s/issues/25). Design: [architect
 | `t48ctrl` | ours: JSON control for the shell, on a root-only Unix socket (see below) |
 | `stdio` | a console for trying things by hand |
 
-libre is built without BFCP, PCP, RTMP, zlib and backtraces. It needs a crypto library even without TLS (MD5 for digest login, SHA-1 and HMAC for STUN), so the default build links **mbedTLS 3.6.8** for those alone. libre only does TLS through **OpenSSL**, so `TLS=1` swaps mbedTLS for OpenSSL 3.5.9 (LTS) with the unused parts configured out.
+libre is built without BFCP, PCP, RTMP, zlib and backtraces. Its crypto library is **OpenSSL 3.6** (Apache-2.0): libre does SIP over TLS and SRTP only through OpenSSL, and needs a crypto library anyway (MD5 for digest login, SHA-1 and HMAC for STUN). Until #78 that was mbedTLS 3.6 for the hashes alone, with no TLS. OpenSSL is configured down to what TLS 1.2 and 1.3, DTLS and SRTP use: no SSLv3, old ciphers and hashes (DES, RC2, RC4, MD4, IDEA, SEED, Blowfish, CAST, Whirlpool, RIPEMD), PSK, QUIC, compression, engines or modules (the `BR2_PACKAGE_LIBOPENSSL_ENABLE_*` lines in [`t48s_defconfig`](../buildroot/configs/t48s_defconfig); `sip/build.sh` passes the same to its own OpenSSL build). Kept: AES (CBC, GCM), ChaCha20-Poly1305, X25519 and the NIST curves, RSA, ECDSA. curl keeps mbedTLS, which is smaller.
 
-| Binary (stripped) | Size |
-|---|---|
-| ARM, no TLS (the default) | 1,291,720 bytes |
-| ARM, with TLS | about 3.77 MB (3,464,920 before Opus, which adds 307,392) |
-| x86-64, for the PC test | 1,456,312 bytes |
+### Sizes and memory
 
-Opus costs 300 KB. TLS costs about 2.4 MB of flash and RAM. Plain UDP and TCP first, as the design says; TLS is one build switch away when wanted.
+| | Before #78 (mbedTLS) | Now (OpenSSL) |
+|---|---|---|
+| baresip, ARM, `sip/build.sh` (clang) | 1,290,360 bytes | 3,810,200 bytes |
+| baresip in the image (Buildroot, GCC) | | 4,187,104 bytes |
+| baresip, x86-64, for the PC tests | 1,456,312 bytes | 6,108,288 bytes |
+| `system.img` (squashfs, xz), which the phone holds in RAM | 2,981,888 bytes (main at 066c0f2) | 4,075,520 bytes |
+
+Of the 2.5 MB more in the binary, the SRTP modules are 10 KB and DTLS-SRTP 5 KB; the rest is OpenSSL. The system image slots are 20 MB, so space is no concern; the image costs its own size in RAM ([boot.md](boot.md)), 1.1 MB more.
+
+baresip's memory, measured running the ARM binary natively (32-bit, on a Cortex-A72 in AArch32), with one account and no call, 2026-11-26:
+
+| | Resident | Of which heap and stacks | Of which program pages |
+|---|---|---|---|
+| Before #78, UDP | 0.9 MB | 128 KB | 0.8 MB |
+| Now, UDP, SRTP off or Optional | 2.7 MB | 320 KB | 2.4 MB |
+| Now, TLS | 3.3 MB | 460 KB | 2.9 MB |
+| Now, UDP, DTLS-SRTP | 4.0 MB | 580 KB | 3.5 MB |
+
+So a phone with a TLS account uses about 3.5 MB more than before (1.1 MB image, 2.4 MB baresip), and about 3 MB with UDP alone. The program pages are page cache from the system image, which the kernel can drop and read again; the heap is what is really taken. That fits the T46S's 64 MB as well as the T48S's 128 MB. `t48-sip` leaves out the TLS transport and the SRTP modules when no account uses them, because `dtls_srtp` alone makes a key and a certificate as it loads (0.7 MB).
 
 Two patches ([`sip/patches`](../sip/patches)). libre reads an address flag (`IFA_FLAGS`) that arrived in Linux 3.14, and we build against our 3.6.11 kernel's headers, whose kernel never sends it. baresip gets four small hooks for `t48timer`: a call's setup message, its SIP session, a way to set its custom headers, and those headers on the 2xx that answers it.
 
@@ -48,10 +64,11 @@ docker run --rm -u $(id -u):$(id -g) -e HOME=/work -e T=/work/t48s \
 ```
 
 - `native/build-toolchain.sh` makes the musl cross toolchain (`$T/bin/armcc`) that `native/Makefile` already expects, now with the 3.6.11 kernel headers in its sysroot.
-- `sip/build.sh` downloads pinned, checksummed sources and builds into `$T/sip-arm/bin/baresip`. `TARGET=host` builds the same thing for the PC; `TLS=1` the TLS variant. Licence texts of everything linked in are copied to `$T/sip-*/share/licences/`; they ship with the binary.
+- `sip/build.sh` downloads pinned, checksummed sources and builds into `$T/sip-arm/bin/baresip`. `TARGET=host` builds the same thing for the PC. Licence texts of everything linked in are copied to `$T/sip-*/share/licences/`; they ship with the binary. (`TLS=1` is gone: every build has TLS.)
+- OpenSSL's `libcrypto.pc` asks for `-latomic` on ARM, which the clang sysroot does not have; the line is taken out after the install. Nothing in libcrypto needs it: clang makes OpenSSL's atomics inline on ARMv6 (no `__atomic_*` calls in the library), and CMake's FindOpenSSL, which libre and baresip use, never read the file anyway. The blocker reported in #78 does not happen in the `sip/Dockerfile` container (2026-11-26): both the ARM and the PC build link.
 - A build takes a minute or two on 8 cores. The container image is about 2 GB.
 
-The phone's image builds the same thing with Buildroot (#16): packages `libre`, `libg722` and `baresip` in `buildroot/package`, with the same versions and checksums, the patches from `sip/patches` (libre's and baresip's), Buildroot's mbedTLS, and the module list read from `sip/build.sh`. They install `baresip`, `t48-sip`, the config and `sip.example` in `/usr/share/t48/sip`, and the licence texts; nothing starts baresip at boot. The scripts stay for the PC build and the call test.
+The phone's image builds the same thing with Buildroot (#16): packages `libre`, `libg722` and `baresip` in `buildroot/package`, with the same versions and checksums, the patches from `sip/patches` (libre's and baresip's), Buildroot's OpenSSL (3.6.2; `sip/build.sh` uses the same), and the module list read from `sip/build.sh`. They install `baresip`, `t48-sip`, the config and `sip.example` in `/usr/share/t48/sip`, and the licence texts; nothing starts baresip at boot. The scripts stay for the PC build and the call test.
 
 ## Running it
 
@@ -64,7 +81,7 @@ password=...
 domain=sip.example.com
 # optional: auth_user, display_name, transport (udp, tcp, tls), outbound_proxy, register_seconds,
 #           enabled (off), mwi (off), keepalive (off), dtmf (rfc2833, inband, info), codecs,
-#           session_timer (seconds, off), 100rel (on, required);
+#           session_timer (seconds, off), 100rel (on, required), srtp (optional, compulsory, dtls);
 #           label, voicemail, ringtone and forward_* are for the shell
 ```
 
@@ -78,6 +95,7 @@ The rest are under Advanced on the account's page, on the phone and the web setu
 | DTMF | `dtmf`: `rfc2833`, `inband`, `info` | RFC 2833 | `;dtmfmode=rtpevent` or `info` |
 | Codecs | `codecs`: all four in the order offered, an off one with `-` in front: `g722,opus,-pcmu,pcma` | not set: Opus, G.722, PCMU, PCMA, all on | `;audio_codecs=` |
 | NAT keepalive | `keepalive`: `off` | on | `;keepalive=no` from us ([below](#nat-keepalives)) |
+| SRTP | `srtp`: `optional`, `compulsory`, `dtls` | off | `;mediaenc=srtp`, `srtp-mand` or `dtls_srtp` ([SRTP](#srtp)) |
 
 A value `t48-sip` cannot use is logged and the default used; that includes a `register_seconds` other than 0 or 60 to 86400, which before #77 was passed to baresip as it was. A `codecs` that names only some leaves the others off; one with all off offers all.
 
@@ -138,6 +156,51 @@ Both settings are under Advanced on an account's page, on the phone and on the w
 **100rel.** baresip's default, kept: off. A caller that requires it gets 420, which RFC 3261 says it should answer by calling again without; one that only supports it gets an ordinary 180, and early media in an ordinary 183 plays. `100rel=on` adds `Supported: 100rel` and PRACK, sends 180 reliably to callers that support it and acknowledges reliable 18x. On, libre sends the reliable 180 without SDP, which some strict callers may reject: hence off by default. `100rel=required` refuses callers without it (421); the screens offer Off and On, and show Required only for a file that already says it. One fix: answering before the caller's PRACK came in was refused by baresip; `t48ctrl` now tries the answer again every 100 ms for up to 10 s.
 
 **TCP and TLS.** The phone's Contact on a TCP or TLS account is its end of the connection to the server, so a far end cannot open a new connection to it. A server on TCP or TLS has to Record-Route, which every provider does; a transparent proxy works over UDP only.
+
+## SIP over TLS
+
+Issue [#78](https://github.com/M0LTE/yealink-t48s/issues/78). Transport TLS on an account's page (phone and web setup), `transport=tls` in its file.
+
+- **Finding the server.** With no port in Server host, DNS SRV `_sips._tcp.<host>`, then the host itself on 5061. With a port, that host and port. An outbound proxy is reached over TLS too.
+- **The server's certificate** must chain to a root the phone trusts and name the host typed in Server host (or the outbound proxy's host). That is the name checked even when SRV sends the phone to another host, as RFC 5922 says, so the server's certificate must cover the SIP domain: providers' certificates normally cover the domain and its SRV targets. Wildcards match one label only. An expired certificate, one from an unknown CA or one for another name is refused, and the account does not register; the log says why (`tls_verify_handler: err = 20`, `10` or `62`: OpenSSL's codes for unknown issuer, expired, wrong name).
+- **Trusted roots:** the image's CA list (Mozilla's, from Buildroot's `ca-certificates`), looked up by hash in `/etc/ssl/certs` so the 144 roots are never all loaded, and the [roots the owner adds](#certificates).
+- **TLS 1.2 and 1.3** (OpenSSL's defaults; nothing older). No client certificate is sent.
+- **NAT keepalives** run over the TLS connection every 96 to 120 s; when one goes unanswered the account registers again on a new connection ([NAT keepalives](#nat-keepalives)).
+- baresip listens for TLS on the port after `sip_listen`'s (5061) only while an account uses TLS; nothing needs it, as a TLS account's calls come over its own connection.
+
+## SRTP
+
+Per account, under Advanced (phone and web setup), **off by default**: most providers do not use it, and a provider that does not would refuse every call made with Compulsory.
+
+| Setting | `srtp=` | Offer | Plain RTP far end | SRTP far end |
+|---|---|---|---|---|
+| Off | (not set) | `RTP/AVP` | plain call | plain call (a Compulsory caller's call is refused, 488) |
+| Optional | `optional` | `RTP/AVP` with `a=crypto` keys (baresip `srtp`) | plain call | **SRTP** |
+| Compulsory | `compulsory` | `RTP/SAVP` with `a=crypto` (`srtp-mand`) | refused, 488, never rings | **SRTP** |
+| DTLS-SRTP | `dtls` | `UDP/TLS/RTP/SAVPF` with a fingerprint (`dtls_srtp`) | refused | **SRTP**, if the far end does DTLS-SRTP |
+
+- **Optional is opportunistic SRTP** as most phones and PBXs do it ([marrold.co.uk](https://www.marrold.co.uk/2021/03/opportunistic-srtp-support-in-voip.html)): an ordinary `RTP/AVP` offer that also carries keys. A far end that knows SRTP answers with its own keys and the call is encrypted; one that does not ignores them and the call is plain. Offered `RTP/SAVP`, as from a Compulsory caller, an Optional phone answers SRTP too. A strict far end that insists on `RTP/SAVP` refuses an Optional offer (488); for such a provider, choose Compulsory.
+- **Keys** (SDES, RFC 4568) travel in the SDP, so they are only as private as the signalling: use SRTP with TLS. The suite offered is AES_CM_128_HMAC_SHA1_80; baresip also takes _32 and AES-GCM.
+- **DTLS-SRTP** (RFC 5764) is there because it cost 5 KB, but few SIP providers use it (WebRTC does). It makes a key and certificate when it loads, so it is loaded only when an account uses it.
+- **On the screen:** when a call's audio is SRTP the call screen shows **Encrypted**, a lamp and a word beside Speaker and Muted, on both models. The shell learns it from baresip's `CALL_MENC` event, and from `"secure":true` in t48ctrl's catch-up events after a restart.
+- ZRTP is not built (#77: its library is unmaintained and adds about 1 MB).
+
+![SRTP on an account's Advanced page](img/settings-account-srtp.png)
+
+![An encrypted call](img/phone-in-call-encrypted.png) ![The same on the T46S](img/t46s-in-call-encrypted.png)
+
+## Certificates
+
+Root certificates for servers whose certificate the image's list does not cover: a private PBX, a self-signed server. Added on the web setup page (Accounts, Advanced, Certificates), listed with their expiry on the phone under Settings, Accounts, Advanced, Certificates, and removable in both. Trusted for SIP over TLS beside the built-in list.
+
+- **What is taken:** a PEM file (one or more `CERTIFICATE` blocks, other text ignored) or one DER certificate, up to 64 KB. Each must be a root: its issuer is its subject (a self-signed server certificate is one too). An intermediate is refused with its issuer named, as OpenSSL would not use it as a trust anchor. A file holding a private key anywhere is refused whole, so a key pasted by mistake is never kept.
+- **Read with care.** The file may come from anywhere: [`shell/certs.c`](../shell/certs.c) reads the DER with every length checked against what is left, no recursion, and only the fields shown (names, dates, basic constraints). It is shared by the shell and the web setup page. `shell/tests/test_certs.c` runs it over every cut and every changed byte of a good certificate, 20,000 random changes, and hostile files, under AddressSanitizer.
+- **What is kept:** the certificate written out again as PEM, not the file given, as `/data/config/certs/<16 hex digits>.pem`; at most 16. The same certificate twice is kept once. Not in the settings backup.
+- `t48-sip` copies the certificates (and nothing else from the files) into `ca.pem` in its run directory and gives it to baresip as `sip_cafile`. Adding or removing one restarts baresip.
+- A certificate's own signature is not checked when it is added: as a trust anchor OpenSSL does not check it either. Expiry is shown, in red once past, and an expired root does not help a connection.
+- Pinning a server's certificate per account is not done: an owner who wants only one server trusted can add that server's self-signed certificate, but the built-in list stays trusted too.
+
+![Certificates on the phone](img/settings-certs.png) ![On the web setup page](img/web-certs.png)
 
 ## Control interface
 
@@ -252,7 +315,25 @@ Result on 2026-11-23, all passing (Opus rows 2026-11-25):
 | bob calls alice after 130 s | alice rang |
 | The router restarts (every binding gone) | alice's next OPTIONS showed a new port, she registered again (26 s after the restart); bob's call rang |
 | alice with `keepalive=off` | the binding went after 40 s and bob's call did not reach her |
-| carol, whose REGISTER cannot be sent (TLS on a build without it) | tried again every 30 to 60 s |
+| carol, whose REGISTER cannot be sent (TLS to a port where nothing listens) | tried again every 30 to 60 s |
+
+`sip/test/tls-test.sh` (in the build container, about 3 minutes; issue #78) makes a test CA and certificates when it starts, gives the test Kamailio a TLS listener on 5061 with a certificate for `sip.test`, and answers `_sips._tcp.sip.test` from a DNS server of its own on loopback ([`dns.py`](../sip/test/dns.py)). alice and bob run through `t48-sip` with the test CA as an added root. Calls are checked by [`srtp_call.py`](../sip/test/srtp_call.py): encrypted or not (the `CALL_MENC` event and `"secure"` in a catch-up), and each side hears the other's tone. Result on 2026-11-26, all passing:
+
+| Check | Result |
+|---|---|
+| TLS registration, no port: found by SRV | registered, the server saw it over TLS |
+| TLS registration to `host:port` | registered |
+| No added root (the test CA unknown) | refused, err 20; not registered |
+| A name the certificate is not for (`other.test`, same server) | refused, err 62 |
+| An expired certificate | refused, err 10 |
+| Calls over TLS, alice's SRTP and bob's: Off/Off, Optional/Off, Off/Optional | plain calls, both tones heard, nothing says encrypted |
+| Optional/Optional, Compulsory/Compulsory, Compulsory/Optional | SRTP (AES_CM_128_HMAC_SHA1_80) both ways, tones heard, both say secure |
+| Optional/Compulsory, Compulsory/Off, Off/Compulsory | refused before ringing (488) |
+| DTLS-SRTP both ends | SRTP after the DTLS handshake, fingerprint checked |
+| DTLS-SRTP to Off | refused |
+| alice as the ARM binary under qemu-arm, Compulsory both ends | SRTP, tones heard |
+
+`sip/test/phone-test.sh` has the shell's side ([`28-srtp.script`](../shell/tests/phone/28-srtp.script)): Optional to a far end that takes SRTP shows Encrypted, to one that does not makes a plain call, Compulsory to it fails.
 
 `sip/test/audiod-test.sh` adds an Opus call through two audio services, and one with alice's side as the ARM binaries under qemu; both pass.
 
@@ -263,8 +344,8 @@ Result on 2026-11-23, all passing (Opus rows 2026-11-25):
 3. Done off the phone: our control module on a Unix socket (`t48ctrl`), and the shell's client for it ([phone.md](phone.md)).
 4. Done off the phone: the real `t48audio` and the audio service, tested with calls between two of each (`sip/test/audiod-test.sh`, results in [audiod.md](audiod.md#tests-and-results)). On the phone it waits for playback in the kernel driver.
 5. A runit service for `t48-sip`. (Buildroot packages: done, #16.)
-6. Decide on TLS (2.4 MB) and SRTP later.
+6. Done (#78): SIP over TLS and SRTP, in the image. Tried against a real provider on 2026-11-26: TLS registration and calls work; SRTP Compulsory works where Optional was refused.
 
 ## Licences
 
-baresip, libre and libopus are BSD-3-Clause, libg722 BSD-2-Clause and public domain, mbedTLS and OpenSSL Apache-2.0. Their sources are used unmodified apart from the one patch above, and their licence texts are installed with the binary. Our files in `sip/` are AGPL-3.0-or-later.
+baresip, libre and libopus are BSD-3-Clause, libg722 BSD-2-Clause and public domain, OpenSSL Apache-2.0. Their sources are used unmodified apart from the two patches above, and their licence texts are installed with the binary. Our files in `sip/` are AGPL-3.0-or-later.

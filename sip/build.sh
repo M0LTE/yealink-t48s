@@ -10,11 +10,11 @@
 #                             by native/build-toolchain.sh)
 #   TARGET=host sip/build.sh  the same versions and modules for this PC, used
 #                             by sip/test/call-test.sh
-#   TLS=1 sip/build.sh        OpenSSL instead of mbedTLS, adding SIP over TLS
 #
-# libre needs a crypto library even without TLS (MD5 for digest login, SHA-1
-# and HMAC for STUN). The default build uses mbedTLS for that alone; libre
-# only does TLS with OpenSSL.
+# Crypto is OpenSSL (issue #78): libre does SIP over TLS and SRTP only with
+# it, and needs a crypto library anyway (MD5 for digest login, SHA-1 and HMAC
+# for STUN). It is configured as the image's Buildroot OpenSSL is
+# (buildroot/configs/t48s_defconfig), so sizes measured here hold there.
 #
 # Needs: clang, lld, llvm-ar, cmake, make, curl, patch (sip/Dockerfile has them all).
 # Output: $OUT/bin/baresip, sizes printed at the end.
@@ -22,18 +22,15 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=${T:-$HOME/src-build/t48s}
 TARGET=${TARGET:-arm}
-TLS=${TLS:-0}
 JOBS=${JOBS:-$(nproc)}
-SUFFIX=; [ "$TLS" = 1 ] && SUFFIX=-tls
-OUT=${OUT:-$T/sip-$TARGET$SUFFIX}
+OUT=${OUT:-$T/sip-$TARGET}
 DL=${DL:-$T/dl}
 
 RE=re-4.13.0
 BARESIP=baresip-4.13.0
 G722=libg722-1.2.8
 OPUS=opus-1.6.1
-OPENSSL=openssl-3.5.9
-MBEDTLS=mbedtls-3.6.8
+OPENSSL=openssl-3.6.2
 
 # Modules compiled into the binary. account: the accounts file; menu: the call
 # commands (dial, accept, hangup) that t48ctrl runs; opus, g711, libg722:
@@ -44,8 +41,9 @@ MBEDTLS=mbedtls-3.6.8
 # replaces baresip's ctrl_tcp, which any local program could reach),
 # t48mwi (message waiting, for the lamp; in place of baresip's mwi), and
 # t48keepalive (keeps NAT bindings open between registrations), t48timer
-# (session timers, with the baresip patch in sip/patches).
-MODULES="account;menu;opus;g711;libg722;auresamp;aufile;ausine;stdio"
+# (session timers, with the baresip patch in sip/patches). srtp and dtls_srtp:
+# media encryption, per account (SDES and DTLS-SRTP, issue #78).
+MODULES="account;menu;opus;g711;libg722;auresamp;aufile;ausine;stdio;srtp;dtls_srtp"
 APP_MODULES="t48audio;t48ctrl;t48mwi;t48keepalive;t48timer"
 
 LLVM_AR=$(command -v llvm-ar || command -v llvm-ar-21)
@@ -65,13 +63,8 @@ fetch $G722.tar.gz https://github.com/sippy/libg722/archive/refs/tags/v1.2.8.tar
     953bf2ead9b0b0dde32fcbc022a2cf5029155405737eba203499e30b18610706
 fetch $OPUS.tar.gz https://downloads.xiph.org/releases/opus/$OPUS.tar.gz \
     6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1
-if [ "$TLS" != 1 ]; then
-    fetch $MBEDTLS.tar.bz2 https://github.com/Mbed-TLS/mbedtls/releases/download/$MBEDTLS/$MBEDTLS.tar.bz2 \
-        bc54b818e87f49c0b3281dd85d24adaede0e63b4e822e3fbd49c005a38b9595b
-else
-    fetch $OPENSSL.tar.gz https://github.com/openssl/openssl/releases/download/$OPENSSL/$OPENSSL.tar.gz \
-        603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
-fi
+fetch $OPENSSL.tar.gz https://github.com/openssl/openssl/releases/download/$OPENSSL/$OPENSSL.tar.gz \
+    aaf51a1fe064384f811daeaeb4ec4dce7340ec8bd893027eee676af31e83a04f
 
 cd "$OUT"
 P="$OUT/prefix"
@@ -116,30 +109,25 @@ OPUSHOST=; [ "$TARGET" = arm ] && OPUSHOST=--host=arm-linux-musleabi
     --disable-rtcd --disable-intrinsics --disable-shared --disable-doc \
     --disable-extra-programs >../opus.log && make -j"$JOBS" >>../opus.log && make install >>../opus.log)
 
-# Crypto: mbedTLS (hashes only), or OpenSSL for TLS=1
-if [ "$TLS" = 1 ]; then
-    rm -rf src/$OPENSSL && tar -C src -xf "$DL/$OPENSSL.tar.gz"
-    if [ "$TARGET" = arm ]; then OSSLT=linux-armv4; else OSSLT=linux-x86_64; fi
-    (cd src/$OPENSSL && CC="$CC" AR=$LLVM_AR RANLIB=$LLVM_RANLIB ./Configure $OSSLT \
-        --prefix="$P" --libdir=lib no-shared no-tests no-apps no-docs no-engine \
-        no-dso no-legacy no-quic no-comp no-ssl3 no-dtls1 no-idea no-mdc2 no-rc5 \
-        no-camellia no-seed no-sm2 no-sm3 no-sm4 no-whirlpool no-aria no-siphash \
-        no-cms no-ts no-ocsp no-srp no-psk no-gost -Os >../openssl.log &&
-        make -j"$JOBS" build_libs >>../openssl.log && make install_dev >>../openssl.log)
-    CRYPTO="-DUSE_OPENSSL=ON -DUSE_MBEDTLS=OFF -DOPENSSL_ROOT_DIR=$P -DOPENSSL_USE_STATIC_LIBS=ON"
-else
-    rm -rf src/$MBEDTLS build-mbedtls && tar -C src -xf "$DL/$MBEDTLS.tar.bz2"
-    cmake -S src/$MBEDTLS -B build-mbedtls $XCMAKE $COMMON -DENABLE_PROGRAMS=OFF \
-        -DENABLE_TESTING=OFF -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DMBEDTLS_FATAL_WARNINGS=OFF >build-mbedtls.log
-    cmake --build build-mbedtls -j"$JOBS" --target mbedcrypto >>build-mbedtls.log
-    mkdir -p "$P/include" && cp -r src/$MBEDTLS/include/mbedtls src/$MBEDTLS/include/psa "$P/include/"
-    cp build-mbedtls/library/libmbedcrypto.a "$P/lib/"
-    # libre's CMake finds mbedTLS but neither adds its include path nor
-    # links it, hence CFLAGS and CMAKE_C_STANDARD_LIBRARIES
-    CRYPTO="-DUSE_OPENSSL=OFF -DUSE_MBEDTLS=ON -DMBEDTLS_INCLUDE_DIR=$P/include
-        -DMBEDTLS_LIBRARY=$P/lib/libmbedcrypto.a -DCMAKE_C_STANDARD_LIBRARIES=$P/lib/libmbedcrypto.a"
-    export CFLAGS="-I$P/include"
-fi
+# OpenSSL, with what Buildroot always leaves out and what t48s_defconfig turns
+# off (the BR2_PACKAGE_LIBOPENSSL_ENABLE_* lines there): no old ciphers or
+# hashes, no SSLv3, PSK, QUIC, compression, engines or modules. Kept: TLS 1.2
+# and 1.3, DTLS (for DTLS-SRTP), AES, ChaCha20, X25519, RSA, ECDSA.
+# linux-armv4 asks for -latomic, which the clang sysroot has no copy of; the
+# 32-bit atomics it uses are inline on ARMv6, so the flag is dropped.
+rm -rf src/$OPENSSL && tar -C src -xf "$DL/$OPENSSL.tar.gz"
+if [ "$TARGET" = arm ]; then OSSLT=linux-armv4; else OSSLT=linux-x86_64; fi
+(cd src/$OPENSSL && CC="$CC" AR=$LLVM_AR RANLIB=$LLVM_RANLIB ./Configure $OSSLT \
+    --prefix="$P" --libdir=lib --openssldir=/etc/ssl threads no-shared no-dso \
+    no-docs no-tests no-apps no-engine no-dynamic-engine no-afalgeng no-fuzz-libfuzzer no-fuzz-afl \
+    no-rc5 no-rc2 no-rc4 no-md2 no-md4 no-mdc2 no-blake2 no-idea no-seed no-des no-rmd160 \
+    no-whirlpool no-bf no-cast no-ssl no-ssl3 no-weak-ssl-ciphers no-psk no-comp no-argon2 \
+    no-cmp no-thread-pool no-default-thread-pool no-loadereng no-padlockeng no-module \
+    no-quic no-siv no-sm2-precomp no-ssl-trace no-unit-test no-crypto-mdebug no-autoerrinit \
+    -DOPENSSL_NO_ASYNC -Os >../openssl.log &&
+    make -j"$JOBS" build_libs >>../openssl.log && make install_dev >>../openssl.log &&
+    sed -i 's/ -latomic//' "$P"/lib/pkgconfig/*.pc)
+CRYPTO="-DUSE_OPENSSL=ON -DUSE_MBEDTLS=OFF -DOPENSSL_ROOT_DIR=$P -DOPENSSL_USE_STATIC_LIBS=ON"
 
 # libre
 rm -rf src/$RE build-re && tar -C src -xf "$DL/$RE.tar.gz"
@@ -172,7 +160,6 @@ cp src/$RE/LICENSE share/licences/re.LICENSE
 cp src/$BARESIP/LICENSE share/licences/baresip.LICENSE
 cp src/$G722/LICENSE share/licences/libg722.LICENSE
 cp src/$OPUS/COPYING share/licences/opus.LICENSE
-[ "$TLS" = 1 ] || cp src/$MBEDTLS/LICENSE share/licences/mbedtls.LICENSE
-if [ "$TLS" = 1 ]; then cp src/$OPENSSL/LICENSE.txt share/licences/openssl.LICENSE; fi
+cp src/$OPENSSL/LICENSE.txt share/licences/openssl.LICENSE
 file bin/baresip
 ls -l bin/baresip

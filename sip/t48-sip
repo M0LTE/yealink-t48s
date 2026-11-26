@@ -16,6 +16,10 @@
 #                     else /usr/share/t48/sip/config
 #   T48_SIP_RUN       default /run/t48-sip (holds the password: mode 0700).
 #                     The shell's control socket is ctrl.sock in here.
+#   T48_SIP_CERTS     default certs beside the settings (/data/config/certs):
+#                     root certificates the owner added, one PEM file each,
+#                     trusted for SIP over TLS beside the image's own list
+#                     (issue #78).
 #   BARESIP           default baresip
 set -e
 SETTINGS=${T48_SIP_SETTINGS:-/data/config/sip}
@@ -58,7 +62,7 @@ host_ok() {
 account() {
     f=$1
     user= password= domain= auth_user= display_name= transport=udp proxy= regint= enabled=on mwi=on keepalive=on rel100=off timer=off
-    dtmf=rfc2833 codecs=
+    dtmf=rfc2833 codecs= srtp=off
     while IFS= read -r l || [ -n "$l" ]; do
         case "$l" in ''|'#'*) continue ;; esac
         key=${l%%=*}
@@ -79,6 +83,7 @@ account() {
             session_timer) timer=$val ;;
             dtmf) dtmf=$val ;;
             codecs) codecs=$val ;;
+            srtp) srtp=$val ;;
             label|voicemail|ringtone|forward_*) ;;    # the shell's business
             *) echo "t48-sip: $f: ignoring unknown setting '$key'" >&2 ;;
         esac
@@ -169,6 +174,17 @@ account() {
         ''|*[!0-9]*) echo "t48-sip: $f: session_timer: off or seconds; using off" >&2 ;;
         *) [ ${#timer} -le 5 ] || timer=86400; [ "$timer" -ge 90 ] || timer=90; line="$line;timer=$timer" ;;
     esac
+    # media encryption (issue #78): off; optional, plain RTP/AVP offered with
+    # a=crypto keys so it is SRTP when the far end takes them and RTP when not
+    # (baresip's srtp); compulsory, RTP/SAVP, no call without SRTP
+    # (srtp-mand); dtls, DTLS-SRTP (UDP/TLS/RTP/SAVPF)
+    case "$srtp" in
+        off|no|false|0|'') ;;
+        optional) line="$line;mediaenc=srtp" ;;
+        compulsory) line="$line;mediaenc=srtp-mand" ;;
+        dtls) line="$line;mediaenc=dtls_srtp" ;;
+        *) echo "t48-sip: $f: srtp: off, optional, compulsory or dtls; using off" >&2 ;;
+    esac
     # no registration, no server address to hold its calls to (Block direct calls)
     [ "$regint" != 0 ] || line="$line;check_origin=no"
     return 0
@@ -193,8 +209,23 @@ if [ -f "$RUN/pid" ]; then
 fi
 echo $$ > "$RUN/pid"
 
-grep -v -e '^t48ctrl_socket' -e '^filter_registrar' "$CONFIG" > "$RUN/config"
+grep -v -e '^t48ctrl_socket' -e '^filter_registrar' -e '^sip_cafile' "$CONFIG" > "$RUN/config"
 printf 't48ctrl_socket\t\t%s\n' "$RUN/ctrl.sock" >> "$RUN/config"
+
+# SIP over TLS trusts the image's CA list (sip_capath in the config) and the
+# root certificates the owner added on the web setup page, if any, gathered
+# here into one file (issue #78). Only certificates are copied, whatever else
+# a file holds.
+CERTS=${T48_SIP_CERTS:-$(dirname "$SETTINGS")/certs}
+: > "$RUN/ca.pem"
+for c in "$CERTS"/*.pem; do
+    [ -f "$c" ] || continue
+    sed -n '/^-----BEGIN CERTIFICATE-----$/,/^-----END CERTIFICATE-----$/p' "$c" >> "$RUN/ca.pem"
+done
+if [ -s "$RUN/ca.pem" ]; then
+    printf 'sip_cafile\t\t%s\n' "$RUN/ca.pem" >> "$RUN/config"
+    echo "t48-sip: added root certificates: $(grep -c -e "-----BEGIN CERTIFICATE" "$RUN/ca.pem")" >&2
+fi
 
 # Block direct calls (issue #77), off unless the phone file says on: a call or
 # other request that does not come from the address the account's last
@@ -226,5 +257,15 @@ for i in "" 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
     fi
 done
 [ $n -gt 0 ] || die "no usable account in $SETTINGS or ${SETTINGS}2 to 16 (see sip.example)"
+
+# TLS and media encryption only when an account uses them: otherwise no TLS
+# port is opened (the one after sip_listen's), and the modules are not loaded,
+# which saves the memory OpenSSL takes for them (dtls_srtp makes a key and a
+# certificate as it loads)
+if ! grep -q ';transport=tls' "$RUN/accounts"; then
+    sed -i '/^sip_transports/s/,tls//' "$RUN/config"
+fi
+grep -q ';mediaenc=srtp' "$RUN/accounts" || sed -i '/^module[[:space:]]*srtp\.so/d' "$RUN/config"
+grep -q ';mediaenc=dtls_srtp' "$RUN/accounts" || sed -i '/^module[[:space:]]*dtls_srtp\.so/d' "$RUN/config"
 
 exec "$BARESIP" -f "$RUN" "$@"
