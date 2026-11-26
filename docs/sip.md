@@ -315,7 +315,7 @@ Result on 2026-11-23, all passing (Opus rows 2026-11-25):
 | bob calls alice after 130 s | alice rang |
 | The router restarts (every binding gone) | alice's next OPTIONS showed a new port, she registered again (26 s after the restart); bob's call rang |
 | alice with `keepalive=off` | the binding went after 40 s and bob's call did not reach her |
-| carol, whose REGISTER cannot be sent (TLS to a port where nothing listens) | tried again every 30 to 60 s |
+| carol, whose REGISTER cannot be sent (her server's name cannot be looked up; until #78 it was TLS on a build without it) | tried again every 30 to 60 s |
 
 `sip/test/tls-test.sh` (in the build container, about 3 minutes; issue #78) makes a test CA and certificates when it starts, gives the test Kamailio a TLS listener on 5061 with a certificate for `sip.test`, and answers `_sips._tcp.sip.test` from a DNS server of its own on loopback ([`dns.py`](../sip/test/dns.py)). alice and bob run through `t48-sip` with the test CA as an added root. Calls are checked by [`srtp_call.py`](../sip/test/srtp_call.py): encrypted or not (the `CALL_MENC` event and `"secure"` in a catch-up), and each side hears the other's tone. Result on 2026-11-26, all passing:
 
