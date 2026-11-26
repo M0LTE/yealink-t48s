@@ -250,8 +250,9 @@ static const char *update_notice(const struct update_info *u);
 /* installed apps the feed has newer, as t48-app last found: the home screen's count (issue #80) */
 static int app_updates(void)
 {
-    const char *feed = val("feed", "url", "");
-    return manifest_updates(opt.state, feed[0] ? feed : T48_DEFAULT_FEED);
+    struct t48_feed fl[T48_FEEDS];
+    int n = feeds_list(fl);
+    return manifest_updates(opt.state, fl, n);
 }
 
 void page_overview(struct req *r)
@@ -1254,25 +1255,26 @@ static void app_settings_form(struct req *r, const struct manifest *m)
 
 static void page_apps(struct req *r)
 {
-    static char out[32 * 1024];
-    char err[200] = "";
-    int shown = 0, updates = 0;
-    app_command("list", NULL, out, sizeof out, 25000);
+    static char out[512 * 1024];
+    char err[T48_FEEDS][200];
+    int shown = 0, updates = 0, nerr = 0;
+    app_command("list", NULL, out, sizeof out, 45000);   /* the feeds take 32 s at the most (shell/pkg.c) */
     scan_apps();
     page_begin(r, "Apps", "/apps");
     /* one line per app (t48-app list --machine, shell/pkg.c): id, name, installed, in the feed,
-     * download size, size on the phone, state, permissions, description, category; any
-     * fields after those are for a newer page */
-    static char *line_f[128][11];
+     * download size, size on the phone, state, permissions, description, category, source
+     * (the feed it comes from), the other feeds that have it; any fields after those are
+     * for a newer page. Everything in them is from a feed or a package: shown as text. */
+    static char *line_f[T48_LIST_MAX][13];
     int nlines = 0, used[MANIFEST_CATEGORIES] = {0}, groups = 0;
-    for (char *p = out; p && *p && nlines < 128;) {
+    for (char *p = out; p && *p && nlines < T48_LIST_MAX;) {
         char *nl = strchr(p, '\n'), **f = line_f[nlines];
         if (nl) *nl = 0;
         memset(line_f[nlines], 0, sizeof line_f[0]);
-        if (!strncmp(p, "feederror ", 10)) snprintf(err, sizeof err, "%s", p + 10);
+        if (!strncmp(p, "feederror ", 10) && nerr < T48_FEEDS) snprintf(err[nerr++], sizeof err[0], "%s", p + 10);
         if (!strncmp(p, "app\t", 4)) {
             char *q = p;
-            for (int k = 0; k < 11 && q; k++) { f[k] = q; q = strchr(q, '\t'); if (q) *q++ = 0; }
+            for (int k = 0; k < 13 && q; k++) { f[k] = q; q = strchr(q, '\t'); if (q) *q++ = 0; }
         }
         p = nl ? nl + 1 : NULL;
         if (!f[9] || !manifest_id_ok(f[1])) continue;
@@ -1299,7 +1301,17 @@ static void page_apps(struct req *r)
             H("<p class='dim small'>");
             if (strcmp(f[3], "-")) H("Installed %s. ", f[3]);
             if (strcmp(f[4], "-")) H("In the feed %s. ", f[4]);
-            H("%l KB. %r%s</p><div class='actions'>", kb, strcmp(f[8], "-") ? "Permissions: " : "", strcmp(f[8], "-") ? f[8] : "");
+            H("%l KB. %r%s", kb, strcmp(f[8], "-") ? "Permissions: " : "", strcmp(f[8], "-") ? f[8] : "");
+            /* the feed it comes from; when more than one has it, the first, and the others named */
+            if (f[11] && strcmp(f[11], "-")) H("%r<span class='src'>Source: %s</span>", strcmp(f[8], "-") ? ". " : "", f[11]);
+            if (f[12] && strcmp(f[12], "-")) {
+                H(". Also in ");
+                for (char *a = f[12], *c; a; a = c) {
+                    if ((c = strchr(a, ','))) *c++ = 0;
+                    H("%s%r", a, c ? ", " : "");
+                }
+            }
+            H("</p><div class='actions'>");
             if (!strcmp(st, "available") || !strcmp(st, "update")) {
                 form_begin(r, !strcmp(st, "update") ? "/apps/update" : "/apps/install", "class='inline'");
                 H("<input type='hidden' name='id' value='%s'><button class='primary' type='submit'>%r</button></form>", id, !strcmp(st, "update") ? "Update" : "Install");
@@ -1320,12 +1332,31 @@ static void page_apps(struct req *r)
         form_begin(r, "/apps/update-all", NULL);
         H("<div class='actions'><button class='primary' type='submit'>Update all</button></div></form></div>");
     }
-    if (err[0]) H("<p class='flash bad'>Feed error: %s</p>", err);
+    for (int i = 0; i < nerr; i++) H("<p class='flash bad'>%s</p>", err[i]);
 
-    H("<div class='card'><h2>Feed</h2>");
-    form_begin(r, "/apps/feed", NULL);
-    H("<label class='field'><span>Feed URL</span><input name='url' type='url' value='%s' maxlength='200' placeholder='%s'><small>Empty: default feed</small></label>"
-      "<div class='actions'><button type='submit'>Save</button></div></form></div>", val("feed", "url", ""), T48_DEFAULT_FEED);
+    /* the feeds (issue 81): the official one first and always there, then those added */
+    struct t48_feed fl[T48_FEEDS];
+    int nf = feeds_list(fl);
+    char name[64];
+    H("<div class='card'><h2>Feeds</h2><table class='list'><tbody>");
+    for (int i = 0; i < nf; i++) {
+        feeds_name(fl, nf, fl[i].url, name, sizeof name);
+        H("<tr><td>%s<br><span class='dim mono small'>%s</span></td><td class='acts'>", name, fl[i].url);
+        if (i) {
+            form_begin(r, "/apps/feeds/remove", "class='inline'");
+            H("<input type='hidden' name='url' value='%s'><button type='submit' class='small bad' data-ask='Remove %s? Its apps stay, without updates.'>Remove</button></form>",
+              fl[i].url, name);
+        } else H("<span class='dim small'>Built in</span>");
+        H("</td></tr>");
+    }
+    H("</tbody></table>");
+    if (nf < T48_FEEDS) {
+        form_begin(r, "/apps/feeds/add", "class='sub'");
+        H("<label class='field wide'><span>Add feed</span><input name='url' type='url' maxlength='200' placeholder='https://example.org/apps/index.json' required>"
+          "<small>Apps from other feeds are not checked by this project.</small></label>"
+          "<div class='actions'><button class='primary' type='submit'>Add feed</button></div></form>");
+    } else H("<p class='dim'>%d feeds, the most there can be.</p>", T48_FEEDS);
+    H("</div>");
     page_end(r);
 }
 
@@ -1400,11 +1431,31 @@ static void post_app_settings(struct req *r)
     redirect(r, "/apps");
 }
 
-static void post_app_feed(struct req *r)
+/* a feed added at the end of the list, or one taken out (shell/manifest.c does both, for the phone too) */
+static void post_feed_add(struct req *r)
 {
-    char u[201];
-    if (!line(r, "url", u, sizeof u) || (u[0] && strncmp(u, "https://", 8) && strncmp(u, "file://", 7)) || strchr(u, ' ')) flash(r, 1, "Not saved: the feed URL must start with https://");
-    else { set("feed", "url", u); flash(r, 0, u[0] ? "Feed saved." : "Using the default feed."); }
+    char u[256];
+    if (!line(r, "url", u, sizeof u) || feeds_add(u) < 0) {
+        int e = errno;
+        if (e == EEXIST) flash(r, 1, "Not added: already in the list.");
+        else if (e == ENOSPC) flash(r, 1, "Not added: %d feeds, the most there can be.", T48_FEEDS);
+        else if (e == EINVAL || !u[0]) flash(r, 1, "Not added: the feed URL must start with https://");
+        else flash(r, 1, "Not added: %s.", strerror(e));
+    } else {
+        logmsg("feed added");
+        flash(r, 0, "Feed added.");
+    }
+    redirect(r, "/apps");
+}
+
+static void post_feed_remove(struct req *r)
+{
+    char u[256];
+    if (!line(r, "url", u, sizeof u) || feeds_remove(u) < 0) flash(r, 1, "Not removed: not an added feed.");
+    else {
+        logmsg("feed removed");
+        flash(r, 0, "Feed removed.");
+    }
     redirect(r, "/apps");
 }
 
@@ -2123,7 +2174,8 @@ const struct route routes[] = {
     {"POST", "/apps/remove", post_app_change},
     {"POST", "/apps/update-all", post_app_update_all},
     {"POST", "/apps/settings", post_app_settings},
-    {"POST", "/apps/feed", post_app_feed},
+    {"POST", "/apps/feeds/add", post_feed_add},
+    {"POST", "/apps/feeds/remove", post_feed_remove},
     {"GET", "/access", page_access},
     {"POST", "/access/ssh", post_access_ssh},
     {"POST", "/access/key-add", post_key_add},

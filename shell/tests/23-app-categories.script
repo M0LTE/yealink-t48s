@@ -15,7 +15,7 @@ key ok
 expectstate settings.page store
 waitstate store loaded 5000
 # General: Clock, Crasher, Odd. Games: Blocks. Radio: Waves. Tools: Meter, Notes.
-expectstate settings.rows 14
+expectstate settings.rows 13
 expectstate settings.row Clock
 expectstate settings.heading General
 shot shots/apps-categories.png

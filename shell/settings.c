@@ -34,9 +34,10 @@
 #endif
 
 enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_SIPADV, P_CODECS, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE,
-             P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL, P_ADVANCED, P_FWD };
+             P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL, P_ADVANCED, P_FWD, P_FEEDS, P_FEED };
 static const char *const page_names[] = {"root", "accounts", "sip", "sipadvanced", "codecs", "network", "time", "timezone", "sound", "screen", "access", "about",
-                                         "appsettings", "appconf", "store", "storeapp", "theme", "update", "install", "advanced", "forward"};
+                                         "appsettings", "appconf", "store", "storeapp", "theme", "update", "install", "advanced", "forward",
+                                         "feeds", "feed"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION,
                 R_HEAD };   /* a group's name above its rows: never chosen, the keys step over it */
@@ -44,7 +45,7 @@ enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16, F_
        F_SECONDS = 128,   /* the value is shown with " s" after it */
        F_REGINT = 256,    /* register_seconds: 0, 60 to 86400 or empty */
        F_CODEC = 512 };   /* a row of the Codecs page: a switch that also moves up and down */
-enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
+enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_REMOVE, A_UPDATE_ALL,
               A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME,
               A_UPD_CHANNEL, A_UPD_CHECK, A_UPD_INSTALL, A_UPD_KERNEL, A_UPD_RESTART,
               A_FW_BACKUP, A_FW_INSTALL, A_FW_RESTORE, A_KEYTEST, A_DND };
@@ -53,6 +54,7 @@ struct row {
     int kind, flags;
     char label[96];
     char value[200];       /* what shows on the right; for R_NOTE the whole text */
+    char sub[64];          /* quiet words after the label, where there is room: an app's feed (issue 81) */
     char file[80], key[48];
     char def[160];         /* what the value is when the store has none */
     const char *choices;   /* R_CHOICE: "dhcp|static" */
@@ -62,7 +64,7 @@ struct row {
     int level, level_max;
 };
 
-#define MAX_ROWS 96
+#define MAX_ROWS (T48_LIST_MAX + 24)   /* the Apps page: every app, the headings, a line a feed, and its actions */
 /* the list: seven rows on the T48S; on a small screen as many as fit above the soft keys' labels */
 #define VISIBLE (SMALL ? SROWS : 7)
 #define ROW_H (SMALL ? SROW_STEP : 60)
@@ -409,25 +411,27 @@ const char *settings_update_notice(void)
                                                                                                  : "Custom: update available";
 }
 
-static const char *feed_now(void);
-
-/* installed apps the feed has newer, as t48-app last found. Asked for every second by
- * the home screen, so counted again only when the offers file, the feed or the list of
- * installed apps has changed */
+/* installed apps their feeds have newer, as t48-app last found. Asked for every second
+ * by the home screen, so counted again only when the offers file, the record of where
+ * each app came from, the feeds or the list of installed apps has changed */
 int settings_app_updates(void)
 {
-    static char seen[600];
+    static char seen[2400];
     static int count;
-    char path[400], sig[600];
-    struct stat st;
-    const char *feed = feed_now();
-    if (!feed[0]) feed = pkg_default_feed();
+    char path[400], sig[2400];
+    struct stat st, src;
+    struct t48_feed fl[T48_FEEDS];
+    int nf = feeds_list(fl);
     snprintf(path, sizeof path, "%s/" T48_OFFERS, opt.state);
     if (stat(path, &st) < 0) return 0;
-    snprintf(sig, sizeof sig, "%ld.%ld.%ld.%d.%s", (long)st.st_mtim.tv_sec, (long)st.st_mtim.tv_nsec, (long)st.st_size, manifest_scans, feed);
+    snprintf(path, sizeof path, "%s/" T48_SOURCES, opt.state);
+    if (stat(path, &src) < 0) memset(&src, 0, sizeof src);
+    int at = snprintf(sig, sizeof sig, "%ld.%ld.%ld.%ld.%ld.%d", (long)st.st_mtim.tv_sec, (long)st.st_mtim.tv_nsec, (long)st.st_size,
+                      (long)src.st_mtim.tv_sec, (long)src.st_mtim.tv_nsec, manifest_scans);
+    for (int i = 0; i < nf && at < (int)sizeof sig; i++) at += snprintf(sig + at, sizeof sig - (size_t)at, " %s", fl[i].url);
     if (strcmp(sig, seen)) {
         snprintf(seen, sizeof seen, "%s", sig);
-        count = manifest_updates(opt.state, feed);
+        count = manifest_updates(opt.state, fl, nf);
     }
     return count;
 }
@@ -438,11 +442,15 @@ struct store_app {
     char id[64], name[64], have[24], offered[24], state[16], perms[96], description[160];
     long pkg_bytes, disk_bytes;
     int category;   /* place in manifest_categories: the group it is listed under (issue 30) */
+    char source[64];   /* the feed it comes from, by name: Official, a host, or "" (issue 81) */
+    char also[200];    /* the other feeds that have it, commas between, or "" */
 };
-static struct store_app store[128];
+static struct store_app store[T48_LIST_MAX];
 static int nstore;
 static enum { ST_NONE, ST_LOADING, ST_LOADED } store_state;
-static char feed_error[200];
+static char feed_errors[T48_FEEDS][200];   /* "example.org: download timed out", one a feed */
+static int nfeed_errors;
+static char feed_removing[256];            /* the feed the Remove question is about */
 
 static struct {
     pid_t pid;
@@ -460,8 +468,6 @@ static void redraw_me(void)
 {
     shell_settings_changed();
 }
-
-static const char *feed_now(void) { return cfg_str("feed", "url", pkg_default_feed()); }
 
 /* the installer on a phone started from a USB stick (t48-install, docs/installer.md) */
 static const char *fw_tool(void) { return getenv("T48_INSTALL") ? getenv("T48_INSTALL") : "/usr/bin/t48-install"; }
@@ -535,14 +541,17 @@ static int job_start(int kind, const char *cmd, const char *arg)
     job.kind = kind;
     job.ok = job.listed = 0;
     job.result[0] = 0;
-    if (kind == J_LIST) { feed_error[0] = 0; job.blank = !nstore; }
+    if (kind == J_LIST) { nfeed_errors = 0; job.blank = !nstore; }
     logmsg("%s %s %s", kind == J_FIRMWARE ? "install: t48-install" : "apps: t48-app", cmd, arg ? arg : "");
     return 0;
 }
 
+static int store_again;   /* asked for while a list was being made: what it read may be out of date */
+
 static void store_refresh(void)
 {
-    if (job.pid > 0) return;
+    if (job.pid > 0) { store_again = job.kind == J_LIST; return; }
+    store_again = 0;
     /* what was listed before stays on the screen until the new list starts to arrive */
     store_state = job_start(J_LIST, "list", NULL) == 0 ? ST_LOADING : ST_NONE;
 }
@@ -558,11 +567,11 @@ static void job_line(char *line)
 {
     if (!strncmp(line, "app\t", 4) && job.kind == J_LIST) {
         if (!job.listed) { nstore = 0; job.listed = 1; }
-        if (nstore >= 128) return;
+        if (nstore >= T48_LIST_MAX) return;
         struct store_app *a = &store[nstore];
         /* the fields t48-app list --machine gives (pkg.c); any after these are for a newer shell */
-        char *f[10] = {0}, *p = line + 4;
-        for (int i = 0; i < 10 && p; i++) {
+        char *f[12] = {0}, *p = line + 4;
+        for (int i = 0; i < 12 && p; i++) {
             f[i] = p;
             p = strchr(p, '\t');
             if (p) *p++ = 0;
@@ -579,9 +588,11 @@ static void job_line(char *line)
         snprintf(a->perms, sizeof a->perms, "%s", strcmp(f[7], "-") ? f[7] : "");
         snprintf(a->description, sizeof a->description, "%s", strcmp(f[8], "-") ? f[8] : "");
         a->category = manifest_category(f[9] ? f[9] : "");
+        snprintf(a->source, sizeof a->source, "%s", f[10] && strcmp(f[10], "-") ? f[10] : "");
+        snprintf(a->also, sizeof a->also, "%s", f[11] && strcmp(f[11], "-") ? f[11] : "");
         nstore++;
     } else if (!strncmp(line, "feederror ", 10)) {
-        snprintf(feed_error, sizeof feed_error, "%s", line + 10);
+        if (nfeed_errors < T48_FEEDS) snprintf(feed_errors[nfeed_errors++], sizeof feed_errors[0], "%s", line + 10);
     } else if (!strncmp(line, "progress ", 9) && job.kind == J_CHANGE && ov.kind == O_BUSY) {
         char what[24] = "";
         int pc = -1;
@@ -647,11 +658,16 @@ int settings_reaped(pid_t pid, int status)
     job.fd = -1;
     job.pid = 0;
     int ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    if (job.kind == J_LIST && store_again) {
+        /* the feeds changed while it was reading them (one added, say): read them again */
+        store_refresh();
+        if (store_state == ST_LOADING) return 1;
+    }
     if (job.kind == J_LIST) {
         store_state = ST_LOADED;
         if (!job.listed) nstore = 0;
-        if (!ok && !feed_error[0]) snprintf(feed_error, sizeof feed_error, "installer stopped");
-        logmsg("apps: %d listed%s%s", nstore, feed_error[0] ? "; feed: " : "", feed_error);
+        if (!ok && !nfeed_errors) snprintf(feed_errors[nfeed_errors++], sizeof feed_errors[0], "installer stopped");
+        logmsg("apps: %d listed%s%s", nstore, nfeed_errors ? "; feed: " : "", nfeed_errors ? feed_errors[0] : "");
         /* the list has just appeared where there was none: start at its top */
         if (depth >= 0 && stack[depth].page == P_STORE && job.blank) stack[depth].sel = stack[depth].top = 0;
     } else if (job.kind == J_FIRMWARE) {
@@ -1293,9 +1309,9 @@ static void build_store(void)
     if (store_state == ST_LOADING && !nstore) {
         snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Loading");
     } else {
-        if (feed_error[0] && store_state == ST_LOADED) {
+        for (int i = 0; store_state == ST_LOADED && i < nfeed_errors; i++) {
             struct row *r = add(R_NOTE, "");
-            snprintf(r->value, sizeof r->value, "Feed error: %s", feed_error);
+            snprintf(r->value, sizeof r->value, "%s", feed_errors[i]);
             r->flags = F_DANGER;
         }
         /* Grouped by category, in the fixed order, each group in the order t48-app listed
@@ -1317,14 +1333,53 @@ static void build_store(void)
                 else if (!strcmp(a->state, "builtin")) snprintf(v, sizeof v, "Built in %s", a->have);
                 else if (!strcmp(a->state, "unsupported")) snprintf(v, sizeof v, "Needs newer firmware");
                 else snprintf(v, sizeof v, "%s, %s", a->offered, size);
-                snprintf(add_menu(a->name, P_STOREAPP, v)->arg, sizeof rows[0].arg, "%s", a->id);
+                struct row *r = add_menu(a->name, P_STOREAPP, v);
+                snprintf(r->arg, sizeof r->arg, "%s", a->id);
+                /* where it comes from, quietly; the official feed is the usual case and goes unsaid */
+                if (a->source[0] && strcmp(a->source, "Official")) snprintf(r->sub, sizeof r->sub, "%s", a->source);
             }
         }
         if (updates > 1) add_action("Update all", A_UPDATE_ALL, "");
         add_action("Refresh", A_REFRESH, "");
     }
-    add_stored(R_TEXT, "Feed URL", "feed", "url", pkg_default_feed(), 0);
-    if (strcmp(feed_now(), pkg_default_feed())) add_action("Use default feed", A_FEED_DEFAULT, "");
+    struct t48_feed fl[T48_FEEDS];
+    int nf = feeds_list(fl);
+    char v[24];
+    if (nf > 1) snprintf(v, sizeof v, "%d", nf);
+    else snprintf(v, sizeof v, "Official");
+    add_menu("Feeds", P_FEEDS, v);
+}
+
+/* The feeds (issue 81): the official one, then those added, each with its own page;
+ * Add feed while there is room */
+static void build_feeds(void)
+{
+    struct t48_feed fl[T48_FEEDS];
+    int n = feeds_list(fl);
+    char name[64];
+    snprintf(title, sizeof title, "Feeds");
+    for (int i = 0; i < n; i++) {
+        feeds_name(fl, n, fl[i].url, name, sizeof name);
+        snprintf(add_menu(name, P_FEED, "")->arg, sizeof rows[0].arg, "%d", i);
+    }
+    if (n < T48_FEEDS) {
+        add_stored(R_TEXT, "Add feed", "feed", "add", "", 0);
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Apps from other feeds are not checked by this project");
+    } else {
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%d feeds, the most there can be", T48_FEEDS);
+    }
+}
+
+static void build_feed(const char *arg)
+{
+    struct t48_feed fl[T48_FEEDS];
+    int n = feeds_list(fl), i = atoi(arg);
+    if (i < 0 || i >= n) { snprintf(title, sizeof title, "Feed"); snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Removed"); return; }
+    feeds_name(fl, n, fl[i].url, title, sizeof title);
+    snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%s", fl[i].url);
+    if (i == 0) add_info("Source", "Built in");
+    else snprintf(add_action("Remove", A_FEED_REMOVE, "")->arg, sizeof rows[0].arg, "%d", i);
+    if (i) rows[nrows - 1].flags = F_DANGER;
 }
 
 static void build_storeapp(const char *id)
@@ -1362,7 +1417,15 @@ static void build_storeapp(const char *id)
     }
     add_info("Permissions", v);
     if (!strcmp(a->state, "builtin")) add_info("Source", "Built in");
-    else if (inst) add_action("Remove", A_REMOVE, id)->flags = F_DANGER;
+    else if (a->source[0]) add_info("Source", a->source);
+    if (a->also[0]) {
+        /* offered by more than one feed: this is the one it installs and updates from */
+        char also[220];
+        snprintf(also, sizeof also, "%s", a->also);
+        for (char *p = also; (p = strchr(p, ',')); p++) { memmove(p + 1, p, strlen(p) + 1); p[1] = ' '; p++; }
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Also in %s", also);
+    }
+    if (strcmp(a->state, "builtin") && inst) add_action("Remove", A_REMOVE, id)->flags = F_DANGER;
 }
 
 /* Install: one step at a time. A phone on Yealink's firmware is backed up, then
@@ -1455,6 +1518,8 @@ static void rebuild(void)
     case P_INSTALL: build_install(); break;
     case P_FWD: build_fwd(stack[depth].arg); break;
     case P_ADVANCED: build_advanced(); break;
+    case P_FEEDS: build_feeds(); break;
+    case P_FEED: build_feed(stack[depth].arg); break;
     }
     for (int i = 0; keep[0] && i < nrows; i++)
         if (rows[i].kind == R_ACTION && !strcmp(rows[i].label, keep)) stack[depth].sel = i;
@@ -1578,7 +1643,6 @@ static void store_value(const struct row *r, const char *value)
     /* read by t48-sip when baresip starts */
     if (!strcmp(r->file, "phone") && !strcmp(r->key, "block_direct")) snprintf(dirty, sizeof dirty, "sip");
     mark_dirty(r->file);
-    if (!strcmp(r->file, "feed") && !strcmp(r->key, "url")) store_refresh();
 }
 
 static void set_level(struct row *r, int v)
@@ -1658,10 +1722,20 @@ static void do_action(const struct row *r)
         }
         snprintf(ov.extra, sizeof ov.extra, "About 3 min. Do not unplug");
         break;
-    case A_FEED_DEFAULT:
-        cfg_set("feed", "url", NULL);
-        store_refresh();
+    case A_FEED_REMOVE: {
+        struct t48_feed fl[T48_FEEDS];
+        int n = feeds_list(fl), i = atoi(r->arg);
+        char name[64];
+        if (i < 1 || i >= n) break;
+        feeds_name(fl, n, fl[i].url, name, sizeof name);
+        snprintf(feed_removing, sizeof feed_removing, "%s", fl[i].url);
+        memset(&ov, 0, sizeof ov);
+        ov.kind = O_CONFIRM;
+        ov.act = A_FEED_REMOVE;
+        snprintf(ov.title, sizeof ov.title, "Remove %s?", name);
+        snprintf(ov.text, sizeof ov.text, "Its apps stay, without updates");
         break;
+    }
     case A_SSH:
         if (!strcmp(r->value, "on")) {
             /* off is the safe way: no question asked */
@@ -1756,6 +1830,12 @@ static void confirmed(enum action act, const char *arg)
 {
     switch (act) {
     case A_REMOVE: change_app(act, arg); break;
+    case A_FEED_REMOVE:
+        if (feeds_remove(feed_removing) < 0) { message("Not removed", strerror(errno)); break; }
+        logmsg("settings: feed removed");
+        store_refresh();
+        pop();
+        break;
     case A_SSH:
         cfg_set("access", "ssh", "on");
         run_apply("access");
@@ -1831,7 +1911,7 @@ static void activate(int i, int dir)
         kbd_row = *r;
         /* a password starts empty: what is stored is never put on the screen */
         t48_kbd_open(&kbd, (r->flags & F_PASSWORD) ? "New password (empty: no change)" : r->label,
-                     (r->flags & F_PASSWORD) ? "" : r->value, 160,
+                     (r->flags & F_PASSWORD) ? "" : r->value, !strcmp(r->file, "feed") ? 199 : 160,
                      ((r->flags & F_PASSWORD) ? T48_KBD_PASSWORD : 0) | ((r->flags & F_DIGITS) ? T48_KBD_DIGITS : 0));
         kbd_open = 1;
         break;
@@ -1892,9 +1972,23 @@ static void kbd_done(void)
         rebuild();
         return;
     }
-    if (!strcmp(kbd_row.file, "feed") && !strcmp(kbd_row.key, "url") && strncmp(text, "https://", 8) &&
-        strncmp(text, "file://", 7)) {
-        message("Not a feed URL", "Must start with https://");
+    /* a feed added: at the end of the list, and the Apps page asks them all again */
+    if (!strcmp(kbd_row.file, "feed") && !strcmp(kbd_row.key, "add")) {
+        if (!text[0]) return;
+        if (feeds_add(text) < 0) {
+            char most[40];
+            snprintf(most, sizeof most, "%d feeds, the most there can be", T48_FEEDS);
+            if (errno == EEXIST) message("Not added", "Already in the list");
+            else if (errno == ENOSPC) message("Not added", most);
+            else if (errno == EINVAL) message("Not a feed URL", "Must start with https://");
+            else message("Not added", strerror(errno));
+            return;
+        }
+        logmsg("settings: feed added");
+        store_refresh();
+        rebuild();
+        for (int i = 0; i < nrows; i++)   /* the cursor stays on Add feed, which has moved down */
+            if (!strcmp(rows[i].key, "add") && !strcmp(rows[i].file, "feed")) stack[depth].sel = i;
         return;
     }
     /* emptied: the setting goes back to not being set (an app's own may really be empty) */
@@ -1903,6 +1997,21 @@ static void kbd_done(void)
 }
 
 /* ---------- input ---------- */
+
+/* the simulator types into the keyboard, for the tests (be_sim.c): at the cursor */
+int settings_type(const char *text)
+{
+    if (!kbd_open) return -1;
+    size_t n = strlen(text), room = sizeof kbd.text - 1 - (size_t)kbd.len;
+    if (kbd.max > 0 && (size_t)(kbd.max - kbd.len) < room) room = (size_t)(kbd.max - kbd.len);
+    if (n > room) n = room;
+    memmove(kbd.text + kbd.cur + n, kbd.text + kbd.cur, (size_t)(kbd.len - kbd.cur) + 1);
+    memcpy(kbd.text + kbd.cur, text, n);
+    kbd.len += (int)n;
+    kbd.cur += (int)n;
+    redraw_me();
+    return 0;
+}
 
 static void overlay_answer(int yes)
 {
@@ -2207,11 +2316,18 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
     int lw = t48_text_width(f, r->label), room = right - (x + pad);
     if (lw > room * 2 / 3 && r->value[0]) lw = room * 2 / 3;
     t48_text_fit(&ui, x + pad, ty, lw + 2, f, r->kind == R_INFO && !selected ? ink.dim : text, r->label);
+    char secs[220];
+    const char *shown = r->kind == R_CHOICE ? choice_text(r->value) : r->value;
+    if (r->flags & F_SECONDS) { snprintf(secs, sizeof secs, "%s s", r->value); shown = secs; }
+    int vw = r->value[0] ? t48_text_width(f, shown) : 0;
+    if (r->sub[0]) {
+        /* quiet, in the small face after the label; it goes first when there is no room */
+        const t48_font *sf = &t48_font_small;
+        int sw = t48_text_width(sf, r->sub), gap = SMALL ? 8 : 12;
+        if (lw + gap + sw + 24 + vw <= room) t48_text(&ui, x + pad + lw + gap, ty + f->height - sf->height - (SMALL ? 0 : 2), sf, ink.dim, r->sub);
+    }
     if (r->value[0]) {
-        char secs[220];
-        const char *shown = r->kind == R_CHOICE ? choice_text(r->value) : r->value;
-        if (r->flags & F_SECONDS) { snprintf(secs, sizeof secs, "%s s", r->value); shown = secs; }
-        int vw = t48_text_width(f, shown), max = room - lw - 24;
+        int max = room - lw - 24;
         uint32_t vc = dis ? ink.faint : r->kind == R_INFO ? ink.text : ink.dim;
         if (vw <= max) t48_text_right(&ui, right, ty, f, vc, shown);
         else if (max > 40) t48_text_fit(&ui, right - max, ty, max, f, vc, shown);
@@ -2454,7 +2570,18 @@ const char *settings_state(const char *key)
             if (rows[i].kind == R_HEAD) return rows[i].label;
         return "-";
     }
-    if (!strcmp(key, "store")) return store_state == ST_LOADING ? "loading" : store_state == ST_LOADED ? (feed_error[0] ? "error" : "loaded") : "none";
+    if (!strcmp(key, "store")) return store_state == ST_LOADING ? "loading" : store_state == ST_LOADED ? (nfeed_errors ? "error" : "loaded") : "none";
+    if (!strcmp(key, "store.errors")) { snprintf(b, sizeof b, "%d", nfeed_errors); return b; }
+    if (!strncmp(key, "storesrc.", 9)) {
+        const struct store_app *a = store_find(key + 9);
+        return a && a->source[0] ? a->source : "-";
+    }
+    if (!strncmp(key, "storealso.", 10)) {
+        const struct store_app *a = store_find(key + 10);
+        return a && a->also[0] ? a->also : "-";
+    }
+    if (!strcmp(key, "feeds")) { struct t48_feed fl[T48_FEEDS]; snprintf(b, sizeof b, "%d", feeds_list(fl)); return b; }
+    if (!strcmp(key, "settings.sub")) return depth >= 0 && stack[depth].sel < nrows && rows[stack[depth].sel].sub[0] ? rows[stack[depth].sel].sub : "-";
     if (!strncmp(key, "store.", 6)) {
         const struct store_app *a = store_find(key + 6);
         return a ? a->state : "none";

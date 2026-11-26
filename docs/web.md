@@ -40,7 +40,7 @@ Open that address in a browser. A browser the phone has not seen gets one page o
 | Sound and screen | ringer, handset, speaker and headset levels; brightness, and when the screen dims and goes off; the theme, which the page wears too ([design](design/README.md)) |
 | Contacts | add, change, delete; import a CSV or vCard file (added to the list, or replacing it); download as CSV or vCard |
 | Calls | the call history, and Clear |
-| Apps | what is installed and what the feed offers, grouped by category as on the phone: install, update, remove; Update all when there is more than one update, as on the phone; each app's own settings; the feed address |
+| Apps | what is installed and what the feeds offer, grouped by category as on the phone, each app with its feed: install, update, remove; Update all when there is more than one update, as on the phone; each app's own settings; the feeds, added and removed ([apps.md](apps.md#feeds)). Everything from a feed is shown as text |
 | Access | SSH on and off, the host key's fingerprint, the keys that can log in: **paste a public key** to add one, remove one, forget all. The browsers paired with the page; turn the page off |
 | Backup | download the settings as one text file; put a saved file back |
 | Update | the version and slot that are running, the channel, the newest release on it and when it was checked; check, install, restart, and the kernel when the channel's differs; the daily check, on or off |
