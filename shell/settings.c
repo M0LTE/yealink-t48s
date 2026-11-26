@@ -64,7 +64,7 @@ struct row {
     int level, level_max;
 };
 
-#define MAX_ROWS 96
+#define MAX_ROWS (T48_LIST_MAX + 24)   /* the Apps page: every app, the headings, a line a feed, and its actions */
 /* the list: seven rows on the T48S; on a small screen as many as fit above the soft keys' labels */
 #define VISIBLE (SMALL ? SROWS : 7)
 #define ROW_H (SMALL ? SROW_STEP : 60)
@@ -445,7 +445,7 @@ struct store_app {
     char source[64];   /* the feed it comes from, by name: Official, a host, or "" (issue 81) */
     char also[200];    /* the other feeds that have it, commas between, or "" */
 };
-static struct store_app store[128];
+static struct store_app store[T48_LIST_MAX];
 static int nstore;
 static enum { ST_NONE, ST_LOADING, ST_LOADED } store_state;
 static char feed_errors[T48_FEEDS][200];   /* "example.org: download timed out", one a feed */
@@ -564,7 +564,7 @@ static void job_line(char *line)
 {
     if (!strncmp(line, "app\t", 4) && job.kind == J_LIST) {
         if (!job.listed) { nstore = 0; job.listed = 1; }
-        if (nstore >= 128) return;
+        if (nstore >= T48_LIST_MAX) return;
         struct store_app *a = &store[nstore];
         /* the fields t48-app list --machine gives (pkg.c); any after these are for a newer shell */
         char *f[12] = {0}, *p = line + 4;
@@ -1369,11 +1369,6 @@ static void build_feed(const char *arg)
     if (i < 0 || i >= n) { snprintf(title, sizeof title, "Feed"); snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Removed"); return; }
     feeds_name(fl, n, fl[i].url, title, sizeof title);
     snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%s", fl[i].url);
-    int apps_from = 0;
-    for (int k = 0; k < nstore; k++) apps_from += !strcmp(store[k].source, title);
-    char v[24];
-    snprintf(v, sizeof v, "%d", apps_from);
-    if (store_state == ST_LOADED) add_info("Apps", v);
     if (i == 0) add_info("Source", "Built in");
     else snprintf(add_action("Remove", A_FEED_REMOVE, "")->arg, sizeof rows[0].arg, "%d", i);
     if (i) rows[nrows - 1].flags = F_DANGER;

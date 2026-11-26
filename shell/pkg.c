@@ -5,10 +5,11 @@
  *
  * A feed is an index.json at an https address (docs/apps.md); each entry
  * gives a package's address, size and SHA-256. There are several (issue 81):
- * the official feed first, then the ones the owner added. They are read side by
- * side, each with a short time limit, so one slow or broken feed holds up none of
- * the others. Every feed but the official one is someone else's: its packages get
- * the same checks, and nothing it says is trusted further than that. A package (.t48app) is a
+ * the official feed first, then the ones the owner added. They are read a few at a
+ * time, each with a short time limit and all of them with one, so one slow or broken
+ * feed holds up none of the others. Every feed but the official one is someone
+ * else's: its packages get the same checks, nothing it says is trusted further than
+ * that, and it can never update an app it did not install (app_follows). A package (.t48app) is a
  * gzipped tar holding one folder named after the app's id. Installing is:
  * fetch the index, refuse an app written for a newer API level than this
  * shell speaks, download the package with curl, check its size and SHA-256
@@ -40,9 +41,10 @@
 #define MAX_PACKAGE (32L * 1024 * 1024)
 #define MAX_UNPACKED (96L * 1024 * 1024)
 #define MAX_FILES 4000
-#define MAX_FEED_APPS 256   /* from all the feeds together */
+#define MAX_FEED_APPS T48_FEED_APPS
 #define MAX_ONE_FEED 128    /* from any one */
 #define INDEX_SECONDS 15    /* each feed's time limit; T48_FEED_TIMEOUT in the tests */
+#define FETCH_AT_ONCE 3     /* feeds fetched at the same time */
 #define CA_BUNDLE "/etc/ssl/certs/ca-certificates.crt"
 
 static int machine;              /* --machine: lines for the shell instead of words for a person */
@@ -523,56 +525,74 @@ static int index_seconds(void)
     return s > 0 && s <= INDEX_SECONDS ? s : INDEX_SECONDS;
 }
 
-/* Fetch every feed's index side by side and read them: 0 if at least one could be
- * read, else -1 with the first feed's reason. Each has INDEX_SECONDS; one that is not
- * done by then is stopped, so a slow feed costs that much and no more. */
+/* Fetch every feed's index, FETCH_AT_ONCE at a time, and read them: 0 if at least one
+ * could be read, else -1 with the first feed's reason. Each has INDEX_SECONDS, and all of
+ * them twice that: one not done by then is stopped, so a slow feed costs that much and
+ * no more. */
 static int load_feeds(void)
 {
     char dir[340], path[T48_FEEDS][360];
     pid_t pid[T48_FEEDS];
-    int left = 0, secs = index_seconds();
+    int secs = index_seconds();
 
     if (feeds_read) goto counted;
     feeds_read = 1;
     nfeed = 0;
-    for (int k = 0; k < nfeeds; k++) feeds_name(feeds, nfeeds, feeds[k].url, feed_name[k], sizeof feed_name[0]);
+    feeds_names(feeds, nfeeds, feed_name);
     work_dir(dir, sizeof dir);
     if (mkdir(dir, 0700) < 0 && errno != EEXIST) { fail("cannot write to %s (%s)", apps_dir, strerror(errno)); return -1; }
     progress("index", -1);
+    long long start[T48_FEEDS], now = t48_now_ms();
+    /* all of it: twice one feed's limit, however many feeds; one not started by then is given up */
+    long long until = now + secs * 2000LL + 2000;
+    int next = 0, running = 0, done = 0;
     for (int k = 0; k < nfeeds; k++) {
-        const char *u = feeds[k].url;
         feed_ok[k] = 0;
         feed_err[k][0] = 0;
         pid[k] = 0;
         snprintf(path[k], sizeof path[0], "%s/index-%d.json", dir, k);
-        if (strncmp(u, "https://", 8) && strncmp(u, "file://", 7)) { snprintf(feed_err[k], sizeof feed_err[0], "feed URL must start with https://"); continue; }
-        pid[k] = curl_start(u, path[k], MAX_INDEX, strncmp(u, "https://", 8) ? "=file" : "=https", secs);
-        if (pid[k] < 0) { pid[k] = 0; snprintf(feed_err[k], sizeof feed_err[0], "cannot start a download (%s)", strerror(errno)); continue; }
-        left++;
     }
-    /* curl keeps to its own limit; this one is for a curl that cannot, stuck opening a file */
-    long long until = t48_now_ms() + secs * 1000LL + 2000;
-    while (left > 0) {
+    while (done < nfeeds) {
+        /* a few at a time: each curl is a few MB of memory on a phone with little */
+        while (next < nfeeds && running < FETCH_AT_ONCE && t48_now_ms() < until) {
+            int k = next++;
+            const char *u = feeds[k].url;
+            if (strncmp(u, "https://", 8) && strncmp(u, "file://", 7)) {
+                snprintf(feed_err[k], sizeof feed_err[0], "feed URL must start with https://");
+                done++;
+                continue;
+            }
+            pid[k] = curl_start(u, path[k], MAX_INDEX, strncmp(u, "https://", 8) ? "=file" : "=https", secs);
+            if (pid[k] < 0) {
+                pid[k] = 0;
+                snprintf(feed_err[k], sizeof feed_err[0], "cannot start a download (%s)", strerror(errno));
+                done++;
+                continue;
+            }
+            start[k] = t48_now_ms();
+            running++;
+        }
+        now = t48_now_ms();
         for (int k = 0; k < nfeeds; k++) {
             int status;
-            if (pid[k] <= 0 || waitpid(pid[k], &status, WNOHANG) != pid[k]) continue;
-            int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-            pid[k] = 0;
-            left--;
-            if (code == 0) feed_ok[k] = 1;
-            else curl_why(code, feed_err[k], sizeof feed_err[0]);
-        }
-        if (left > 0 && t48_now_ms() > until) {
-            for (int k = 0; k < nfeeds; k++) {
-                if (pid[k] <= 0) continue;
+            if (pid[k] <= 0) continue;
+            if (waitpid(pid[k], &status, WNOHANG) == pid[k]) {
+                int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+                if (code == 0) feed_ok[k] = 1;
+                else curl_why(code, feed_err[k], sizeof feed_err[0]);
+            } else if (now > start[k] + secs * 1000LL + 2000 || now > until) {
+                /* curl keeps to its own limit; this is for a curl that cannot, stuck opening a file */
                 kill(pid[k], SIGKILL);
                 while (waitpid(pid[k], NULL, 0) < 0 && errno == EINTR) {}
-                pid[k] = 0;
                 snprintf(feed_err[k], sizeof feed_err[0], "download timed out");
-            }
-            left = 0;
+            } else continue;
+            pid[k] = 0;
+            running--;
+            done++;
         }
-        if (left > 0) usleep(50000);
+        if (now > until && !running)
+            for (; next < nfeeds; next++, done++) snprintf(feed_err[next], sizeof feed_err[0], "download timed out");
+        if (done < nfeeds) usleep(50000);
     }
     /* read in the feeds' order, so the official feed's apps come first */
     for (int k = 0; k < nfeeds; k++) {
@@ -611,53 +631,54 @@ static const struct manifest *installed_find(const char *id)
 }
 
 /* is this installed app in the folder we install to, rather than part of the system image? */
-static int ours(const struct manifest *m)
-{
-    char *full = realpath(apps_dir, NULL);
-    size_t n = full ? strlen(full) : 0;
-    int r = full && !strncmp(m->dir, full, n) && m->dir[n] == '/';
-    free(full);
-    return r;
-}
+static int ours(const struct manifest *m) { return !manifest_builtin(m); }
 
-/* The offer an app installs or updates from. An installed app follows the feed it came
- * from, and only that one; one that came from no feed (built in, from a file, or from
- * before issue 81) follows the first feed that has it, as does an app not installed. */
-static const struct feed_app *offer_for(const char *id, int *src_gone)
+/* The offer an app installs or updates from. An installed app only from the feeds it
+ * follows (app_follows: the one it came from; the official feed for a built-in app or
+ * one with no record), the first of them that has it; an app not installed from the
+ * first feed that has it. *why on NULL: 0 not offered, 1 its feed was not read, 2 its
+ * feed was removed. */
+static const struct feed_app *offer_for(const char *id, int *why)
 {
-    char url[256];
-    *src_gone = 0;
-    if (installed_find(id) && app_source(opt.state, id, url, sizeof url)) {
+    const struct manifest *m = installed_find(id);
+    *why = 0;
+    if (!m) return feed_find(id);
+    int follows[T48_FEEDS], nf = app_follows(opt.state, m, feeds, nfeeds, follows);
+    for (int k = 0; k < nf; k++) {
         for (int i = 0; i < nfeed; i++)
-            if (!strcmp(feed[i].id, id) && !strcmp(feeds[feed[i].src].url, url)) return &feed[i];
-        int listed = 0;
-        for (int k = 0; k < nfeeds; k++) listed |= !strcmp(feeds[k].url, url);
-        *src_gone = listed ? 1 : 2;   /* 1: its feed has it not, or was not read; 2: its feed was removed */
-        return NULL;
+            if (feed[i].src == follows[k] && !strcmp(feed[i].id, id)) return &feed[i];
+        if (!feed_ok[follows[k]]) *why = 1;
     }
-    return feed_find(id);
+    char rec[256];
+    if (!nf && app_source(opt.state, id, rec, sizeof rec) && strcmp(rec, "official") && strcmp(rec, "file")) *why = 2;
+    return NULL;
 }
 
-/* the feed an installed app came from, by name: its own record, else the feed it follows */
-static const char *source_name(const struct manifest *m, const struct feed_app *fa)
+/* the feed an installed app came from, as a place in feeds[]: -1 for none, or for one
+ * no longer listed (*gone then holds its URL) */
+static int source_of(const struct manifest *m, const struct feed_app *fa, char *gone, size_t gn)
 {
-    static char b[64];
-    char url[256];
-    if (m && !ours(m)) return "-";
-    if (m && app_source(opt.state, m->id, url, sizeof url)) { feeds_name(feeds, nfeeds, url, b, sizeof b); return b; }
-    return fa ? feed_name[fa->src] : "-";
+    char rec[256];
+    gone[0] = 0;
+    if (fa) return fa->src;
+    if (!m || manifest_builtin(m) || !app_source(opt.state, m->id, rec, sizeof rec) || !strcmp(rec, "file")) return -1;
+    int follows[T48_FEEDS], nf = app_follows(opt.state, m, feeds, nfeeds, follows);
+    if (nf) return follows[0];
+    snprintf(gone, gn, "%s", rec);
+    return -1;
 }
 
 /* the other feeds that have the app, by name, with commas between: "-" for none */
-static const char *also_in(const char *id, const char *source)
+static const char *also_in(const char *id, int src)
 {
-    static char b[300];
+    static char b[600];
+    int seen[T48_FEEDS] = {0};
     b[0] = 0;
     for (int i = 0; i < nfeed; i++) {
-        const char *nm = feed_name[feed[i].src];
-        if (strcmp(feed[i].id, id) || !strcmp(nm, source)) continue;
+        int k = feed[i].src;
+        if (strcmp(feed[i].id, id) || k == src || seen[k]++) continue;
         size_t at = strlen(b);
-        snprintf(b + at, sizeof b - at, "%s%s", at ? "," : "", nm);
+        snprintf(b + at, sizeof b - at, "%s%s", at ? "," : "", feed_name[k]);
     }
     return b[0] ? b : "-";
 }
@@ -736,19 +757,16 @@ static int cmd_install(const char *what, int only_if_newer)
     if (strchr(what, '/') || (strlen(what) > 7 && !strcmp(what + strlen(what) - 7, ".t48app"))) {
         /* a file copied to the phone by hand: nothing to check it against */
         r = install_file(what, NULL, id, sizeof id, version, sizeof version);
-        if (r == 0) source_set(id, NULL);
+        if (r == 0) source_set(id, "file");   /* updates from the official feed only, if it has it */
     } else {
         if (load_feeds() < 0) return -1;
         const struct feed_app *fa = offer_for(what, &gone);
         const struct manifest *have = installed_find(what);
         if (!fa) {
-            char url[256];
-            int k = 0;
-            if (gone == 1 && app_source(opt.state, what, url, sizeof url))
-                for (; k < nfeeds && strcmp(feeds[k].url, url); k++) {}
+            int follows[T48_FEEDS], nf = have ? app_follows(opt.state, have, feeds, nfeeds, follows) : 0;
             if (gone == 2) fail("%s: its feed was removed", what);
-            else if (gone == 1 && k < nfeeds && !feed_ok[k]) fail("%s: %s", feed_name[k], feed_err[k]);
-            else if (gone == 1) fail("%s is not in its feed", what);
+            else if (gone == 1) fail("%s: %s", feed_name[follows[0]], feed_err[follows[0]]);
+            else if (have && nf) fail("%s is not in its feed", what);
             else fail("%s is not in the feed", what);
             return -1;
         }
@@ -783,7 +801,8 @@ static int cmd_install(const char *what, int only_if_newer)
             return -1;
         }
         r = install_file(pkg, fa->id, id, sizeof id, version, sizeof version);
-        if (r == 0) source_set(id, feeds[fa->src].url);
+        /* the official feed by name, so a phone whose official feed moves keeps its apps' updates */
+        if (r == 0) source_set(id, strcmp(feeds[fa->src].url, feeds_official()) ? feeds[fa->src].url : "official");
     }
     if (r < 0) return -1;
     if (machine) printf("done %s %s\n", id, version);
@@ -874,17 +893,27 @@ static void list_line(const char *id, const char *name, const char *have, const 
 
 static int cmd_list(void)
 {
-    int gone;
+    int why;
+    char gone[256], gone_name[64];
     load_feeds();   /* the installed apps are listed whatever the feeds say */
+    /* the feeds that could not be read first, so a reader has them before the apps */
+    for (int k = 0; k < nfeeds; k++) {
+        if (feed_ok[k]) continue;
+        if (machine) printf("feederror %s: %s\n", feed_name[k], feed_err[k]);
+        else fprintf(stderr, "t48-app: %s: %s\n", feed_name[k], feed_err[k]);
+    }
     if (!machine) printf("%-14s %-10s %-10s %8s  %-11s %-16s %-8s %s\n", "ID", "INSTALLED", "IN FEED", "SIZE", "", "SOURCE", "CATEGORY", "NAME");
     for (int i = 0; i < napps; i++) {
         const struct manifest *m = &apps[i];
-        const struct feed_app *fa = offer_for(m->id, &gone);
-        const char *state = !ours(m) ? "builtin" : "installed", *src = source_name(m, fa);
+        const struct feed_app *fa = offer_for(m->id, &why);
+        int src = source_of(m, fa, gone, sizeof gone);
+        const char *state = !ours(m) ? "builtin" : "installed", *name = "-";
+        if (src >= 0) name = feed_name[src];
+        else if (gone[0]) { feeds_name(feeds, 0, gone, gone_name, sizeof gone_name); name = gone_name; }
         if (fa && manifest_version_cmp(fa->version, m->version) > 0) state = fa->api > T48_API_LEVEL ? "unsupported" : "update";
         list_line(m->id, m->name, m->version[0] ? m->version : "-", fa ? fa->version : "-", fa ? fa->size : 0, dir_size(m->dir),
-                  state, m->perms, m->description[0] ? m->description : fa ? fa->description : "", category_of(m, fa), src,
-                  also_in(m->id, src));
+                  state, m->perms, m->description[0] ? m->description : fa ? fa->description : "", category_of(m, fa), name,
+                  ours(m) ? also_in(m->id, src) : "-");
     }
     /* an app in two feeds is listed once, from the first that has it */
     for (int i = 0; i < nfeed; i++) {
@@ -892,12 +921,7 @@ static int cmd_list(void)
         if (installed_find(fa->id) || feed_find(fa->id) != fa) continue;
         list_line(fa->id, fa->name, "-", fa->version[0] ? fa->version : "-", fa->size, 0,
                   fa->api > T48_API_LEVEL ? "unsupported" : "available", fa->perms, fa->description, category_of(NULL, fa),
-                  feed_name[fa->src], also_in(fa->id, feed_name[fa->src]));
-    }
-    for (int k = 0; k < nfeeds; k++) {
-        if (feed_ok[k]) continue;
-        if (machine) printf("feederror %s: %s\n", feed_name[k], feed_err[k]);
-        else fprintf(stderr, "t48-app: %s: %s\n", feed_name[k], feed_err[k]);
+                  feed_name[fa->src], also_in(fa->id, fa->src));
     }
     fflush(stdout);
     return 0;

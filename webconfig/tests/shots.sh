@@ -19,6 +19,11 @@ cfg() { "$SB/t48-config" --config "$T/config" set "$@"; }
 export T48_OFFICIAL_FEED="file://$SB/feeds/official/index.json"
 ln -s "$SB/feeds/3" "$T/radio-club"
 ln -s "$SB/feeds/7" "$T/extras"
+# and in the picture of the Apps page they get made-up web addresses (shots.js)
+export SHOT_REPLACE=$(python3 -c 'import json, sys; t, sb = sys.argv[1:]; print(json.dumps([
+    ["file://%s/feeds/official/index.json" % sb, "https://m0lte.github.io/yealink-t48s-apps/index.json"],
+    ["file://%s/radio-club/index.json" % t, "https://apps.radioclub.example/index.json"], ["radio-club", "apps.radioclub.example"],
+    ["file://%s/extras/index.json" % t, "https://t48.example.net/index.json"], ["extras", "t48.example.net"]]))' "$T" "$SB")
 mkdir -p "$T/config" "$T/phone" "$T/access" "$T/keep/ssh" "$T/installed"
 cfg access web on
 cfg access ssh on

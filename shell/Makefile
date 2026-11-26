@@ -87,6 +87,7 @@ check: all $(O)/apps $(O)/extra $(O)/feeds $(O)/test_dialplan
 		python3 ../tests/small/fakesip.py simdata/sip.sock sip:1001@pbx.example.org & fake=$$!; sleep 0.3; \
 		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(FEEDS_ENV) $(SIM) --model t46s --sip simdata/sip.sock --script $$t 2>sim.log; r=$$?; \
 		kill $$fake; cat sim.log; [ $$r = 0 ] || exit 1; done
+	sh tests/feeds-trust.sh $(O)
 	sh tests/sound/sound-test.sh $(O)
 	@echo "all simulator tests passed"
 

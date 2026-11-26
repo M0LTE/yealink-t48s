@@ -1255,19 +1255,19 @@ static void app_settings_form(struct req *r, const struct manifest *m)
 
 static void page_apps(struct req *r)
 {
-    static char out[48 * 1024];
+    static char out[512 * 1024];
     char err[T48_FEEDS][200];
     int shown = 0, updates = 0, nerr = 0;
-    app_command("list", NULL, out, sizeof out, 25000);
+    app_command("list", NULL, out, sizeof out, 45000);   /* the feeds take 32 s at the most (shell/pkg.c) */
     scan_apps();
     page_begin(r, "Apps", "/apps");
     /* one line per app (t48-app list --machine, shell/pkg.c): id, name, installed, in the feed,
      * download size, size on the phone, state, permissions, description, category, source
      * (the feed it comes from), the other feeds that have it; any fields after those are
      * for a newer page. Everything in them is from a feed or a package: shown as text. */
-    static char *line_f[128][13];
+    static char *line_f[T48_LIST_MAX][13];
     int nlines = 0, used[MANIFEST_CATEGORIES] = {0}, groups = 0;
-    for (char *p = out; p && *p && nlines < 128;) {
+    for (char *p = out; p && *p && nlines < T48_LIST_MAX;) {
         char *nl = strchr(p, '\n'), **f = line_f[nlines];
         if (nl) *nl = 0;
         memset(line_f[nlines], 0, sizeof line_f[0]);

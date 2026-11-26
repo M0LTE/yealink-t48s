@@ -259,10 +259,10 @@ static void feed_host(const char *url, char *out, size_t n)
     snprintf(out, n, "%.*s", (int)len, p);
 }
 
-/* What the owner sees as an app's source: Official, or the feed's host. Never anything
- * the feed says about itself, so another feed cannot call itself Official. Two feeds on
- * one host are told apart by the first part of the path. */
-void feeds_name(const struct t48_feed *all, int n, const char *url, char *out, size_t on)
+/* A feed's name before it is made unique: Official, or the feed's host. Never anything
+ * the feed says about itself. Two feeds on one host are told apart by the first part
+ * of the path. */
+static void base_name(const struct t48_feed *all, int n, const char *url, char *out, size_t on)
 {
     char host[128], other[128];
     if (!strcmp(url, feeds_official())) { snprintf(out, on, "Official"); return; }
@@ -271,14 +271,82 @@ void feeds_name(const struct t48_feed *all, int n, const char *url, char *out, s
     for (int i = 0; i < n; i++) {
         if (!strcmp(all[i].url, url) || !strcmp(all[i].url, feeds_official())) continue;
         feed_host(all[i].url, other, sizeof other);
-        shared |= !strcmp(host, other);
+        shared |= !strcasecmp(host, other);
     }
     const char *path = strstr(url, "://");
     path = path ? path + 3 + strcspn(path + 3, "/") : "";
     if (shared && *path == '/' && strncmp(url, "file://", 7)) snprintf(out, on, "%s/%.*s", host, (int)strcspn(path + 1, "/?#"), path + 1);
     else snprintf(out, on, "%s", host);
+    out[on > 48 ? 48 : on - 1] = 0;   /* room for a suffix */
     for (char *p = out; *p; p++)
-        if ((unsigned char)*p <= 32 || *p == 127 || *p == ',') *p = '_';   /* one word: lists are split on spaces and commas */
+        if ((unsigned char)*p <= 32 || *p >= 127 || *p == ',') *p = '_';   /* one word: lists are split on spaces and commas */
+}
+
+/* Every listed feed's name, all different (ignoring case): the official feed is always
+ * Official, and a feed whose name would match an earlier one, a host called "official"
+ * included, gets -2, -3... after it. */
+void feeds_names(const struct t48_feed *all, int n, char names[][64])
+{
+    for (int i = 0; i < n; i++) {
+        char base[64];
+        base_name(all, n, all[i].url, base, sizeof base);
+        snprintf(names[i], 64, "%s", base);
+        for (int k = 2;; k++) {
+            int clash = 0;
+            for (int j = 0; j < i; j++) clash |= !strcasecmp(names[j], names[i]);
+            if (!clash) break;
+            snprintf(names[i], 64, "%s-%d", base, k);
+        }
+    }
+}
+
+/* The name of the feed at url: its name in the list, or for one no longer listed (an
+ * app's feed that was removed) the name it would have on its own */
+void feeds_name(const struct t48_feed *all, int n, const char *url, char *out, size_t on)
+{
+    char names[T48_FEEDS][64];
+    feeds_names(all, n, names);
+    for (int i = 0; i < n; i++)
+        if (!strcmp(all[i].url, url)) { snprintf(out, on, "%s", names[i]); return; }
+    base_name(all, 0, url, out, on);
+}
+
+/* is this app part of the system image, rather than in the folder apps are installed to
+ * (the first of opt.apps)? Such an app takes updates from the official feed only. */
+int manifest_builtin(const struct manifest *m)
+{
+    char first[300];
+    snprintf(first, sizeof first, "%.*s", (int)strcspn(opt.apps, ":"), opt.apps);
+    char *full = realpath(first, NULL);
+    size_t n = full ? strlen(full) : 0;
+    int ours = full && !strncmp(m->dir, full, n) && m->dir[n] == '/';
+    free(full);
+    return !ours;
+}
+
+/* The feeds an installed app may take updates from, best first, as places in all[]:
+ * the feed it was installed from (app_source: "official", or the feed's URL), and only
+ * that one. With no record (built in, from a file, or from before issue 81) the official
+ * feed; an app installed before issue 81 first the one feed setting of that firmware
+ * (`url`), which it came from if it was set. A built-in app the official feed only, whatever
+ * its record says. Never any other feed: what an added feed offers under an installed
+ * app's id is not that app. */
+int app_follows(const char *state, const struct manifest *m, const struct t48_feed *all, int n, int out[T48_FEEDS])
+{
+    char rec[256], legacy[256] = "";
+    int k = 0, has = app_source(state, m->id, rec, sizeof rec), builtin = manifest_builtin(m);
+    if (!builtin && has && strcmp(rec, "official") && strcmp(rec, "file")) {
+        for (int i = 0; i < n; i++)
+            if (!strcmp(all[i].url, rec)) out[k++] = i;
+        return k;
+    }
+    /* the old setting first: when it was set, that firmware installed from it alone */
+    if (!builtin && !has && cfg_get("feed", "url", legacy, sizeof legacy) && legacy[0])
+        for (int i = 0; i < n; i++)
+            if (!strcmp(all[i].url, legacy) && strcmp(legacy, feeds_official())) out[k++] = i;
+    for (int i = 0; i < n; i++)
+        if (!strcmp(all[i].url, feeds_official())) out[k++] = i;
+    return k;
 }
 
 /* the added feeds as they are, then written back as url1, url2... in that order */
@@ -334,8 +402,9 @@ int feeds_remove(const char *url)
 }
 
 /* The feed an installed app came from, as t48-app wrote it down when it installed it
- * (T48_SOURCES in the state folder, a line "id url" each): 1, or 0 for an app with
- * none (built in, copied by hand, or installed before issue 81). */
+ * (T48_SOURCES in the state folder, a line "id feed" each: "official" for the official
+ * feed whatever its address, "file" for a package copied to the phone, else the feed's
+ * URL): 1, or 0 for an app with none (built in, or installed before issue 81). */
 int app_source(const char *state, const char *id, char *url, size_t n)
 {
     char path[400], line[600];
@@ -370,9 +439,8 @@ static int offered_in(const char *text, const char *url, const char *id, char *v
 }
 
 /* How many of the installed apps have a newer version, that this shell can run, in the
- * feed each follows, from what t48-app last read of the feeds (T48_OFFERS in the state
- * folder). An app follows the feed it was installed from (app_source), else the first
- * of these feeds that has it; a feed no longer in the list counts for nothing. Counted
+ * feed each follows (app_follows), from what t48-app last read of the feeds (T48_OFFERS
+ * in the state folder); a feed no longer in the list counts for nothing. Counted
  * against what is installed now, so an update or a removal counts at once. */
 int manifest_updates(const char *state, const struct t48_feed *feeds, int nfeeds)
 {
@@ -387,14 +455,9 @@ int manifest_updates(const char *state, const struct t48_feed *feeds, int nfeeds
     if (!text) return 0;
     text[len] = 0;
     for (int i = 0; i < napps; i++) {
-        char url[256], version[64];
-        int api = 0, listed = 0, has = 0;
-        if (app_source(state, apps[i].id, url, sizeof url)) {
-            for (int k = 0; k < nfeeds; k++) listed |= !strcmp(feeds[k].url, url);
-            has = listed && offered_in(text, url, apps[i].id, version, sizeof version, &api);
-        } else {
-            for (int k = 0; k < nfeeds && !has; k++) has = offered_in(text, feeds[k].url, apps[i].id, version, sizeof version, &api);
-        }
+        char version[64];
+        int api = 0, has = 0, follows[T48_FEEDS], nf = app_follows(state, &apps[i], feeds, nfeeds, follows);
+        for (int k = 0; k < nf && !has; k++) has = offered_in(text, feeds[follows[k]].url, apps[i].id, version, sizeof version, &api);
         if (has && api <= T48_API_LEVEL && manifest_version_cmp(version, apps[i].version) > 0) n++;
     }
     free(text);

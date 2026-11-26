@@ -1070,6 +1070,19 @@ class Paired(unittest.TestCase):
         self.bad("/apps/feeds/remove", {"url": OFFICIAL}, "/apps")
         self.ok("/apps/feeds/remove", {"url": legacy}, "/apps")
         self.assertIsNone(p.get("feed", "url"))
+        # a feed offering the built-in clock, newer: no update for it, and it is not named as having it
+        hostile = "file://" + os.path.join(FEEDS, "hostile", "index.json")
+        self.ok("/apps/feeds/add", {"url": hostile}, "/apps")
+        page = b.get("/apps").body
+        clock = page[page.index("<h2>Clock</h2>"):]
+        clock = clock[:clock.index("<div class='card")] if "<div class='card" in clock else clock
+        self.assertIn("Built in", clock)
+        self.assertNotIn("Update", clock)
+        self.assertNotIn("hostile", clock)
+        self.assertNotIn("value='clock'><button class='primary'", page)
+        self.bad("/apps/update", {"id": "clock"}, "/apps")
+        self.assertFalse(os.path.exists(os.path.join(p.installed, "clock")))
+        self.ok("/apps/feeds/remove", {"url": hostile}, "/apps")
         # two feeds that share apps, one that is not a feed, one that never answers
         club = self.point(os.path.join(p.dir, "radio-club"), 6)
         extras = self.point(os.path.join(p.dir, "extras"), 7)
@@ -1091,9 +1104,6 @@ class Paired(unittest.TestCase):
         self.assertIn("In the feed 1.0.0", demo)
         self.assertIn("<span class='src'>Source: radio-club</span>. Also in extras", demo)
         self.assertIn("Source: extras", page[page.index("<h2>Lark</h2>"):])
-        # what a feed says is shown as text
-        self.assertIn("Notes &lt;script&gt;alert(&#39;lark&#39;)&lt;/script&gt; &amp; more", page)
-        self.assertNotIn("<script>alert", page)
         # installed from the feed that listed it; updates come from that feed only
         self.ok("/apps/install", {"id": "demo"}, "/apps")
         self.ok("/apps/install", {"id": "lark"}, "/apps")
@@ -1105,6 +1115,9 @@ class Paired(unittest.TestCase):
         page = b.get("/apps").body
         self.assertEqual(page.count("pill warn'>Update<"), 2)
         self.assertIn("In the feed 1.2.0", page[page.index("<h2>Demo</h2>"):])
+        # what a feed says is shown as text
+        self.assertIn("Notes &lt;script&gt;alert(&#39;lark&#39;)&lt;/script&gt; &amp; more", page)
+        self.assertNotIn("<script>alert", page)
         # the overview counts both, each from its own feed, as the daily check does
         self.assertIn("<span class='pill warn'>2 updates</span>", b.get("/").body)
         check = subprocess.run([os.path.join(SHELL_BUILD, "t48-app"), "--apps", p.installed + ":" + os.path.join(SHELL_BUILD, "apps"),

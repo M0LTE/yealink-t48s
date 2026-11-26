@@ -434,16 +434,21 @@ int manifest_category(const char *name);   /* its place in that list; 0 (General
 /* the feeds (issue 81): the official one first, then up to seven added in the feed
  * settings file; key is the setting that holds it, "" for the official one */
 #define T48_FEEDS 8
+#define T48_FEED_APPS 256                          /* apps from all the feeds together */
+#define T48_LIST_MAX (T48_FEED_APPS + MAX_APPS)    /* the most t48-app list gives: the Apps screen and page take all */
 struct t48_feed { char url[256]; char key[8]; };
 const char *feeds_official(void);
 int feeds_url_ok(const char *url);                   /* https:// (file:// for the tests), one word, 200 at most */
 int feeds_list(struct t48_feed out[T48_FEEDS]);      /* how many */
+void feeds_names(const struct t48_feed *all, int n, char names[][64]);   /* each listed feed's name, all different */
 void feeds_name(const struct t48_feed *all, int n, const char *url, char *out, size_t on);   /* Official, or the host */
 int feeds_add(const char *url);                      /* 0, or -1 with errno EINVAL, EEXIST or ENOSPC */
 int feeds_remove(const char *url);                   /* 0, or -1 with errno ENOENT */
 /* the feed each installed app came from: a file in the state folder, "id url" a line */
 #define T48_SOURCES "app-sources"
-int app_source(const char *state, const char *id, char *url, size_t n);   /* 1 and its URL, or 0 */
+int app_source(const char *state, const char *id, char *url, size_t n);   /* 1 and "official", "file" or a URL; or 0 */
+int manifest_builtin(const struct manifest *m);   /* part of the system image, not in the first of opt.apps */
+int app_follows(const char *state, const struct manifest *m, const struct t48_feed *all, int n, int out[T48_FEEDS]);   /* feeds it updates from */
 int manifest_updates(const char *state, const struct t48_feed *feeds, int nfeeds);   /* installed apps their feeds have newer */
 extern int manifest_scans;
 
