@@ -803,7 +803,7 @@ class Paired(unittest.TestCase):
         self.ok("/accounts/save", dict(base, forward_always="on", forward_always_to="1009"), "/accounts")
         self.assertIn("<span class='pill good'>On</span>" + pill + "</summary>", b.get("/accounts").body)
         self.assertNotIn("</span><span class='sum dim'>Not set", b.get("/accounts").body)
-        self.assertRegex(b.get("/").body, r"example.org \(1005\) +" + pill)
+        self.assertRegex(b.get("/").body, r"<p>1005 +" + pill)
         p.set("sip5", "forward_always_to", "1005@pbx.example.org")   # by hand: the page refuses it, and the phone ignores it
         self.assertNotIn(pill, b.get("/").body)
         self.ok("/accounts/save", dict(base, forward_busy="on", forward_busy_to="1009"), "/accounts")

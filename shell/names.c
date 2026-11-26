@@ -116,14 +116,16 @@ void acct_names(int n, const char *const user[], const char *const host[], const
         if (label[i] && label[i][0]) snprintf(out[i], ACCT_NAME_MAX, "%s", label[i]);
         else host_short(host[i], out[i], ACCT_NAME_MAX);
     }
-    /* the same twice: an account named after its host takes the start of its user */
+    /* the same twice: an account named after its host is its user if that is short (an extension,
+     * "103"), otherwise the host's name and the start of the user */
     char base[n > 0 ? n : 1][ACCT_NAME_MAX];
     for (int i = 0; i < n; i++) memcpy(base[i], out[i], ACCT_NAME_MAX);
     for (int i = 0; i < n; i++) {
         if (!base[i][0] || (label[i] && label[i][0])) continue;
         for (int j = 0; j < n; j++) {
             if (j == i || strcmp(base[i], base[j])) continue;
-            snprintf(out[i], ACCT_NAME_MAX, "%.30s (%.4s)", base[i], user[i]);
+            if (strlen(user[i]) <= 8) snprintf(out[i], ACCT_NAME_MAX, "%s", user[i]);
+            else snprintf(out[i], ACCT_NAME_MAX, "%.30s (%.4s)", base[i], user[i]);
             break;
         }
     }

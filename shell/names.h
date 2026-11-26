@@ -20,7 +20,8 @@ void host_short(const char *host, char *out, size_t n);
 #define ACCT_NAME_MAX 48
 
 /* What each of n accounts is called: its Account name, or the short form of its server host,
- * with the first 4 characters of its user added where two would otherwise read the same.
+ * except where two would read the same: then its user if 8 characters or fewer, else the short
+ * host with the first 4 characters of its user.
  * user[i] empty: the account is not set up, and out[i] is "". */
 void acct_names(int n, const char *const user[], const char *const host[], const char *const label[],
                 char out[][ACCT_NAME_MAX]);

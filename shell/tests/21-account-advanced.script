@@ -31,7 +31,7 @@ key down
 key down
 key down
 expectstate settings.row Account_16
-expectstate settings.value example.org_(1016)
+expectstate settings.value 1016
 shot shots/settings-accounts-sixteen.png
 key down
 expectstate settings.row Default_account

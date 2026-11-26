@@ -94,7 +94,9 @@ int main(void)
     names("Xq7rT2mLp9", "sip.example.net", "example.net", "Bv3kW8nQz1", "sip2.example.net", "", "1001", "pbx.example.org", "Work",
           "example.net", "example.net (Bv3k)", "Work");
     names("100", "10.0.0.5", "", "101", "10.0.0.5", "", "", "", "",
-          "10.0.0.5 (100)", "10.0.0.5 (101)", "");
+          "100", "101", "");
+    names("1001", "pbx.example.org", "", "Xq7rT2mLp9", "sip.example.org", "", "12345678", "pbx.example.org", "",
+          "1001", "example.org (Xq7r)", "12345678");
 
     printf("%s names test: %d checks, %d failed\n", fails ? "FAIL" : "PASS", checks, fails);
     return fails != 0;
