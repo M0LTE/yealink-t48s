@@ -205,7 +205,8 @@ daily_check() {
         fw="firmware not reached"
     fi
     if a=$(${T48_APP:-t48-app} check 2>&1); then
-        case "$a" in "Up to date") a="apps up to date" ;; *) a=$(echo "$a" | sed 's/update/app update/') ;; esac
+        # "2 updates", "Up to date", with ", 1 feed not reached" when one of several feeds was not (issue 81)
+        case "$a" in "Up to date"*) a="apps up to date${a#Up to date}" ;; *) a=$(echo "$a" | sed 's/update/app update/') ;; esac
     else
         a="apps not reached ($(echo "$a" | tail -n 1 | sed 's/^t48-app: //'))"
     fi

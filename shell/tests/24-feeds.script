@@ -1,0 +1,199 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# More than one feed (issue 81). The official feed (in the tests, feeds/official: no
+# apps) is first and always there; four are added on the Feeds page: a club's feed
+# (feeds/6, later 8), another (feeds/7, later 9) that also has demo, newer, one that is
+# not a feed (feeds/bad) and one that never answers (a pipe nobody writes to, given up
+# on after T48_FEED_TIMEOUT). Each app shows the feed it comes from; demo shows once,
+# from the club's feed, with the other named; installed apps update from their own feed
+# only, and the daily check counts across feeds (tests/mkfeeds.sh).
+run mkdir -p simdata/slow && ln -sfn $PWD/feeds/6 simdata/radio-club && ln -sfn $PWD/feeds/7 simdata/extras && mkfifo simdata/slow/index.json
+wait 200
+key ok
+expect launcher
+key right
+key right
+key ok
+expectstate settings.page store
+waitstate store loaded 5000
+# the official feed alone: the built-in apps, Refresh, Feeds
+expectstate settings.rows 4
+key down
+key down
+key down
+expectstate settings.row Feeds
+expectstate settings.value Official
+key ok
+expectstate settings.page feeds
+expectstate settings.rows 3
+expectstate settings.row Official
+shot shots/apps-feeds-official.png
+
+# ---- add four ----
+key down
+expectstate settings.row Add_feed
+key ok
+type file://$PWD/simdata/radio-club/index.json
+key ok
+expectstate overlay none
+expectstate feeds 2
+expectstate settings.row Add_feed
+key ok
+type file://$PWD/simdata/extras/index.json
+key ok
+key ok
+type file://$PWD/feeds/bad/index.json
+key ok
+key ok
+type file://$PWD/simdata/slow/index.json
+key ok
+expectstate feeds 5
+run grep -q "^url4=file://.*/simdata/slow/index.json$" simdata/config/feed
+run ! grep -q "^url=" simdata/config/feed
+key up
+expectstate settings.row slow
+key up
+expectstate settings.row bad
+key up
+key up
+expectstate settings.row radio-club
+shot shots/apps-feeds.png
+key ok
+expectstate settings.page feed
+expectstate settings.row Remove
+key x
+key x
+expectstate settings.page store
+
+# ---- the store: one broken feed and one slow one hold up none of the others ----
+waitstate store error 9000
+expectstate store.errors 2
+expectstate store.demo available
+expectstate storesrc.demo radio-club
+expectstate storealso.demo extras
+expectstate storesrc.kite radio-club
+expectstate storealso.kite extras
+expectstate storesrc.lark extras
+expectstate storealso.lark -
+expectstate storesrc.clock -
+run ./t48-app --apps simdata/installed:apps --config simdata/config --state simdata/state list > simdata/list 2>simdata/err
+run test "$(grep -c '^demo ' simdata/list)" = 1 && grep -q "^demo .* 1.0.0 .*radio-club .*Demo$" simdata/list
+run grep -q "^t48-app: bad: not an app feed$" simdata/err && grep -q "^t48-app: slow: download timed out$" simdata/err
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key up
+key down
+key down
+key down
+key down
+expectstate settings.row Demo
+expectstate settings.sub radio-club
+shot shots/apps-sources.png
+key ok
+expectstate settings.page storeapp
+expectstate settings.rows 7
+shot shots/apps-source-detail.png
+
+# ---- installed from the first feed that has it, and it stays with that feed ----
+key ok
+waitstate overlay message 15000
+expectstate overlay.title Demo_installed
+key ok
+waitstate store.demo installed 9000
+run grep -q "^demo file://.*/simdata/radio-club/index.json$" simdata/state/app-sources
+# the other feed's 1.1.0 is not an update for it
+expectstate store.demo installed
+run ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state install lark >/dev/null
+run grep -q "^lark file://.*/simdata/extras/index.json$" simdata/state/app-sources
+run ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state check > simdata/check
+run grep -qx "Up to date, 2 feeds not reached" simdata/check
+
+# ---- both feeds have something newer: the daily check counts both, each from its own feed ----
+run ln -sfn $PWD/feeds/8 simdata/radio-club && ln -sfn $PWD/feeds/9 simdata/extras
+run ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state check > simdata/check
+run grep -qx "2 updates, 2 feeds not reached" simdata/check
+run ./t48-app --machine --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state check > simdata/check
+run grep -qx "updates 2" simdata/check && grep -qx "unreached 2" simdata/check
+key x
+expectstate settings.page store
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Feeds
+key up
+expectstate settings.row Refresh
+key ok
+waitstate store error 9000
+expectstate store.demo update
+expectstate store.lark update
+# demo's update is the club feed's 1.2.0, not the 1.1.0 of the feed that is listed first for nothing
+run ./t48-app --apps simdata/installed:apps --config simdata/config --state simdata/state list 2>/dev/null | grep -q "^demo  *1.0.0  *1.2.0 "
+run ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state update >/dev/null
+waitstate installed.demo 1.2.0 3000
+expectstate installed.lark 1.1.0
+
+# ---- a feed removed: its apps stay, without updates ----
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+expectstate settings.row Feeds
+key ok
+key down
+key down
+expectstate settings.row extras
+key ok
+key down
+key down
+expectstate settings.row Remove
+key ok
+expectstate overlay confirm
+expectstate overlay.title Remove_extras?
+shot shots/apps-feed-remove.png
+key ok
+expectstate settings.page feeds
+expectstate feeds 4
+run ! grep -q "extras" simdata/config/feed
+run grep -q "^url2=file://.*/feeds/bad/index.json$" simdata/config/feed
+expectstate installed.lark 1.1.0
+run ! ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state update lark 2>simdata/err
+run grep -q "its feed was removed" simdata/err
+
+# ---- eight at most ----
+# set elsewhere (as the web setup page would): the page on the screen follows
+run for n in 4 5 6 7; do ./t48-config --config simdata/config set feed url$n file:///f$n/index.json || exit 1; done
+waitstate feeds 8 3000
+wait 1500
+expectstate settings.page feeds
+expectstate settings.rows 9
+shot shots/apps-feeds-full.png
+key x
+key x
+key x
+expect idle
+quit

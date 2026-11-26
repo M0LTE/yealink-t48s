@@ -28,7 +28,17 @@ const [url, statusFile, out] = process.argv.slice(2);
   for (const [path, name] of [['/accounts', 'accounts'], ['/network', 'network'], ['/time', 'time'], ['/sound', 'sound'],
                               ['/contacts', 'contacts'], ['/history', 'history'], ['/apps', 'apps'], ['/access', 'access'], ['/backup', 'backup']]) {
     await page.goto(url + path);
-    if (name === 'apps') await page.click('details.sub summary');
+    if (name === 'apps') {
+      await page.click('details.sub summary');
+      // the test feeds are folders on this computer: shown under made-up web addresses instead,
+      // as SHOT_REPLACE lists them in pairs (shots.sh)
+      const pairs = JSON.parse(process.env.SHOT_REPLACE || '[]');
+      await page.evaluate((pairs) => {
+        const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        for (let n; (n = walk.nextNode());)
+          for (const [from, to] of pairs) n.nodeValue = n.nodeValue.split(from).join(to);
+      }, pairs);
+    }
     await shot(name, true);
   }
   // Accounts, Advanced: the dial plan, open

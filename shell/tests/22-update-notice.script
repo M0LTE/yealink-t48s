@@ -56,12 +56,14 @@ run rm -f simdata/update/state simdata/state/update-latest
 waitstate notes - 3000
 
 # ---- apps: an installed app the feed has newer ----
-run ./t48-config --config simdata/config set feed url file://$PWD/feeds/1/index.json
+# one feed, pointed at feed 1 then feed 2: a newer version in the feed the app came from
+run mkdir -p simdata && ln -sfn $PWD/feeds/1 simdata/feed
+run ./t48-config --config simdata/config set feed url file://$PWD/simdata/feed/index.json
 run ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state install demo
 wait 1500
 expectstate installed.demo 1.0.0
 expectstate notes -
-run ./t48-config --config simdata/config set feed url file://$PWD/feeds/2/index.json
+run ln -sfn $PWD/feeds/2 simdata/feed
 run ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state check
 waitstate notes 1_app_update 3000
 shot shots/update-notice-apps.png

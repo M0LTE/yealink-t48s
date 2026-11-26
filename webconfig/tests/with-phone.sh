@@ -12,6 +12,8 @@ SHOTS=$(cd "$HERE/../$O" && mkdir -p shots && cd shots && pwd)
 export WEB_BIN WEB_PORT=${WEB_PORT:-8437} T48_TESTS="$HERE"
 export B="python3 $HERE/browser.py simdata/jar http://127.0.0.1:$WEB_PORT"
 cd "$HERE/../../shell/$O"
+# the official feed is one on disk with no apps: the tests never reach the internet (shell/Makefile)
+export T48_OFFICIAL_FEED="file://$PWD/feeds/official/index.json" T48_FEED_TIMEOUT=2
 rm -rf simdata web.log
 mkdir -p shots
 status=0

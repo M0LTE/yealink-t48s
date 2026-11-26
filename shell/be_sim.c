@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "shell.h"
 
 /* The screen: 800x480 at 32 bits unless told otherwise (--screen, --model). As the T46S it is 16 bits
@@ -227,6 +228,13 @@ static void step(long long now)
             snprintf(m, sizeof m, "expected the pixel at %d, %d to be %06X, it is %06X", wait_x, wait_y, (unsigned)wait_colour, (unsigned)pixel(wait_x, wait_y));
             fail(m);
         }
+    } else if (!strcmp(cmd, "type")) {
+        /* text into the open keyboard at once, as if typed; $PWD in it is the folder the test runs in */
+        char text[400], cwd[300] = "";
+        const char *pwd = strstr(a, "$PWD");
+        if (pwd && getcwd(cwd, sizeof cwd)) snprintf(text, sizeof text, "%.*s%s%s", (int)(pwd - a), a, cwd, pwd + 4);
+        else snprintf(text, sizeof text, "%s", a);
+        if (settings_type(text) < 0) fail("no keyboard open");
     } else if (!strcmp(cmd, "run")) {
         /* a command for the PC's shell, such as making the far end of a test call do something */
         if (system(line + 4) != 0) fail("the command failed");

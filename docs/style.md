@@ -44,7 +44,7 @@ One voice for the phone's screen ([`shell/`](../shell), [`libt48/`](../libt48)) 
 | Admit a browser with a code | Pair | Link, connect |
 | End a browser's pairing | Sign out | Forget, unpair |
 | The six digits | Code | PIN, number |
-| The list apps come from | Feed, Feed URL, Default feed | Feed address, the standard feed |
+| The list apps come from | Feed, Feeds, Add feed; the built-in one is Official | Feed address, the standard feed, Default feed, repository |
 | Fetch the list again | Refresh | Look again |
 | An app's factory values | Reset to defaults | Back to the app's own defaults |
 | An app that ships in the image | Built in | Part of the firmware |

@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# More than one feed on the small screen (issue 81, tests/24-feeds.script): an app's
+# feed in quiet type after its name, the Feeds page, and a feed added there.
+run mkdir -p simdata && ln -sfn $PWD/feeds/6 simdata/radio-club && ln -sfn $PWD/feeds/7 simdata/extras
+run ./t48-config --config simdata/config set feed url1 file://$PWD/simdata/radio-club/index.json
+wait 2500
+key soft1
+expect launcher
+key right
+key right
+key soft1
+expectstate settings.page store
+waitstate store loaded 5000
+expectstate storesrc.demo radio-club
+expectstate storealso.demo -
+key down
+key down
+expectstate settings.row Demo
+expectstate settings.sub radio-club
+shot shots/t46s-apps-sources.png
+key down
+key down
+expectstate settings.row Refresh
+key down
+expectstate settings.row Feeds
+expectstate settings.value 2
+key soft1
+expectstate settings.page feeds
+key down
+key down
+expectstate settings.row Add_feed
+key soft1
+expectstate kbd open
+type file://$PWD/simdata/extras/index.json
+key ok
+expectstate feeds 3
+expectstate settings.row Add_feed
+shot shots/t46s-apps-feeds.png
+key soft4
+expectstate settings.page store
+waitstate store loaded 5000
+expectstate storealso.demo extras
+expectstate storesrc.lark extras
+key soft4
+expect launcher
+quit

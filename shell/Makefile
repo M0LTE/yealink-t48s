@@ -66,6 +66,10 @@ $(O)/feeds: $(O)/apps tests/mkfeeds.sh ../sdk/t48-pack
 # apps installed by a test go in simdata/installed, settings in simdata/config
 SIM = ./t48-sim --apps simdata/installed:apps --data simdata/appdata --config simdata/config --state simdata/state --access simdata/access --notice simdata/notice --apply ../tests/access/apply.sh --update ../tests/update/update.sh
 
+# the official feed in the tests is one on disk with no apps, as the tests never reach the internet,
+# and a feed that does not answer is given up on after 2 seconds rather than 15 (shell/pkg.c)
+FEEDS_ENV = T48_OFFICIAL_FEED=file://$$PWD/feeds/official/index.json T48_FEED_TIMEOUT=2
+
 # the dial plan's matcher on its own
 $(O)/test_dialplan: tests/test_dialplan.c dialplan.c dialplan.h
 	@mkdir -p $(O)
@@ -81,14 +85,15 @@ check: all $(O)/apps $(O)/extra $(O)/feeds $(O)/test_dialplan $(O)/test_certs
 	$(O)/test_certs
 	@mkdir -p $(O)/shots
 	cd $(O) && for t in ../tests/*.script; do echo "== $$t"; rm -rf simdata; \
-		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(SIM) --script $$t 2>sim.log || { cat sim.log; exit 1; }; cat sim.log; \
+		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(FEEDS_ENV) $(SIM) --script $$t 2>sim.log || { cat sim.log; exit 1; }; cat sim.log; \
 		if grep -q 7355719 sim.log; then echo "the password typed in 04-settings is in the log"; exit 1; fi; done
 	@# the same shell as a T46S: 480x272 at 16 bits, upside down, no touch, four soft keys, and a stand-in for the SIP service
 	cd $(O) && for t in ../tests/small/*.script; do echo "== $$t"; rm -rf simdata; mkdir -p simdata/config; \
 		./t48-config --config simdata/config set sip user 1001 && ./t48-config --config simdata/config set sip domain pbx.example.org || exit 1; \
 		python3 ../tests/small/fakesip.py simdata/sip.sock sip:1001@pbx.example.org & fake=$$!; sleep 0.3; \
-		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(SIM) --model t46s --sip simdata/sip.sock --script $$t 2>sim.log; r=$$?; \
+		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(FEEDS_ENV) $(SIM) --model t46s --sip simdata/sip.sock --script $$t 2>sim.log; r=$$?; \
 		kill $$fake; cat sim.log; [ $$r = 0 ] || exit 1; done
+	sh tests/feeds-trust.sh $(O)
 	sh tests/sound/sound-test.sh $(O)
 	@echo "all simulator tests passed"
 
