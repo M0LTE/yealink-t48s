@@ -1313,7 +1313,7 @@ static void post_app_update_all(struct req *r)
     static char out[8192];
     char why[200] = "";
     int done = 0;
-    int st = app_command("update", NULL, out, sizeof out, 600000);
+    int st = app_command("update", NULL, out, sizeof out, 240000);   /* under browsers' own timeouts */
     for (char *p = out; p && *p; p = strchr(p, '\n'), p = p ? p + 1 : NULL) {
         done += !strncmp(p, "done ", 5);
         /* the app that failed, and why, in t48-app's own words: "t48-app: demo: checksum mismatch" */
