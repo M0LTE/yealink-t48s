@@ -424,7 +424,12 @@ def main():
     time.sleep(0.4)
     d.ctl("key", "5")
     time.sleep(0.4)
-    check("idle" in d.ctl(), "a key sound ends by itself and the hardware goes idle")
+    check("running" in d.ctl(), "after a key sound the hardware keeps running for the next key")
+    d.ctl("key", "6")
+    time.sleep(1.5)
+    check("running" in d.ctl(), "and again from the next key")
+    time.sleep(0.8)
+    check("idle" in d.ctl(), "2 s after the last key sound the hardware goes idle")
     d.ctl("route", "handset", "tone", "dial")     # off-hook dial tone at the handset volume
     time.sleep(0.6)
     d.ctl("route", "none", "tone", "off")
@@ -432,7 +437,7 @@ def main():
     check("not understood" in d.ctl("route", "sideways"), "audioctl refuses nonsense")
     log, played = d.stop()
     n = len(played) / 16000
-    check(3.4 < n < 4.6, "the loudspeaker file holds only the time the hardware ran (%.2f s of about 4.9 s)" % n)
+    check(5.6 < n < 6.8, "the loudspeaker file holds only the time the hardware ran (%.2f s of about 7.2 s)" % n)
     dial = played[1600:14400]
     check(540 < amp(dial, 350) < 575 and 540 < amp(dial, 440) < 575, "dial tone on hook: 350 + 440 Hz at the ringer volume")
     # find the ring: 1000 Hz at the loudspeaker's limit (1800) in some 16 ms block

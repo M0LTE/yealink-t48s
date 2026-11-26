@@ -50,6 +50,10 @@
  * game's next beep starts at once. After it leaves, 2 s more. */
 #define APP_LINGER_TICKS 100
 #define APP_HEARD_TICKS  25	/* STATE says an app is sounding for this long after */
+/* After a key's sound the hardware stays running too: someone dialling presses
+ * the next key within a second or two, and opening and closing the hardware
+ * between keys takes long enough to be heard, as a late tone. */
+#define KEY_LINGER_TICKS 100
 
 struct client {
 	int fd;
@@ -388,6 +392,8 @@ static void ctl_read(int i)
 			break;
 		case T48AC_KEY:
 			engine_key(&eng, p[0]);
+			if (linger < KEY_LINGER_TICKS)
+				linger = KEY_LINGER_TICKS;
 			break;
 		case T48AC_APP:
 			if (p[0] >= T48AC_APP_COUNT) {
