@@ -185,6 +185,11 @@ account() {
         dtls) line="$line;mediaenc=dtls_srtp" ;;
         *) echo "t48-sip: $f: srtp: off, optional, compulsory or dtls; using off" >&2 ;;
     esac
+    # SDES puts the keys in the SDP: without TLS anyone on the path can read them
+    case "$srtp/$transport" in
+        optional/udp|optional/tcp|compulsory/udp|compulsory/tcp)
+            echo "t48-sip: $f: SRTP keys sent in clear over $transport; use TLS or DTLS-SRTP" >&2 ;;
+    esac
     # no registration, no server address to hold its calls to (Block direct calls)
     [ "$regint" != 0 ] || line="$line;check_origin=no"
     return 0
@@ -264,6 +269,12 @@ done
 # certificate as it loads)
 if ! grep -q ';transport=tls' "$RUN/accounts"; then
     sed -i '/^sip_transports/s/,tls//' "$RUN/config"
+else
+    # the image's CA list, looked up by hash: without it no server can be checked
+    capath=$(sed -n 's/^sip_capath[[:space:]]*//p' "$RUN/config" | tail -n 1)
+    if [ -n "$capath" ] && ! ls "$capath"/*.0 >/dev/null 2>&1; then
+        echo "t48-sip: CA list $capath missing or empty; TLS servers will be refused" >&2
+    fi
 fi
 grep -q ';mediaenc=srtp' "$RUN/accounts" || sed -i '/^module[[:space:]]*srtp\.so/d' "$RUN/config"
 grep -q ';mediaenc=dtls_srtp' "$RUN/accounts" || sed -i '/^module[[:space:]]*dtls_srtp\.so/d' "$RUN/config"

@@ -162,7 +162,9 @@ Both settings are under Advanced on an account's page, on the phone and on the w
 Issue [#78](https://github.com/M0LTE/yealink-t48s/issues/78). Transport TLS on an account's page (phone and web setup), `transport=tls` in its file.
 
 - **Finding the server.** With no port in Server host, DNS SRV `_sips._tcp.<host>`, then the host itself on 5061. With a port, that host and port. An outbound proxy is reached over TLS too.
-- **The server's certificate** must chain to a root the phone trusts and name the host typed in Server host (or the outbound proxy's host). That is the name checked even when SRV sends the phone to another host, as RFC 5922 says, so the server's certificate must cover the SIP domain: providers' certificates normally cover the domain and its SRV targets. Wildcards match one label only. An expired certificate, one from an unknown CA or one for another name is refused, and the account does not register; the log says why (`tls_verify_handler: err = 20`, `10` or `62`: OpenSSL's codes for unknown issuer, expired, wrong name).
+- **The server's certificate** must chain to a root the phone trusts and name the host typed in Server host (or the outbound proxy's host). That is the name checked even when SRV sends the phone to another host, as RFC 5922 says, so the server's certificate must cover the SIP domain: providers' certificates normally cover the domain and its SRV targets. Wildcards match one label only. An expired certificate, one from an unknown CA or one for another name is refused, and the account does not register; the log says why (`tls_verify_handler: err = 20`, `9`, `10` or `62`: OpenSSL's codes for unknown issuer, not yet valid, expired, wrong name).
+- **The clock.** The phone has no clock that runs while it is off: until NTP sets it, the date is 1970 and every certificate is not yet valid (err 9). So when any account uses TLS or DTLS-SRTP, the runit service waits to start `t48-sip` until the year is at least the one the image was built in (`built=` in `/etc/t48-release`), as it waits for an account, the audio service and an address.
+- **The CA list missing:** `t48-sip` logs `CA list /etc/ssl/certs missing or empty; TLS servers will be refused` when a TLS account is set and the folder has no hashed certificates.
 - **Trusted roots:** the image's CA list (Mozilla's, from Buildroot's `ca-certificates`), looked up by hash in `/etc/ssl/certs` so the 144 roots are never all loaded, and the [roots the owner adds](#certificates).
 - **TLS 1.2 and 1.3** (OpenSSL's defaults; nothing older). No client certificate is sent.
 - **NAT keepalives** run over the TLS connection every 96 to 120 s; when one goes unanswered the account registers again on a new connection ([NAT keepalives](#nat-keepalives)).
@@ -180,9 +182,9 @@ Per account, under Advanced (phone and web setup), **off by default**: most prov
 | DTLS-SRTP | `dtls` | `UDP/TLS/RTP/SAVPF` with a fingerprint (`dtls_srtp`) | refused | **SRTP**, if the far end does DTLS-SRTP |
 
 - **Optional is opportunistic SRTP** as most phones and PBXs do it ([marrold.co.uk](https://www.marrold.co.uk/2021/03/opportunistic-srtp-support-in-voip.html)): an ordinary `RTP/AVP` offer that also carries keys. A far end that knows SRTP answers with its own keys and the call is encrypted; one that does not ignores them and the call is plain. Offered `RTP/SAVP`, as from a Compulsory caller, an Optional phone answers SRTP too. A strict far end that insists on `RTP/SAVP` refuses an Optional offer (488); for such a provider, choose Compulsory.
-- **Keys** (SDES, RFC 4568) travel in the SDP, so they are only as private as the signalling: use SRTP with TLS. The suite offered is AES_CM_128_HMAC_SHA1_80; baresip also takes _32 and AES-GCM.
+- **Keys** (SDES, RFC 4568) travel in the SDP, so they are only as private as the signalling: use SRTP with TLS. `t48-sip` logs a warning for an account with Optional or Compulsory on UDP or TCP. The suite offered is AES_CM_128_HMAC_SHA1_80; baresip also takes _32 and AES-GCM.
 - **DTLS-SRTP** (RFC 5764) is there because it cost 5 KB, but few SIP providers use it (WebRTC does). It makes a key and certificate when it loads, so it is loaded only when an account uses it.
-- **On the screen:** when a call's audio is SRTP the call screen shows **Encrypted**, a lamp and a word beside Speaker and Muted, on both models. The shell learns it from baresip's `CALL_MENC` event, and from `"secure":true` in t48ctrl's catch-up events after a restart.
+- **On the screen:** when a call's audio is SRTP and its keys did not travel in clear (the account is on TLS, or uses DTLS-SRTP), the call screen shows **Encrypted**, a lamp and a word beside Speaker and Muted, on both models. SRTP with SDES over UDP or TCP shows nothing: anyone who saw the SIP could decrypt it. The shell learns it from baresip's `CALL_MENC` event, and from `"secure":true` in t48ctrl's catch-up events after a restart.
 - ZRTP is not built (#77: its library is unmaintained and adds about 1 MB).
 
 ![SRTP on an account's Advanced page](img/settings-account-srtp.png)
@@ -193,7 +195,7 @@ Per account, under Advanced (phone and web setup), **off by default**: most prov
 
 Root certificates for servers whose certificate the image's list does not cover: a private PBX, a self-signed server. Added on the web setup page (Accounts, Advanced, Certificates), listed with their expiry on the phone under Settings, Accounts, Advanced, Certificates, and removable in both. Trusted for SIP over TLS beside the built-in list.
 
-- **What is taken:** a PEM file (one or more `CERTIFICATE` blocks, other text ignored) or one DER certificate, up to 64 KB. Each must be a root: its issuer is its subject (a self-signed server certificate is one too). An intermediate is refused with its issuer named, as OpenSSL would not use it as a trust anchor. A file holding a private key anywhere is refused whole, so a key pasted by mistake is never kept.
+- **What is taken:** a PEM file (one or more `CERTIFICATE` blocks, other text ignored) or one DER certificate, up to 64 KB. A certificate given twice in one file is kept once. Each must be a root: its issuer is its subject (a self-signed server certificate is one too). An intermediate is refused with its issuer named, as OpenSSL would not use it as a trust anchor. A file with `PRIVATE KEY-----` anywhere in it is refused whole, so a key pasted by mistake is never kept.
 - **Read with care.** The file may come from anywhere: [`shell/certs.c`](../shell/certs.c) reads the DER with every length checked against what is left, no recursion, and only the fields shown (names, dates, basic constraints). It is shared by the shell and the web setup page. `shell/tests/test_certs.c` runs it over every cut and every changed byte of a good certificate, 20,000 random changes, and hostile files, under AddressSanitizer.
 - **What is kept:** the certificate written out again as PEM, not the file given, as `/data/config/certs/<16 hex digits>.pem`; at most 16. The same certificate twice is kept once. Not in the settings backup.
 - `t48-sip` copies the certificates (and nothing else from the files) into `ca.pem` in its run directory and gives it to baresip as `sip_cafile`. Adding or removing one restarts baresip.
@@ -333,7 +335,7 @@ Result on 2026-11-23, all passing (Opus rows 2026-11-25):
 | DTLS-SRTP to Off | refused |
 | alice as the ARM binary under qemu-arm, Compulsory both ends | SRTP, tones heard |
 
-`sip/test/phone-test.sh` has the shell's side ([`28-srtp.script`](../shell/tests/phone/28-srtp.script)): Optional to a far end that takes SRTP shows Encrypted, to one that does not makes a plain call, Compulsory to it fails.
+`sip/test/phone-test.sh` has the shell's side ([`28-srtp.script`](../shell/tests/phone/28-srtp.script)): Optional over UDP to a far end that takes SRTP is SRTP but not shown as Encrypted (keys in clear), to one that does not makes a plain call, Compulsory to it fails, and DTLS-SRTP both ends shows Encrypted.
 
 `sip/test/audiod-test.sh` adds an Opus call through two audio services, and one with alice's side as the ARM binaries under qemu; both pass.
 

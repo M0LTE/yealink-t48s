@@ -39,6 +39,7 @@ They are downloaded and built by CI, not kept here. Versions are pinned in `buil
 | curl | the system image | curl |
 | Mbed TLS | the system image (curl) | Apache-2.0 or GPL-2.0-or-later |
 | OpenSSL | the system image (baresip: SIP over TLS, SRTP) | Apache-2.0 |
+| zlib | the system image (curl links it since Buildroot's OpenSSL brings it in, #78) | Zlib |
 | ca-certificates (Mozilla's list) | the system image | MPL-2.0 |
 | baresip and re (libre) | the system image | BSD-3-Clause |
 | libg722 | the system image | BSD-2-Clause and public domain |

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# SRTP per account (issue #78): Optional to a far end that takes it (carol, also Optional): the call is
-# encrypted and says so, a lamp and a word; Optional to one that does not (bob): a plain call, nothing
-# shown; Compulsory to bob: no call. Set in the account's file and the phone service restarted, as
-# Settings does.
+# SRTP per account (issue #78): Optional to a far end that takes it (carol, also Optional): SRTP, but
+# over UDP its keys went in clear, so the screen does not call it encrypted; Optional to one that does
+# not (bob): a plain call; Compulsory to bob: no call; DTLS-SRTP to carol, set to it too: Encrypted, a
+# lamp and a word. Set in the account's file and the phone service restarted, as Settings does.
 waitstate reg ok 8000
 waitstate audio up 3000
 # ---- Optional, to carol: SRTP ----
@@ -21,8 +21,7 @@ waitstate phone outgoing 2000
 run $FAR $CAROL accept
 waitstate phone incall 5000
 waitstate secure 1 5000
-wait 600
-shot shots/phone-in-call-encrypted.png
+expectstate encrypted 0
 run $FAR $CAROL cmd hangup
 waitstate phone ended 5000
 key x
@@ -61,6 +60,30 @@ expectstate ended Call_failed
 run $FAR $BOB waitcall none 2
 key x
 waitstate phone idle 3000
+# ---- DTLS-SRTP, carol too: the keys never travel in clear ----
+run sh -c "sed -i 's/^srtp=.*/srtp=dtls/' carol.sip; pkill -f -- '-f $PWD/carol/run'; sleep 1; carol/start &"
+run $CONFIG set sip srtp dtls
+run ./apply sip
+wait 2500
+waitstate sip up 10000
+waitstate reg ok 15000
+run grep -q ";mediaenc=dtls_srtp" phone/run/accounts
+key 1
+key 0
+key 0
+key 3
+key ok
+waitstate phone outgoing 3000
+run $FAR $CAROL accept
+waitstate phone incall 5000
+waitstate encrypted 1 5000
+wait 600
+shot shots/phone-in-call-encrypted.png
+run $FAR $CAROL cmd hangup
+waitstate phone ended 5000
+key x
+waitstate phone idle 3000
+run sh -c "sed -i 's/^srtp=.*/srtp=optional/' carol.sip; pkill -f -- '-f $PWD/carol/run'; sleep 1; carol/start &"
 # ---- back to off ----
 run $CONFIG unset sip srtp
 run ./apply sip

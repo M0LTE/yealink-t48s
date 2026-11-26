@@ -252,6 +252,8 @@ int cert_read(const unsigned char *in, size_t n, unsigned char **der, size_t *le
 
     *why = "No certificate in file";
     if (n > CERT_FILE_MAX) { *why = "File too large"; return -1; }
+    /* a key anywhere, in any block, and nothing of the file is taken */
+    if (find(in, end, "PRIVATE KEY-----")) { *why = "File holds a private key; not added"; return -1; }
     if (n && in[0] == 0x30) {
         /* DER: one certificate, the whole file */
         if (max < 1 || cert_info(in, n, &c, why) < 0 || !(der[0] = malloc(n))) return -1;

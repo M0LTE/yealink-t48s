@@ -110,6 +110,7 @@ struct acct {
     int on;                    /* used, and not switched off */
     char user[64], domain[64], label[32], voicemail[40];
     int inband;                /* DTMF as tones in the audio, made by t48audio (issue #77) */
+    int keys_safe;             /* SRTP keys never travel in clear: SDES over TLS, or DTLS-SRTP (issue #78) */
     char aor[140];             /* "sip:user@domain", as baresip names it */
     enum reg reg;
     char why[64];
@@ -245,6 +246,7 @@ static void load_accounts(void)
         cfg_get(f, "label", a->label, sizeof a->label);
         cfg_get(f, "voicemail", a->voicemail, sizeof a->voicemail);
         a->inband = !strcmp(cfg_str(f, "dtmf", ""), "inband");
+        a->keys_safe = !strcmp(cfg_str(f, "transport", "udp"), "tls") || !strcmp(cfg_str(f, "srtp", "off"), "dtls");
         a->used = a->user[0] && a->domain[0];
         a->ringtone = ringtone_code(cfg_str(f, "ringtone", "standard"));
         /* forwarding: each kind on, and with somewhere to go */
@@ -1562,6 +1564,12 @@ static int keypad_hit(int x, int y)
 }
 
 /* the tags that say where the sound is and what is switched off; centred on cx, or from x if cx < 0 */
+/* the call's audio is SRTP and its keys did not travel in clear (issue #78) */
+static int call_encrypted(const struct call *c)
+{
+    return c->secure && c->acct >= 0 && c->acct < MAX_ACCTS && A[c->acct].keys_safe;
+}
+
 static void chips(int cx, int x, int y)
 {
     const char *t[5];
@@ -1571,7 +1579,8 @@ static void chips(int cx, int x, int y)
     if (P.muted) { t[n] = "Muted"; role[n++] = B_STOP; }
     if (P.c.held) { t[n] = "On hold"; role[n++] = B_LIT; }
     if (P.c.remote_held) { t[n] = "Held remotely"; role[n++] = B_LIT; }
-    if (P.c.secure) { t[n] = "Encrypted"; role[n++] = B_GO; }
+    /* SDES over UDP or TCP sends the keys in clear in the SDP: SRTP, but not called encrypted */
+    if (call_encrypted(&P.c)) { t[n] = "Encrypted"; role[n++] = B_GO; }
     for (int i = 0; i < n; i++) w += ui_tag_width(t[i]) + (i ? (SMALL ? 14 : 20) : 0);
     if (cx >= 0) x = cx - w / 2;
     for (int i = 0; i < n; i++) x = ui_tag(x, y, t[i], role[i]);
@@ -2282,6 +2291,7 @@ const char *phone_state(const char *key)
     if (!strcmp(key, "mute")) return P.muted ? "1" : "0";
     if (!strcmp(key, "hold")) return P.c.held ? "1" : "0";
     if (!strcmp(key, "secure")) return P.c.secure ? "1" : "0";
+    if (!strcmp(key, "encrypted")) return call_encrypted(&P.c) ? "1" : "0";
     if (!strcmp(key, "keypad")) return P.keypad ? "1" : "0";
     if (!strcmp(key, "xfer")) return P.xfer ? "1" : "0";
     if (!strcmp(key, "number")) return P.number[0] ? P.number : "-";

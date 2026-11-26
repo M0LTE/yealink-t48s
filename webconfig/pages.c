@@ -626,13 +626,14 @@ static void post_account_cert(struct req *r)
     for (int i = 0; i < n && !bad; i++) {
         int dup = 0;
         cert_info(der[i], dlen[i], &c, &why);
-        for (int k = 0; k < kept; k++) dup |= !strcmp(have[k].id, c.id);
+        /* already kept, or earlier in this same file */
+        for (int k = 0; k < kept + added; k++) dup |= !strcmp(have[k].id, c.id);
         if (dup) continue;
         if (kept + added >= CERT_MAX) { snprintf(text, sizeof text, "%d certificates at most", CERT_MAX); bad = text; break; }
         if (cert_save(dir, der[i], dlen[i], c.id) < 0) { bad = strerror(errno); break; }
         logmsg("certificate added: %s (%s)", c.subject, c.id);
         snprintf(last, sizeof last, "%s", c.subject);
-        added++;
+        have[kept + added++] = c;
     }
     for (int i = 0; i < n; i++) free(der[i]);
     if (added) run_apply("sip", 0, 0);

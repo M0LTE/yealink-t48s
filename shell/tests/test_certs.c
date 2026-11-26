@@ -121,6 +121,8 @@ int main(void)
     CHECK(read_count(buf, strlen(buf), 4, &why) == -1 && strstr(why, "private key"), "a private key beside it");
     snprintf(buf, sizeof buf, "-----BEGIN EC PRIVATE KEY-----\nMIIB\n-----END EC PRIVATE KEY-----\n%s", ROOT);
     CHECK(read_count(buf, strlen(buf), 4, &why) == -1 && strstr(why, "private key"), "an EC private key before it");
+    snprintf(buf, sizeof buf, "%sstray PRIVATE KEY-----\n", ROOT);
+    CHECK(read_count(buf, strlen(buf), 4, &why) == -1 && strstr(why, "private key"), "a key's marker anywhere");
     CHECK(read_count("-----BEGIN CERTIFICATE-----\nMIIB", 32, 4, &why) == -1, "no END");
     CHECK(read_count("-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n", 58, 4, &why) == -1, "not base64");
     CHECK(read_count("-----BEGIN CERTIFICATE-----\nAA==AA\n-----END CERTIFICATE-----\n", 60, 4, &why) == -1, "data after padding");

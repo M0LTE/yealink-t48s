@@ -77,10 +77,14 @@ shot shots/t46s-in-call-hold.png
 key soft2
 key soft1
 expectstate mute 0
-# the audio turns out to be SRTP (issue #78): Encrypted, as a lamp and a word
+# the audio turns out to be SRTP (issue #78). Over UDP the keys went in clear: not called encrypted
 expectstate secure 0
 run sh -c "echo secure > simdata/sip.sock.cmd"
 waitstate secure 1 3000
+expectstate encrypted 0
+# over TLS they did not: Encrypted, as a lamp and a word
+run ./t48-config --config simdata/config set sip transport tls
+waitstate encrypted 1 3000
 wait 200
 shot shots/t46s-in-call-encrypted.png
 # tones sent show as they are keyed

@@ -860,7 +860,8 @@ class Paired(unittest.TestCase):
         self.assertIn("<h3>Certificates</h3><p class='dim'>None</p>", page)
         self.assertIn("name='cert' accept=", page)
         before = len(p.applied_list())
-        self.assertEqual(add(b"Some text first\n" + root), (False, "Added: T48 Test Root."))
+        # the same one twice in the file: kept once
+        self.assertEqual(add(b"Some text first\n" + root + root), (False, "Added: T48 Test Root."))
         self.assertEqual(len(kept()), 1)
         self.assertEqual(p.applied_list()[before:], ["sip"])          # baresip reads them at start
         stored = readb(os.path.join(d, kept()[0]))
