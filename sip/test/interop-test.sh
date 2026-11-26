@@ -238,7 +238,7 @@ check "caller without timers: answered without one" 'said "got 200 se=- "'
 stop timer-caller-without
 instance alice 5071 udp session_timer=1800
 sleep 2
-uac answer 5080 "hdr=Session-Expires:90;refresher=uac" hdr=Require:timer slow-update hold=100 > $W/uac.out & UPID=$!
+uac answer 5080 "hdr=Session-Expires:90;refresher=uac" hdr=Require:timer slow-update hold=105 >/dev/null & UPID=$!
 sleep 0.5
 alice_calls_uac 100 || true
 wait $UPID || true
@@ -288,7 +288,7 @@ check "phones refresh: call still up after 130 s" '[ $up = 1 ] && [ "$(routed UP
 stop sst-refreshed
 instance alice 5071 udp session_timer=90
 sleep 2
-uac answer 5080 "hdr=Session-Expires:90;refresher=uas" hdr=Require:timer hold=130 > $W/uac.out & UPID=$!
+uac answer 5080 "hdr=Session-Expires:90;refresher=uas" hdr=Require:timer hold=130 >/dev/null & UPID=$!
 sleep 0.5
 t0=$(date +%s)
 alice_calls_uac 130 && up=1 || up=0
