@@ -203,7 +203,7 @@ static int __init t48s_holtek_init(void)
 	u64 ver;
 	u8 b[8];
 	u32 want;
-	int i;
+	int i, tries;
 
 	/* every T4xS has the chip on the same three pins: U-Boot asks it which phone this is */
 	if (!of_machine_is_compatible("yealink,sip-t4xs"))
@@ -232,10 +232,17 @@ static int __init t48s_holtek_init(void)
 	udelay(CS_DELAY_US);
 	mutex_unlock(&holtek_lock);
 
-	/* the first bit on the wire is the top bit of byte 7 */
-	ver = holtek_read(CMD_VERSION, 64);
-	for (i = 0; i < 8; i++)
-		b[i] = ver >> (8 * i);
+	/* the first bit on the wire is the top bit of byte 7. Asked up to three
+	 * times: the installer will not write without the hardware id */
+	for (tries = 0; tries < 3; tries++) {
+		if (tries)
+			msleep(20);
+		ver = holtek_read(CMD_VERSION, 64);
+		for (i = 0; i < 8; i++)
+			b[i] = ver >> (8 * i);
+		if (b[6] == 2)
+			break;
+	}
 	/* a protocol 2.0 chip has 2 in byte 6; the hardware id is byte 5 */
 	if (b[6] != 2) {
 		pr_info(DRV_NAME ": no answer we understand (read 0x%016llx), leaving the chip alone\n",

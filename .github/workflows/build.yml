@@ -187,6 +187,9 @@ jobs:
           mkdir "$RUNNER_TEMP/t46s-stick/install"
           cp "$RUNNER_TEMP/k6/T46S-kernel.uimg" "$RUNNER_TEMP/br/output/images/system.img" "$RUNNER_TEMP/t46s-stick/install/"
           (cd "$RUNNER_TEMP/t46s-stick/install" && sha256sum T46S-kernel.uimg system.img > SHA256SUMS)
+          # every kernel against its place: 2.5 MB of kernel partition, 4 MB below the ramdisk U-Boot loads
+          for f in T48S-kernel.uimg T46S-kernel.uimg; do n=$(stat -c %s "$RUNNER_TEMP/k6/$f"); echo "$f: $n of 2621440"; [ "$n" -le 2621440 ] || { echo "$f does not fit the kernel partition"; exit 1; }; done
+          for f in T48S.bin T46S.bin; do n=$(stat -c %s "$RUNNER_TEMP/k6/$f"); echo "$f: $n of 4194304"; [ "$n" -le 4194304 ] || { echo "$f is over U-Boot's 4 MB"; exit 1; }; done
           ls k6-src/linux-*.tar.xz >/dev/null 2>&1 || cp "$RUNNER_TEMP"/k6/linux-*.tar.xz k6-src/
 
       # The source that goes with the binaries (NOTICE.md, "Source for the binaries"):

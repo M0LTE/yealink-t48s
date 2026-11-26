@@ -274,7 +274,12 @@ preflight() {
     K=$(mtd t48kernel); A=$(mtd t48app)
     [ -n "$K" ] && [ -n "$A" ] || die "This kernel cannot write the flash"
     # the phone is the model this kernel is for, the chip says so too
-    [ "$(t48-model strict 2>/dev/null)" = "$MODEL" ] || die "Phone model not known. Nothing written"
+    # (asked three times, in case the chip's answer is not in yet)
+    n=0
+    until [ "$(t48-model strict 2>/dev/null)" = "$MODEL" ]; do
+        n=$((n + 1)); [ $n -lt 3 ] || die "Phone model not known. Nothing written"
+        ${T48_SLEEP:-sleep} 1
+    done
     # U-Boot's own environment names the layout the driver knows
     [ "$(cat "$PARAM/layout" 2>/dev/null)" = matches ] || die "Flash layout not known. Nothing written"
     [ "$(cat "$PARAM/selftest" 2>/dev/null || echo 0)" -gt 0 ] || die "Flash driver self-test did not run"

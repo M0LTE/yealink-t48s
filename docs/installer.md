@@ -80,7 +80,7 @@ Both begin the same way and stop at the first thing that is not right:
 - ubl, uboot, env, logo, smkern, smrfs and rfs on the phone are identical to the backup, all 2112 bytes of every page: it is this phone's backup. `cfg` and `data` may differ (Yealink ran since) and are then compared with how they were when the step began;
 - the flash driver's self-test ran, it has counted no write errors, and `kernel` and `app` have no bad block;
 - the phone is the model the running kernel is for, and the Holtek chip says so (`t48-model strict`);
-- the flash driver found the layout it knows in U-Boot's environment (its `layout` parameter says `matches`, [models.md](models.md#the-flash)). Otherwise the page shows `Flash: Not recognised` and offers nothing.
+- the flash driver found the layout it knows in U-Boot's environment (its `layout` parameter says `matches`, [models.md](models.md#the-flash)). Otherwise the page shows `Flash: Not recognised` and offers Back up only, which reads.
 
 **Install**: the install files match their `SHA256SUMS`, and the kernel file is this model's, by its name and by the name in its header (`Linux-6.18.65-t46s`). The kernel lock is opened, `T48S-kernel.uimg` written and compared page by page with its error-correction bytes (`nandrestore -b`), and the lock closed. Then the app step: all 599 blocks of `app` are erased (539 on a phone whose last 60 already hold our `/data`), UBI is made, slot A written and read back, an empty `/data` made. Then every partition that is never written is compared again.
 

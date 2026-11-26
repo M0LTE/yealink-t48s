@@ -1502,8 +1502,12 @@ static void build_install(void)
     add_info("Stick", v);
     if (!fw.stick) return;
     if (fw.unknown && !restore) {
-        /* t48-install would refuse: the flash driver did not find the layout it knows */
+        /* the flash driver did not find the layout it knows: install would be
+         * refused, but the backup only reads, so an owner can still keep one */
         add_info("Flash", "Not recognised");
+        if (fw.backup == 2) snprintf(v, sizeof v, "Checked, %s", fw.date); else snprintf(v, sizeof v, "%s", fw.backup ? "Unfinished" : "None");
+        add_info("Backup", v);
+        if (fw.backup != 2) add_action("Back up", A_FW_BACKUP, "");
         snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Nothing can be installed on this phone");
         return;
     }

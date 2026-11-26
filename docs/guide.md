@@ -142,7 +142,7 @@ Restore needs this phone's own backup. Without the `t48s-backup` folder (`t46s-b
 | `Stick needs 160 MB free` | Make room, or use another stick |
 | `The stick holds another phone's backup` | Move that `t48s-backup` folder off the stick first |
 | `Backup on the stick is damaged` | The stick has lost data. If the phone is still on Yealink's firmware, rename the folder and Back up again |
-| Install page: Flash `Not recognised` | This phone's loader does not name the flash layout the firmware knows. Nothing is written. Report it on issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10) with the lines [models.md](models.md#test-plan-for-a-t46s-owner) asks for |
+| Install page: Flash `Not recognised` | This phone's loader does not name the flash layout the firmware knows. Nothing is written; Back up still works. Report it on issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10) with the lines [models.md](models.md#test-plan-for-a-t46s-owner) asks for |
 | `Phone model not known` | The phone did not say which model it is, or a kernel for the other model was started. Use the stick for this model |
 | `Kernel file is not for this phone` | The `install` folder is from the other model's zip. Unpack this model's zip again |
 | `Bad block in kernel or app. Not supported yet` | This phone's flash has a worn block where the firmware goes. It cannot be installed yet |

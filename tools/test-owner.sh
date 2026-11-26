@@ -85,7 +85,7 @@ EOS
     # which phone, as t48-model reads it: the device tree and the Holtek chip
     ln -s "$HERE/buildroot/board/t48s/rootfs-overlay/usr/bin/t48-model" "$T/bin/t48-model"
     mkdir -p "$T/dt"; printf 'yealink,sip-t48s\0yealink,sip-t4xs\0' > "$T/dt/compatible"; echo 65 > "$T/hwid"
-    export T48_DT="$T/dt" T48_HWID="$T/hwid"
+    export T48_DT="$T/dt" T48_HWID="$T/hwid" T48_SLEEP=true
     echo usbmode > "$T/bm/mode"; : > "$T/dev/mtd15"
     : > "$T/stick/T48S.rom"
     cp "$SET/T48S-kernel.uimg" "$SET/system.img" "$T/stick/install/"

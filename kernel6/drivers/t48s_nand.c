@@ -205,6 +205,9 @@ static char layout[96] = "not checked";	/* "matches", or why not */
 module_param_string(layout, layout, sizeof(layout), 0444);
 /* "t46s" or "t48s", from the device tree; NULL for anything else */
 static const char *t48s_nand_model;
+/* the page U-Boot's nboot reads the image header from: page 0 of the first
+ * good block of the kernel partition, found once at start-up */
+static int t48s_nand_kernel_head = T48S_KERNEL_OFS >> 11;
 
 /* the allow-list and its locks, alone */
 static bool t48s_nand_list_ok(loff_t ofs, loff_t len)
@@ -569,8 +572,9 @@ static int t48s_nand_write_page(struct nand_chip *chip, const uint8_t *buf,
 		t48s_nand_refuse("page write", (long long)page << T48S_PAGE_SHIFT);
 		return -EROFS;
 	}
-	/* never one of our kernels for the other model (t48s_nand_layout.h) */
-	if (page == (T48S_KERNEL_OFS >> T48S_PAGE_SHIFT) && !t48s_layout_kernel_ok(buf, t48s_nand_model)) {
+	/* never one of our kernels for the other model (t48s_nand_layout.h): the
+	 * page nboot takes the header from, before anything is read or sent */
+	if (page == t48s_nand_kernel_head && !t48s_layout_kernel_ok(buf, t48s_nand_model)) {
 		refused++;
 		pr_err("t48s_nand: a kernel named \"%.32s\" is not for this phone (%s); not written\n",
 		       (const char *)buf + 32, t48s_nand_model ? t48s_nand_model : "model not known");
@@ -1406,13 +1410,6 @@ static int t48s_nand_probe(struct platform_device *pdev)
 		t48s_nand_model = "t46s";
 	else if (of_machine_is_compatible("yealink,sip-t48s"))
 		t48s_nand_model = "t48s";
-	/* Started from the flash of an installed phone: app is ours and in use. Only
-	 * the kernel image the installer writes says this (its device tree), and the
-	 * installer writes only where the layout was checked. */
-	if (strstr(saved_command_line, "t48boot=flash")) {
-		t48s_nand_open[T48S_LOCK_APP] = true;
-		pr_info("t48s_nand: lock: started from flash, the app partition is open\n");
-	}
 
 	/* Yealink's partitions, all read-only, then ours */
 	memcpy(parts, t48s_nand_parts, sizeof(t48s_nand_parts));
@@ -1437,7 +1434,26 @@ static int t48s_nand_probe(struct platform_device *pdev)
 			bad++;
 	pr_info("t48s_nand: %d bad blocks, %u chip commands blocked while scanning\n",
 		bad, blocked);
+	/* where nboot finds the kernel's header: it skips bad blocks */
+	for (ofs = T48S_KERNEL_OFS; ofs < T48S_KERNEL_OFS + 0x00280000; ofs += mtd->erasesize)
+		if (!mtd_block_isbad(mtd, ofs)) {
+			t48s_nand_kernel_head = ofs >> T48S_PAGE_SHIFT;
+			break;
+		}
 	t48s_nand_layout(mtd);
+	/* Started from the flash of an installed phone: app is ours and in use. Only
+	 * the kernel image the installer writes says this (its device tree), and the
+	 * installer writes only where the layout was checked. A T48S was installed
+	 * before this check existed, so its app opens whatever the check says now;
+	 * a T46S's only when the check passes this time too. */
+	if (strstr(saved_command_line, "t48boot=flash")) {
+		if (t48s_nand_layout_ok || (t48s_nand_model && !strcmp(t48s_nand_model, "t48s"))) {
+			t48s_nand_open[T48S_LOCK_APP] = true;
+			pr_info("t48s_nand: lock: started from flash, the app partition is open\n");
+		} else {
+			pr_warn("t48s_nand: lock: started from flash, but the layout is not known: app stays shut\n");
+		}
+	}
 	for (i = 0; i < ARRAY_SIZE(t48s_nand_ours); i++)
 		pr_info("t48s_nand: ours: %s, 0x%08llx to 0x%08llx, %s\n",
 			t48s_nand_ours[i].name, (unsigned long long)t48s_nand_ours[i].offset,

@@ -112,7 +112,7 @@ The driver's table and its writeable ranges were read from one T48S. A T46S carr
 - `bootcmd` is `run bootnand`;
 - `bootnand` ends with `setenv autostart yes; nboot 0x02680000 0 0x015A0000`: U-Boot starts the image at the start of `kernel`, the place the installer writes.
 
-Otherwise the lock does not open, the `/data` blocks are shut and the `userenv` window refuses: the phone's flash is read-only, the Install page says `Flash: Not recognised`, and the boot log has what the phone's environment says instead. On Tom's T48S the environment matches. The rest of an install's checks are the T48S's: a backup of the whole chip, checked three ways including every error-correction byte against our code, so a T46S whose chip or error correction differs gets no further than its backup; no bad block in `kernel` or `app`; the chip's size and page geometry; the Holtek chip's hardware id must be 66 and agree with the kernel's device tree.
+Otherwise the lock does not open, the `/data` blocks are shut and the `userenv` window refuses: the phone's flash is read-only, the Install page says `Flash: Not recognised` and offers Back up alone, and the boot log has what the phone's environment says instead. On Tom's T48S the environment matches. The rest of an install's checks are the T48S's: a backup of the whole chip, checked three ways including every error-correction byte against our code, so a T46S whose chip or error correction differs gets no further than its backup; no bad block in `kernel` or `app`; the chip's size and page geometry; the Holtek chip's hardware id must be 66 and agree with the kernel's device tree.
 
 ## Building
 
@@ -137,7 +137,7 @@ CI does the same on every build ([build.yml](../.github/workflows/build.yml)): `
 **A. Start the new stick, nothing written** (Yealink's firmware still installed)
 
 1. Unpack `t46s-stick.zip` from [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) onto the stick ([guide.md](guide.md#make-the-stick)). Speakerphone at power-on, 2.
-2. Settings, Install. Photograph it. Expected: `Back up`, `Step 1 of 2`. `Flash: Not recognised` means the layout check refused: stop here and send step 3.
+2. Settings, Install. Photograph it. Expected: `Back up`, `Step 1 of 2`. `Flash: Not recognised` means the layout check refused: Back up is still offered and only reads; take it if you like, then stop and send step 3.
 3. If you can, Settings, Access, SSH, then send `dmesg | grep -E 't48s_(nand|holtek|usb)'`, `t48-install status` and `t48-live status`. The lines that matter: `layout: U-Boot's environment names this layout` (or `NOT KNOWN` and the three `env` lines after it), `bad blocks`, `self-test: 549 attempts`, `controller as found`, and the hardware id.
 
 **B. Back up, install, use**
