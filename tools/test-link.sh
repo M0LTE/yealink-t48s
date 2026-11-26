@@ -1,14 +1,15 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# test-link.sh: t48-link and the DHCP script (issue #77, docs/sip.md) on any PC,
-# no root. The carrier is a file standing in for sysfs; ifconfig, route, ntpd,
-# pidof, killall and t48-apply are stand-ins that keep a log. No waits: each
-# step is one look (t48-link once) or one run of the DHCP script.
-#   cable back: a new lease is asked for, once, and the address is kept while
-#   it is; the first look and a carrier that stays up do nothing; the same
-#   address back from DHCP leaves baresip alone, a new one restarts it; a
-#   lease that really ends takes the address away; a renewal with the same
-#   time servers leaves ntpd alone
+# test-link.sh: the network side of a cable put back (issue #77, docs/sip.md):
+# t48-apply network and link-up, and the udhcpc script, on any PC, no root.
+# ifconfig, route, ntpd, pidof, killall, udhcpc and t48-apply sip are
+# stand-ins that keep a log. No waits: each step is one run of a script.
+#   link-up keeps the address while DHCP asks and names it in the kick file;
+#   the same address back leaves baresip alone, a new one restarts it; a
+#   lease that really ends, or a kick naming another address, takes the
+#   address away; network clears a stale kick; udhcpc runs without -q, asks
+#   for its address and does not hold the lock; a fixed address ignores
+#   link-up; a renewal leaves the route and ntpd alone unless they change
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 O=$HERE/buildroot/board/t48s/rootfs-overlay
@@ -17,65 +18,74 @@ trap 'rm -rf "$T"' EXIT
 pass() { echo "ok   $*"; }
 fail() { echo "FAIL $*" >&2; exit 1; }
 
-mkdir -p "$T/sys/class/net/eth0" "$T/run" "$T/etc" "$T/dev" "$T/bin"
+mkdir -p "$T/run" "$T/etc" "$T/dev" "$T/bin"
 : > "$T/log"
 stub() { printf '#!/bin/sh\n%s\n' "$2" > "$T/bin/$1"; chmod +x "$T/bin/$1"; }
-stub t48-apply 'echo "t48-apply $*" >> '"$T/log"
-stub route ':'
-stub killall 'echo "killall $*" >> '"$T/log"
-stub ntpd 'echo "ntpd $*" >> '"$T/log"
+L=$T/log
+stub killall 'echo "killall $*" >> '"$L"
+stub ntpd 'echo "ntpd $*" >> '"$L"
 stub pidof '[ -e '"$T/ntpd-running"' ]'
+stub t48-config 'case "$2 $3" in "network mode") cat '"$T/mode"' 2>/dev/null || exit 1 ;; "network address") cat '"$T/fixed"' 2>/dev/null || exit 1 ;; *) exit 1 ;; esac'
+stub udhcpc 'echo "udhcpc $*" >> '"$L"'; [ -e /proc/self/fd/9 ] && echo "udhcpc holds fd 9" >> '"$L"'; true'
 # ifconfig IF: says the address; ifconfig IF ADDR ...: sets it
-stub ifconfig 'if [ $# -eq 1 ]; then a=$(cat '"$T/addr"' 2>/dev/null); [ -z "$a" ] || echo "inet addr:$a  Mask:255.255.255.0"; else [ "$2" = 0.0.0.0 ] && : > '"$T/addr"' || echo "$2" > '"$T/addr"'; echo "ifconfig $*" >> '"$T/log"'; fi'
+stub ifconfig 'if [ $# -eq 1 ]; then a=$(cat '"$T/addr"' 2>/dev/null); [ -z "$a" ] || echo "inet addr:$a  Mask:255.255.255.0"; else [ "$2" = 0.0.0.0 ] && : > '"$T/addr"' || echo "$2" > '"$T/addr"'; echo "ifconfig $*" >> '"$L"'; fi'
+# route -n: the default route from a file; add and del logged
+stub route 'case "$1" in -n) g=$(cat '"$T/gw"' 2>/dev/null); [ -z "$g" ] || echo "0.0.0.0 $g 0.0.0.0 UG 0 0 0 eth0" ;; del) [ -s '"$T/gw"' ] || exit 1; : > '"$T/gw"'; echo "route del" >> '"$L"' ;; add) echo "$4" > '"$T/gw"'; echo "route add $4" >> '"$L"' ;; esac'
+# t48-apply sip is what restarts baresip: logged; the rest is the real one
+cp "$O/usr/bin/t48-apply" "$T/t48-apply-real"
+stub t48-apply '[ "$1" = sip ] && { echo "t48-apply sip" >> '"$L"'; exit 0; }; exec sh '"$T/t48-apply-real"' "$@"'
 export PATH="$T/bin:$PATH" T48_ROOT="$T" interface=eth0
 
-link() { echo "$1" > "$T/sys/class/net/eth0/carrier"; sh "$O/usr/bin/t48-link" once >/dev/null; }
 dhcp() { sh "$O/usr/share/udhcpc/default.script" "$@"; wait; }
-applies() { grep -c "^t48-apply $1" "$T/log" || true; }
+apply() { sh "$T/t48-apply-real" "$@"; wait; }
+count() { grep -c "^$1" "$L" || true; }
 
+# the cable back, same network
 echo 10.0.0.5 > "$T/addr"
-link 1
-[ "$(applies network)" = 0 ] || fail "first look does nothing"
-link 1
-[ "$(applies network)" = 0 ] || fail "carrier staying up does nothing"
-link 0
-[ "$(applies network)" = 0 ] || fail "carrier down does nothing"
-link 1
-[ "$(applies network)" = 1 ] && [ -e "$T/run/t48-dhcp-kick" ] || fail "cable back: network applied again"
-pass "cable back: network applied again, once; not on the first look or while up"
-
-# the new udhcpc starts with deconfig: the address stays
+apply link-up
+[ "$(cat "$T/run/t48-dhcp-kick")" = 10.0.0.5 ] || fail "link-up names the address in the kick file"
+grep -q "^udhcpc .*-r 10.0.0.5" "$L" && ! grep -q "^udhcpc .* -q" "$L" || fail "udhcpc stays running and asks for its address"
+[ "$(count "udhcpc holds")" = 0 ] || fail "udhcpc does not hold the lock"
+pass "link-up: udhcpc started again without -q, asking for 10.0.0.5, not holding the lock"
 dhcp deconfig
 [ "$(cat "$T/addr")" = 10.0.0.5 ] && [ ! -e "$T/run/t48-dhcp-kick" ] || fail "address kept while DHCP asks"
 pass "address kept while DHCP asks"
-
-ip=10.0.0.5 dhcp bound
-[ "$(applies sip)" = 0 ] || fail "same address: baresip left alone"
+ip=10.0.0.5 router=10.0.0.1 dhcp bound
+[ "$(count "t48-apply sip")" = 0 ] || fail "same address: baresip left alone"
 pass "same address back: baresip left alone"
 
-link 0; link 1; dhcp deconfig
-ip=192.168.7.20 dhcp bound
-[ "$(applies sip)" = 1 ] && [ "$(cat "$T/addr")" = 192.168.7.20 ] || fail "new network: new address, baresip restarted"
+# a renewal with the same router and time servers
+n=$(count route); : > "$T/ntpd-running"; m=$(count ntpd)
+ip=10.0.0.5 router=10.0.0.1 dhcp renew
+[ "$(count route)" = "$n" ] && [ "$(count ntpd)" = "$m" ] || fail "renewal: route and ntpd left alone"
+ip=10.0.0.5 router=10.0.0.254 ntpsrv=10.0.0.1 dhcp renew
+[ "$(cat "$T/gw")" = 10.0.0.254 ] && [ "$(count ntpd)" = $((m + 1)) ] || fail "renewal: new router and time server taken"
+pass "a renewal changes the route and ntpd only when they change"
+
+# the cable back on another network
+apply link-up
+dhcp deconfig
+ip=192.168.7.20 router=192.168.7.1 dhcp bound
+[ "$(count "t48-apply sip")" = 1 ] && [ "$(cat "$T/addr")" = 192.168.7.20 ] || fail "new network: new address, baresip restarted"
 pass "another network: its address, baresip started again"
 
+# a lease that ends, and a kick that names another address
 dhcp deconfig
 [ -z "$(cat "$T/addr")" ] || fail "lease ended: address removed"
-pass "a lease that ends without a kick takes the address away"
+echo 192.168.7.20 > "$T/addr"; echo 10.9.9.9 > "$T/run/t48-dhcp-kick"
+dhcp deconfig
+[ -z "$(cat "$T/addr")" ] || fail "kick for another address: address removed"
+pass "a lease that ends, or a kick for another address, takes the address away"
 
-: > "$T/ntpd-running"
-n=$(grep -c "^ntpd" "$T/log")
-ip=192.168.7.20 dhcp renew
-[ "$(grep -c "^ntpd" "$T/log")" = "$n" ] || fail "renewal: ntpd left alone"
-ntpsrv=10.0.0.1 ip=192.168.7.20 dhcp renew
-[ "$(grep -c "^ntpd" "$T/log")" = $((n + 1)) ] || fail "new time server: ntpd started again"
-pass "renewal leaves ntpd alone unless the time servers change"
+# network (the Network page, boot) clears a stale kick
+echo 192.168.7.20 > "$T/addr"; echo 192.168.7.20 > "$T/run/t48-dhcp-kick"
+apply network
+[ ! -e "$T/run/t48-dhcp-kick" ] || fail "network clears a stale kick"
+pass "network clears a stale kick"
 
-# t48-apply network with DHCP: udhcpc stays running (no -q) and asks for the
-# address it has
-stub t48-config 'exit 1'
-stub udhcpc 'echo "udhcpc $*" >> '"$T/log"
-echo 192.168.7.20 > "$T/addr"
-sh "$O/usr/bin/t48-apply" network
-wait
-grep -q "^udhcpc .*-r 192.168.7.20" "$T/log" && ! grep -q "^udhcpc .* -q" "$T/log" || fail "udhcpc stays running, asks for its address"
-pass "udhcpc stays running to renew, and asks for the address it has"
+# a fixed address: link-up has nothing to ask for
+echo static > "$T/mode"; echo 192.168.7.50 > "$T/fixed"
+n=$(count udhcpc); k=$(count ifconfig)
+apply link-up
+[ "$(count udhcpc)" = "$n" ] && [ "$(count ifconfig)" = "$k" ] && [ ! -e "$T/run/t48-dhcp-kick" ] || fail "fixed address: link-up does nothing"
+pass "with a fixed address link-up does nothing"

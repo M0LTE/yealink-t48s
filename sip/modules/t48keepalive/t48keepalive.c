@@ -25,25 +25,33 @@
  * answers come back.
  *
  * A registration that fails is retried by libre alone, with its back-off
- * (sip/patches/re-0002 covers one that could not be sent). Nothing here
- * registers while an account is not registered, as that would start the
- * back-off again from the top; and no OPTIONS are sent then. The one
- * exception: when a network link comes back (carrier up, on a netlink
- * socket), every account registers at once, so a cable put back in is not
- * left waiting out a back-off of up to 30 min. The address may be the same
- * one, so baresip is not restarted for it.
+ * (sip/patches/re-0002 covers one that could not be sent), and no OPTIONS
+ * are sent while an account is not registered. Registering
+ * again here (above, and below) is a refresh on the same registration
+ * (ua_refresh_register, sip/patches/baresip-0002), never a new one, which
+ * would unregister the old first and could cross with it at the server.
+ *
+ * The phone's one watcher of the network link: when a carrier comes back
+ * (a cable put back; a netlink socket, so no polling), every account
+ * registers at once instead of waiting out a back-off of up to 30 min, and
+ * t48keepalive_linkup runs with "link-up" (default /usr/bin/t48-apply:
+ * a new DHCP lease, so a phone moved to another network takes its address
+ * there; baresip is then started again on it). At most once in 30 s: a
+ * sooner one is put off to then (linkwatch.h).
  *
  * An account opts out with ;keepalive=no (t48-sip writes that for
  * keepalive=off).
  */
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <net/if.h>
 #include <re.h>
 #include <baresip.h>
+#include "linkwatch.h"
 
 #ifndef IFF_LOWER_UP
 #define IFF_LOWER_UP 0x10000     /* carrier: linux/if.h, not in net/if.h */
@@ -72,10 +80,10 @@ struct ka {
 static struct list kal;
 static unsigned next_id;
 
-/* links seen on the netlink socket: was each one's carrier up */
-enum { KA_LINKS = 8 };
-static struct { int index; bool up; } links[KA_LINKS];
-static unsigned nlinks;
+static struct linkwatch lw;
+static struct tmr lw_tmr;         /* an up put off by linkwatch */
+static char lw_name[IF_NAMESIZE];
+static char linkup_cmd[256] = "/usr/bin/t48-apply";   /* run with "link-up" */
 static re_sock_t nlfd = RE_BAD_SOCK;
 static struct re_fhs *nlfhs;
 
@@ -150,7 +158,7 @@ static void public_addr(char *out, size_t n, const struct sip_msg *msg)
 /* register again. The caller's last use of ka for this event */
 static void reregister(struct ka *ka)
 {
-	(void)ua_register(ka->ua);
+	(void)ua_refresh_register(ka->ua);
 }
 
 
@@ -265,40 +273,49 @@ static void start(struct ua *ua)
 }
 
 
-/* a link's carrier came back: every account registers now */
-static void link_up(const char *name)
+/* run "t48-apply link-up", not waiting for it: forked twice, so it is
+ * nobody's child here and leaves no zombie. Without it (a PC) nothing. */
+static void run_linkup(void)
+{
+	pid_t pid;
+
+	if (!linkup_cmd[0] || access(linkup_cmd, X_OK))
+		return;
+	pid = fork();
+	if (pid < 0)
+		return;
+	if (pid == 0) {
+		if (fork() == 0) {
+			execl(linkup_cmd, linkup_cmd, "link-up", (char *)NULL);
+			_exit(127);
+		}
+		_exit(0);
+	}
+	(void)waitpid(pid, NULL, 0);
+}
+
+
+/* a link's carrier came back: every account registers now, and DHCP asks */
+static void link_up(void)
 {
 	struct le *le;
 
-	info("t48keepalive: %s up, registering again\n", name);
+	info("t48keepalive: %s up, registering again\n", lw_name);
+	run_linkup();
 	for (le = list_head(uag_list()); le; le = le->next) {
 		struct ua *ua = le->data;
 
 		if (account_regint(ua_account(ua)))
-			(void)ua_register(ua);
+			(void)ua_refresh_register(ua);
 	}
 }
 
 
-/* true if this link's carrier was seen down and is now up */
-static bool carrier_back(int index, bool up)
+static void link_later(void *arg)
 {
-	unsigned i;
-	bool back;
-
-	for (i = 0; i < nlinks && links[i].index != index; i++)
-		;
-	if (i == nlinks) {
-		/* first sight: nothing to compare with */
-		if (nlinks == KA_LINKS)
-			return false;
-		links[nlinks].index = index;
-		links[nlinks++].up = up;
-		return false;
-	}
-	back = up && !links[i].up;
-	links[i].up = up;
-	return back;
+	(void)arg;
+	linkwatch_fired(&lw, tmr_jiffies());
+	link_up();
 }
 
 
@@ -315,17 +332,38 @@ static void netlink_handler(int flags, void *arg)
 
 		for (; NLMSG_OK(h, len); h = NLMSG_NEXT(h, len)) {
 			struct ifinfomsg *ifi = NLMSG_DATA(h);
-			char name[IF_NAMESIZE] = "link";
+			uint64_t now = tmr_jiffies(), when = 0;
+			bool up;
 
 			if (h->nlmsg_type != RTM_NEWLINK ||
 			    (ifi->ifi_flags & IFF_LOOPBACK))
 				continue;
-			if (!carrier_back(ifi->ifi_index,
-					  (ifi->ifi_flags & IFF_UP) &&
-					  (ifi->ifi_flags & IFF_LOWER_UP)))
-				continue;
-			(void)if_indextoname((unsigned)ifi->ifi_index, name);
-			link_up(name);
+			up = (ifi->ifi_flags & IFF_UP) &&
+				(ifi->ifi_flags & IFF_LOWER_UP);
+			switch (linkwatch_event(&lw, ifi->ifi_index, up, now,
+						&when)) {
+			case LW_NOW:
+				if (!if_indextoname((unsigned)ifi->ifi_index,
+						    lw_name))
+					str_ncpy(lw_name, "link", sizeof lw_name);
+				tmr_cancel(&lw_tmr);
+				link_up();
+				break;
+			case LW_LATER:
+				if (!if_indextoname((unsigned)ifi->ifi_index,
+						    lw_name))
+					str_ncpy(lw_name, "link", sizeof lw_name);
+				info("t48keepalive: %s up again soon after,"
+				     " waiting %llu s\n", lw_name,
+				     (unsigned long long)(when - now + 999) / 1000);
+				tmr_start(&lw_tmr, when - now, link_later, NULL);
+				break;
+			case LW_CANCEL:
+				tmr_cancel(&lw_tmr);
+				break;
+			default:
+				break;
+			}
 		}
 	}
 }
@@ -372,7 +410,8 @@ static void netlink_close(void)
 	if (nlfd != RE_BAD_SOCK)
 		(void)close(nlfd);
 	nlfd = RE_BAD_SOCK;
-	nlinks = 0;
+	tmr_cancel(&lw_tmr);
+	memset(&lw, 0, sizeof lw);
 }
 
 
@@ -413,6 +452,8 @@ static void event_handler(enum bevent_ev ev, struct bevent *event, void *arg)
 static int module_init(void)
 {
 	list_init(&kal);
+	(void)conf_get_str(conf_cur(), "t48keepalive_linkup", linkup_cmd,
+			   sizeof linkup_cmd);
 	netlink_open();
 	return bevent_register(event_handler, NULL);
 }

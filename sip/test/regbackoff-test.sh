@@ -3,7 +3,8 @@
 #
 # Registration back-off (issue #77, docs/sip.md#registration-back-off): builds
 # sip/test/regbackoff.c against the host libre from TARGET=host sip/build.sh
-# (with sip/patches applied) and runs it. A fake clock: it takes a second.
+# (with sip/patches applied) and runs it, then sip/test/linkwatch.c (what
+# t48keepalive does when a cable is put back). Fake clocks: about a second.
 #
 #   sip/test/regbackoff-test.sh     in the sip/Dockerfile container, or
 #                                   anywhere with clang and the host build
@@ -24,3 +25,5 @@ clang -O1 -g -I"$P/include/re" -DHAVE_THREADS -DHAVE_PTHREAD -DHAVE_INTTYPES_H -
     -Wl,--wrap=clock_gettime -Wl,--wrap=sendto -Wl,--wrap=rand_u16 \
     "$P/lib/libre.a" "$P/lib/libssl.a" "$P/lib/libcrypto.a" -lpthread -ldl -lm
 $W/regbackoff
+clang -O1 -g "$SIP/test/linkwatch.c" -o $W/linkwatch
+$W/linkwatch

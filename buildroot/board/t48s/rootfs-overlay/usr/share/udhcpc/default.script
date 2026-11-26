@@ -1,25 +1,31 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # busybox udhcpc hook: apply the lease. T48_ROOT moves /run, /etc and /dev
-# for tools/test-dhcp.sh.
+# for tools/test-link.sh.
 R=${T48_ROOT:-}
+addr() { ifconfig "$interface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p'; }
 case "$1" in
 deconfig)
-    # t48keepalive asked for a new lease because the link came back (it
-    # leaves $R/run/t48-dhcp-kick): the address stays while udhcpc asks, so
-    # on the same network nothing changes. Otherwise the lease is gone.
-    if [ -e "$R/run/t48-dhcp-kick" ]; then
-        rm -f "$R/run/t48-dhcp-kick"
-    else
+    # The cable came back and t48-apply link-up started udhcpc again, naming
+    # the address it had in the kick file: it stays while udhcpc asks, so on
+    # the same network nothing changes. Otherwise the lease is gone.
+    kick=$(cat "$R/run/t48-dhcp-kick" 2>/dev/null)
+    rm -f "$R/run/t48-dhcp-kick"
+    if [ -z "$kick" ] || [ "$kick" != "$(addr)" ]; then
         ifconfig "$interface" 0.0.0.0
     fi ;;
 bound|renew)
     rm -f "$R/run/t48-dhcp-kick"
-    was=$(ifconfig "$interface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p')
+    was=$(addr)
     ifconfig "$interface" "$ip" netmask "${subnet:-255.255.255.0}"
+    # the default route, only when it changes (a renewal mostly brings the same)
     if [ -n "$router" ]; then
-        while route del default gw 0.0.0.0 dev "$interface" 2>/dev/null; do :; done
-        for r in $router; do route add default gw "$r" dev "$interface"; break; done
+        for r in $router; do break; done
+        gw=$(route -n 2>/dev/null | awk '$1 == "0.0.0.0" { print $2; exit }')
+        if [ "$gw" != "$r" ]; then
+            while route del default gw 0.0.0.0 dev "$interface" 2>/dev/null; do :; done
+            route add default gw "$r" dev "$interface"
+        fi
     fi
     : > "$R/etc/resolv.conf"
     for d in $dns; do echo "nameserver $d" >> "$R/etc/resolv.conf"; done

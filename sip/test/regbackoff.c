@@ -15,7 +15,9 @@
 //   3. a new registration (a network change, the account saved) goes at once;
 //      after failures baresip carries one failure over (sipreg_incfailc), so
 //      if it fails too the wait is the second one, 60 to 120 s
-//   4. unregistering (expires 0) that cannot be sent still returns the error
+//   4. a refresh (sipreg_refresh, a cable put back): nothing more while a
+//      REGISTER is on its way; at once while backing off, which goes on
+//   5. unregistering (expires 0) that cannot be sent still returns the error
 //      and is not retried
 //
 // Build and run: sip/test/regbackoff-test.sh
@@ -182,6 +184,26 @@ static void silent_server(uint16_t r)
 	check(send_at[first] - fail_at[n] == wait_ms(2),
 	      "after it fails too: the second wait, one failure carried over");
 
+	/* 4. the cable put back (t48keepalive, sipreg_refresh): with a REGISTER
+	 *    on its way, nothing more; while backing off, one at once on the
+	 *    same registration, and the back-off goes on growing */
+	first = sends;
+	check(sipreg_refresh(reg) == 0 && sends == first,
+	      "refresh with a REGISTER on its way: nothing more sent");
+	n = fails;
+	while (fails < n + 1)
+		step();
+	first = sends;
+	check(sipreg_refresh(reg) == 0 && sends == first + 1 &&
+	      send_at[first] == now_ms, "refresh while backing off: sent at once");
+	while (fails < n + 2)
+		step();
+	first = sends;
+	while (sends == first)
+		step();
+	check(send_at[first] - fail_at[n + 1] == wait_ms(4),
+	      "and if it fails, the back-off goes on (the fourth wait)");
+
 	mem_deref(reg);
 	sip_close(sip, true);
 	mem_deref(sip);
@@ -220,7 +242,7 @@ static void cannot_send(void)
  out:
 	mem_deref(reg);
 
-	/* 4. unregistering cannot be sent either: the error comes back, once,
+	/* 5. unregistering cannot be sent either: the error comes back, once,
 	 *    and nothing is left to try again */
 	{
 		uint32_t timers = tmrl_count(re_tmrl_get());

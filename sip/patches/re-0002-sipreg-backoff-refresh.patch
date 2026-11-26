@@ -1,0 +1,79 @@
+Registration back-off for a REGISTER that could not be sent, and a refresh
+that keeps the registration, issue #77, docs/sip.md.
+
+libre retries a REGISTER that was sent and failed (no answer, an error
+response) after 30 to 60 s, doubling to 15 to 30 min (RFC 5626 section
+4.5), and starts again from the top on success. One that could not be sent
+at all (no network yet, no transport) was not retried by anyone. Now it is
+given the same back-off; unregistering still returns the error.
+
+sipreg_refresh sends a REGISTER at once on the same registration: when the
+network comes back, a registered account refreshes and one that is backing
+off tries now. A new registration (baresip's ua_register) would first
+unregister the old one, and the two requests could cross at the server.
+
+SPDX-License-Identifier: BSD-3-Clause
+
+diff -u a/include/re_sipreg.h b/include/re_sipreg.h
+--- a/include/re_sipreg.h
++++ b/include/re_sipreg.h
+@@ -16,6 +16,7 @@
+ 		    sip_resp_h *resph, void *arg,
+ 		    const char *params, const char *fmt, ...);
+ int sipreg_send(struct sipreg *reg);
++int sipreg_refresh(struct sipreg *reg);
+ 
+ int sipreg_set_rwait(struct sipreg *reg, uint32_t rwait);
+ 
+diff -u a/src/sipreg/reg.c b/src/sipreg/reg.c
+--- a/src/sipreg/reg.c
++++ b/src/sipreg/reg.c
+@@ -413,10 +413,47 @@
+ 
+ int sipreg_send(struct sipreg *reg)
+ {
++	int err;
++
++	if (!reg)
++		return EINVAL;
++
++	err = request(reg, true);
++
++	/* A REGISTER that could not be sent (no network, no transport) is
++	 * retried with the same back-off as one that failed, instead of not
++	 * at all. Unregistering (expires 0) still returns the error. */
++	if (err && reg->expires) {
++		tmr_start(&reg->tmr, failwait(++reg->failc), tmr_handler, reg);
++		reg->resph(err, NULL, reg->arg);
++		return 0;
++	}
++
++	return err;
++}
++
++
++/**
++ * Send a REGISTER now, on the same registration (same Call-ID, next CSeq):
++ * a refresh while registered, or the next try at once while backing off,
++ * which keeps the failure count. Unlike a new registration, nothing is
++ * unregistered first. One already on its way is enough.
++ *
++ * @param reg   SIP Registration client
++ *
++ * @return 0 if success, otherwise errorcode
++ */
++int sipreg_refresh(struct sipreg *reg)
++{
+ 	if (!reg)
+ 		return EINVAL;
+ 
+-	return request(reg, true);
++	if (reg->req || reg->terminated || !reg->expires)
++		return 0;
++
++	tmr_cancel(&reg->tmr);
++
++	return sipreg_send(reg);
+ }
+ 
+ 

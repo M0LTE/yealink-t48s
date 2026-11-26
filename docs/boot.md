@@ -53,7 +53,6 @@ On an installed phone it is also where a start ends when neither slot starts, or
 | `sip` | `t48-sip` (baresip) | an account in `/data/config/sip`, the audio service, an address |
 | `watchdog` | `t48-watchdog` | nothing |
 | `usbmount` | `t48-usbmount watch`: USB sticks read-only on `/run/media` for apps ([app-protocol.md](app-protocol.md#what-an-app-is-given)) | nothing |
-| `link` | `t48-link`: when the Ethernet cable comes back, the network settings are applied again, so DHCP asks for a lease at once ([sip.md](sip.md#registration-back-off)) | nothing |
 | `update-check` | `t48-update daily`: the daily check for firmware and app updates, which installs nothing ([install.md](install.md#the-daily-check)) | the clock, and three minutes after the start |
 
 ```

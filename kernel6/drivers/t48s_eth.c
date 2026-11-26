@@ -74,6 +74,7 @@
 #define ESW_GBLMGMT_IMP_EN	0x80
 #define ESW_IMPENABLE		ESW_PAGE(0x34, 0x06)
 #define ESW_LINK		ESW_PAGE(0x01, 0x00)
+#define ESW_LINK_EXT		0x03		/* link on external port 0 or 1 */
 #define ESW_PORT_IMP		8
 #define ESW_PORTS		2		/* external ports: 0 and 1 */
 #define ESW_PORTCTRL_STP	0xe0		/* spanning tree state: */
@@ -580,6 +581,25 @@ static void esw_imp_enable(struct t48s_eth *p, int on)
 
 static u32 esw_impspeed_wanted(struct t48s_eth *p);
 
+/*
+ * eth0 is the switch's CPU port, which is always up. Its carrier follows the
+ * external ports instead (link register bits 0 and 1, the LAN and PC jacks):
+ * on while either has a link, so a cable pulled and put back is seen as a
+ * carrier change (issue #77: the phone registers and asks DHCP again).
+ */
+static void link_follow(struct t48s_eth *p)
+{
+	bool up = esw_rd(p, ESW_LINK) & ESW_LINK_EXT;
+
+	if (up == netif_carrier_ok(p->dev))
+		return;
+	netdev_info(p->dev, "switch: external link %s\n", up ? "up" : "down");
+	if (up)
+		netif_carrier_on(p->dev);
+	else
+		netif_carrier_off(p->dev);
+}
+
 /* every two seconds while the interface is up: are broadcasts still coming our
  * way, and does the CPU port's speed setting still match the link? */
 static void imp_guard(struct work_struct *work)
@@ -596,6 +616,7 @@ static void imp_guard(struct work_struct *work)
 	v = esw_impspeed_wanted(p);
 	if (readl(p->esw + ESW_IMPSPEED) != v)
 		writel(v, p->esw + ESW_IMPSPEED);
+	link_follow(p);
 	schedule_delayed_work(&p->guard, 2 * HZ);
 }
 
@@ -897,7 +918,8 @@ static int t48s_open(struct net_device *dev)
 	dmac_start(p, CH_RX, p->rx_lli_dma);
 	netdev_info(dev, "switch: imp ctrl now 0x%02x, gblmgmt 0x%02x\n",
 		    esw_rd(p, ESW_IMPCTRL), esw_rd(p, ESW_GBLMGMT));
-	netif_carrier_on(dev);
+	netif_carrier_off(dev);
+	link_follow(p);
 	netif_start_queue(dev);
 	schedule_delayed_work(&p->guard, HZ);
 	return 0;

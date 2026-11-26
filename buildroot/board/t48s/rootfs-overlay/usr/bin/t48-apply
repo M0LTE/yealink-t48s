@@ -4,6 +4,8 @@
 # /data/config/WHAT (docs/settings.md). The shell runs this when a file has
 # been changed on the screen; run it by hand after t48-config set.
 #   network   DHCP, or the fixed address in the file
+#   link-up   the cable came back: a new DHCP lease, keeping the address
+#             while it is asked for (t48keepalive runs this)
 #   sip       restart baresip
 #   system    nothing to do: the shell follows the time zone by itself
 #   access    SSH on or off (t48-access, docs/access.md), and the web setup page
@@ -12,37 +14,52 @@
 #   screen    nothing to do: the shell follows the file by itself
 #   restart   restart the phone (Settings, Update, after an install)
 get() { t48-config get "$1" "$2" 2>/dev/null || echo "$3"; }
+R=${T48_ROOT:-}    # moves /run, /etc and /dev, for tools/test-link.sh
 
-case "$1" in
-network)
+# DHCP, or the fixed address. Serialised: two at once (the Network page and
+# a cable put back) would start two udhcpc. $1 = kick: the cable came back,
+# so the address stays while udhcpc asks (the DHCP script keeps it through
+# udhcpc's first deconfig when the kick file names it)
+network() {
+    exec 9>"$R/run/t48-apply-network.lock"
+    flock 9
     IF=eth0
     mode=$(get network mode dhcp)
     addr=$(get network address "")
     killall udhcpc 2>/dev/null
+    rm -f "$R/run/t48-dhcp-kick"
+    was=$(ifconfig $IF 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p')
     if [ "$mode" = static ] && [ -n "$addr" ]; then
-        was=$(ifconfig $IF 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p')
+        [ "$1" != kick ] || return 0    # nothing to ask for
         ifconfig $IF "$addr" netmask "$(get network netmask 255.255.255.0)" up
         while route del default dev $IF 2>/dev/null; do :; done
         gw=$(get network gateway "")
         [ -n "$gw" ] && route add default gw "$gw" dev $IF
         dns=$(get network dns "")
-        : > /etc/resolv.conf
-        [ -n "$dns" ] && echo "nameserver $dns" >> /etc/resolv.conf
+        : > "$R/etc/resolv.conf"
+        [ -n "$dns" ] && echo "nameserver $dns" >> "$R/etc/resolv.conf"
         # no DHCP to name a time server: the public pool
-        killall ntpd 2>/dev/null; rm -f /run/t48-ntp /run/t48-dhcp-kick
-        ntpd -p pool.ntp.org
-        echo "network: $IF $addr (fixed)" > /dev/console
+        killall ntpd 2>/dev/null; rm -f "$R/run/t48-ntp"
+        ntpd -p pool.ntp.org 9>&-
+        echo "network: $IF $addr (fixed)" > "$R/dev/console"
         # baresip listens on the address it found when it started (with DHCP
         # the udhcpc script does this, when the lease brings another address)
-        [ "$was" = "$addr" ] || "$0" sip
+        [ "$was" = "$addr" ] || "$0" sip 9>&-
     else
+        [ "$1" != kick ] || [ -z "$was" ] || echo "$was" > "$R/run/t48-dhcp-kick"
         # stays running to renew the lease (no -q: with it the lease was
-        # never renewed and the address kept after it ran out). Asks for the
-        # address it has, if any (t48-link starts it again when the cable
-        # comes back)
-        cur=$(ifconfig $IF 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p')
-        udhcpc -b -t 10 -i $IF ${cur:+-r $cur} -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 &
-    fi ;;
+        # never renewed and the address kept after it ran out), and asks for
+        # the address it has, if any
+        udhcpc -b -t 10 -i $IF ${was:+-r $was} -s /usr/share/udhcpc/default.script -x hostname:t48s >/dev/null 2>&1 9>&- &
+    fi
+}
+
+case "$1" in
+network) network ;;
+link-up)
+    # t48keepalive (in baresip): the Ethernet cable came back. A new lease
+    # at once, so a phone moved to another network takes its address there
+    network kick ;;
 sip)
     # baresip reads the account when it starts. Under runit (the phone) the
     # service is started again; it starts by itself once an account exists
@@ -64,6 +81,6 @@ access)
 access-*) exec t48-access "${1#access-}" ;;
 restart) reboot ;;
 system|audio|screen|feed) ;;
-*) echo "usage: t48-apply network | sip | system | access | restart" >&2; exit 2 ;;
+*) echo "usage: t48-apply network | link-up | sip | system | access | restart" >&2; exit 2 ;;
 esac
 exit 0
