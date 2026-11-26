@@ -1260,42 +1260,58 @@ static void page_apps(struct req *r)
     app_command("list", NULL, out, sizeof out, 25000);
     scan_apps();
     page_begin(r, "Apps", "/apps");
-    for (char *p = out; p && *p;) {
-        char *nl = strchr(p, '\n'), *f[10] = {0};
+    /* one line per app (t48-app list --machine, shell/pkg.c): id, name, installed, in the feed,
+     * download size, size on the phone, state, permissions, description, category; any
+     * fields after those are for a newer page */
+    static char *line_f[128][11];
+    int nlines = 0, used[MANIFEST_CATEGORIES] = {0}, groups = 0;
+    for (char *p = out; p && *p && nlines < 128;) {
+        char *nl = strchr(p, '\n'), **f = line_f[nlines];
         if (nl) *nl = 0;
+        memset(line_f[nlines], 0, sizeof line_f[0]);
         if (!strncmp(p, "feederror ", 10)) snprintf(err, sizeof err, "%s", p + 10);
         if (!strncmp(p, "app\t", 4)) {
             char *q = p;
-            for (int k = 0; k < 10 && q; k++) { f[k] = q; q = strchr(q, '\t'); if (q) *q++ = 0; }
+            for (int k = 0; k < 11 && q; k++) { f[k] = q; q = strchr(q, '\t'); if (q) *q++ = 0; }
         }
         p = nl ? nl + 1 : NULL;
         if (!f[9] || !manifest_id_ok(f[1])) continue;
-        /* id, name, installed, in the feed, download size, size on the phone, state, permissions, description */
-        const char *id = f[1], *st = f[7];
-        const struct manifest *m = installed(id);
-        long kb = (atol(f[6]) ? atol(f[6]) : atol(f[5])) / 1024 + 1;
-        shown++;
-        updates += !strcmp(st, "update");
-        H("<div class='card app'><div class='apphead'><h2>%s</h2><span class='pill %r'>%r</span></div>", f[2],
-          !strcmp(st, "available") ? "" : !strcmp(st, "update") ? "warn" : !strcmp(st, "unsupported") ? "bad" : "good",
-          !strcmp(st, "available") ? "Available" : !strcmp(st, "update") ? "Update" : !strcmp(st, "unsupported") ? "Needs newer firmware" :
-          !strcmp(st, "builtin") ? "Built in" : "Installed");
-        if (strcmp(f[9], "-")) H("<p>%s</p>", f[9]);
-        H("<p class='dim small'>");
-        if (strcmp(f[3], "-")) H("Installed %s. ", f[3]);
-        if (strcmp(f[4], "-")) H("In the feed %s. ", f[4]);
-        H("%l KB. %r%s</p><div class='actions'>", kb, strcmp(f[8], "-") ? "Permissions: " : "", strcmp(f[8], "-") ? f[8] : "");
-        if (!strcmp(st, "available") || !strcmp(st, "update")) {
-            form_begin(r, !strcmp(st, "update") ? "/apps/update" : "/apps/install", "class='inline'");
-            H("<input type='hidden' name='id' value='%s'><button class='primary' type='submit'>%r</button></form>", id, !strcmp(st, "update") ? "Update" : "Install");
+        groups += !used[manifest_category(f[10] ? f[10] : "")]++;
+        nlines++;
+    }
+    /* grouped by category as on the phone, with a heading only when there is more than one */
+    for (int g = 0; g < MANIFEST_CATEGORIES; g++) {
+        if (!used[g]) continue;
+        if (groups > 1) H("<h2 class='group'>%r</h2>", manifest_categories[g]);
+        for (int n = 0; n < nlines; n++) {
+            char **f = line_f[n];
+            if (manifest_category(f[10] ? f[10] : "") != g) continue;
+            const char *id = f[1], *st = f[7];
+            const struct manifest *m = installed(id);
+            long kb = (atol(f[6]) ? atol(f[6]) : atol(f[5])) / 1024 + 1;
+            shown++;
+            updates += !strcmp(st, "update");
+            H("<div class='card app'><div class='apphead'><h2>%s</h2><span class='pill %r'>%r</span></div>", f[2],
+              !strcmp(st, "available") ? "" : !strcmp(st, "update") ? "warn" : !strcmp(st, "unsupported") ? "bad" : "good",
+              !strcmp(st, "available") ? "Available" : !strcmp(st, "update") ? "Update" : !strcmp(st, "unsupported") ? "Needs newer firmware" :
+              !strcmp(st, "builtin") ? "Built in" : "Installed");
+            if (strcmp(f[9], "-")) H("<p>%s</p>", f[9]);
+            H("<p class='dim small'>");
+            if (strcmp(f[3], "-")) H("Installed %s. ", f[3]);
+            if (strcmp(f[4], "-")) H("In the feed %s. ", f[4]);
+            H("%l KB. %r%s</p><div class='actions'>", kb, strcmp(f[8], "-") ? "Permissions: " : "", strcmp(f[8], "-") ? f[8] : "");
+            if (!strcmp(st, "available") || !strcmp(st, "update")) {
+                form_begin(r, !strcmp(st, "update") ? "/apps/update" : "/apps/install", "class='inline'");
+                H("<input type='hidden' name='id' value='%s'><button class='primary' type='submit'>%r</button></form>", id, !strcmp(st, "update") ? "Update" : "Install");
+            }
+            if (!strcmp(st, "installed") || !strcmp(st, "update")) {
+                form_begin(r, "/apps/remove", "class='inline'");
+                H("<input type='hidden' name='id' value='%s'><button type='submit' class='bad' data-ask='Remove %s? Deletes its data and settings.'>Remove</button></form>", id, f[2]);
+            }
+            H("</div>");
+            if (m && m->nsettings) app_settings_form(r, m);
+            H("</div>");
         }
-        if (!strcmp(st, "installed") || !strcmp(st, "update")) {
-            form_begin(r, "/apps/remove", "class='inline'");
-            H("<input type='hidden' name='id' value='%s'><button type='submit' class='bad' data-ask='Remove %s? Deletes its data and settings.'>Remove</button></form>", id, f[2]);
-        }
-        H("</div>");
-        if (m && m->nsettings) app_settings_form(r, m);
-        H("</div>");
     }
     if (!shown) H("<div class='card'><p class='dim'>No apps</p></div>");
     /* as on the phone: offered when there is more than one */

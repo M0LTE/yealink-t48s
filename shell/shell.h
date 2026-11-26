@@ -408,6 +408,7 @@ struct manifest {
     int api;
     int any_screen;      /* "screen": "any": it lays itself out for whatever size HELLO says */
     char description[160];
+    char category[16];   /* as the manifest gives it, "" without one: manifest_category() reads it */
     char *settings[MAX_SETTINGS];  /* "key=default" */
     char *setting_label[MAX_SETTINGS];
     char setting_type[MAX_SETTINGS][12];   /* text, number, bool, password */
@@ -423,6 +424,10 @@ int manifest_may(const struct manifest *m, const char *perm);   /* a permission 
 int manifest_read(const char *dir, struct manifest *m, char *err, size_t errn);
 void manifest_free(struct manifest *m);
 int manifest_version_cmp(const char *a, const char *b);   /* <0, 0, >0 as a is older, the same, newer */
+/* the fixed set of app categories (issue 30), in the order the store shows them */
+#define MANIFEST_CATEGORIES 5
+extern const char *const manifest_categories[MANIFEST_CATEGORIES];
+int manifest_category(const char *name);   /* its place in that list; 0 (General) for "" or a name not in it */
 /* what the feed offers, as t48-app last read it: a file in the state folder (docs/apps.md) */
 #define T48_OFFERS "app-offers"
 int manifest_updates(const char *state, const char *feed);   /* installed apps the feed has newer */

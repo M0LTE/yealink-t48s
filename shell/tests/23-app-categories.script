@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# App categories (issue 30): the Apps page groups apps by category under headings,
+# General, Games, Radio, Tools, Media, and the keys step over the headings. Feed 5
+# (tests/mkfeeds.sh) has an app in Radio, Games and Tools, one whose category is in
+# the feed only, and one with a category this firmware does not know (General). The
+# built-in apps have none: General. Feeds 1 to 4 have none at all, so 05-apps.script
+# is the old feed: one group, no headings.
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/5/index.json
+wait 200
+key ok
+expect launcher
+key right
+key right
+key ok
+expectstate settings.page store
+waitstate store loaded 5000
+# General: Clock, Crasher, Odd. Games: Blocks. Radio: Waves. Tools: Meter, Notes.
+expectstate settings.rows 14
+expectstate settings.row Clock
+expectstate settings.heading General
+shot shots/apps-categories.png
+key up
+expectstate settings.row Clock
+key down
+key down
+expectstate settings.row Odd
+expectstate settings.heading General
+key down
+expectstate settings.row Blocks
+expectstate settings.heading Games
+key down
+expectstate settings.row Waves
+expectstate settings.heading Radio
+key up
+expectstate settings.row Blocks
+key down
+key down
+expectstate settings.row Meter
+expectstate settings.heading Tools
+key down
+expectstate settings.row Notes
+expectstate settings.heading Tools
+key down
+expectstate settings.row Refresh
+shot shots/apps-categories-end.png
+
+# ---- installed, an app stays in its group: from its manifest, or the feed's ----
+key up
+key ok
+expectstate settings.row Install
+key ok
+waitstate overlay message 10000
+expectstate overlay.title Notes_installed
+key ok
+waitstate store.notes installed 5000
+key x
+expectstate settings.page store
+expectstate settings.row Notes
+expectstate settings.heading Tools
+key up
+expectstate settings.row Waves
+key ok
+key ok
+waitstate overlay message 10000
+key ok
+waitstate store.waves installed 5000
+key x
+expectstate settings.row Waves
+expectstate settings.heading Radio
+# installed apps come first in their group
+key down
+expectstate settings.row Notes
+key down
+expectstate settings.row Meter
+run ./t48-app --apps simdata/installed:apps --config simdata/config --state simdata/state list > simdata/list
+run grep -q "^waves .* Radio  *Waves$" simdata/list
+run grep -q "^odd .* General  *Odd$" simdata/list
+run grep -q "^clock .* General  *Clock$" simdata/list
+# a touch on a heading chooses nothing
+# (the list shows Blocks at the top, then the Radio heading)
+touch 300 144
+expectstate settings.page store
+expectstate settings.row Meter
+key x
+key x
+expect idle
+quit

@@ -50,13 +50,13 @@ A `.t48app` is a tar.gz holding one folder named after the app's id, with its `m
   "generated": "2026-11-23T12:00:00Z",
   "apps": [
     { "id": "hello", "name": "Hello", "version": "0.1.0", "api": 1,
-      "description": "The smallest useful app", "permissions": [],
+      "description": "The smallest useful app", "permissions": [], "category": "General",
       "url": "hello-0.1.0.t48app", "size": 41234, "sha256": "..." }
   ]
 }
 ```
 
-`url` is relative to the address of `index.json`. A feed is just that file and the packages beside it on any web server.
+`category` is the manifest's, General if it has none; `t48-pack` refuses a manifest whose category is not one of General, Games, Radio, Tools, Media. `url` is relative to the address of `index.json`. A feed is just that file and the packages beside it on any web server.
 
 ## Building the SDK
 

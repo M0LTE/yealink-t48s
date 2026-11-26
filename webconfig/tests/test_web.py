@@ -1020,6 +1020,26 @@ class Paired(unittest.TestCase):
         for app in ("demo", "memo"):
             self.ok("/apps/remove", {"id": app}, "/apps")
 
+    def test_72_app_categories(self):
+        b, was = self.b, self.p.get("feed", "url")
+        feed = lambda n: {"url": "file://" + os.path.join(SHELL_BUILD, "feeds", str(n), "index.json")}
+        # an old feed, no categories: one group, so no headings (issue 30)
+        self.ok("/apps/feed", feed(1), "/apps")
+        self.assertNotIn("class='group'", b.get("/apps").body)
+        # feed 5: in the fixed order, each app under its own; one this firmware does not know is General
+        self.ok("/apps/feed", feed(5), "/apps")
+        page = b.get("/apps").body
+        found = re.findall(r"<h2 class='group'>(\w+)</h2>|<div class='apphead'><h2>(\w+)</h2>", page)
+        self.assertEqual([g or n for g, n in found],
+                         ["General", "Clock", "Crasher", "Odd", "Games", "Blocks", "Radio", "Waves", "Tools", "Meter", "Notes"])
+        # installed, notes keeps the feed's category (its manifest has none), and comes first in it
+        self.ok("/apps/install", {"id": "notes"}, "/apps")
+        page = b.get("/apps").body
+        self.assertLess(page.index("<h2 class='group'>Tools</h2>"), page.index("<h2>Notes</h2>"))
+        self.assertLess(page.index("<h2>Notes</h2>"), page.index("<h2>Meter</h2>"))
+        self.ok("/apps/remove", {"id": "notes"}, "/apps")
+        self.ok("/apps/feed", {"url": was}, "/apps")
+
     def keys(self):
         path = os.path.join(self.p.keep, "ssh", "authorized_keys")
         return read(path).splitlines() if os.path.exists(path) else []

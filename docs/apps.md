@@ -10,11 +10,16 @@ Open **Apps**, then the last tile, **Get apps** (also Settings, Apps; and the Ap
 | ![an installed app](img/apps-detail.png) | ![removing](img/apps-remove.png) |
 | ![a package that fails its check](img/apps-checksum.png) | ![the launcher afterwards](img/apps-launcher.png) |
 
+- Apps are grouped by category under headings: General, Games, Radio, Tools, Media, in that order, installed apps first in each. With only one category there are no headings. The keys step over the headings. An app without a category, or with one this firmware does not know, is General. An installed app's category is its manifest's, else the feed's.
 - Each app's page shows its version, its size (download, and on the phone once installed) and what it may use (its manifest's permissions).
 - Remove asks first, and takes the app's own data and settings with it. Update keeps them.
 - Apps that are part of the firmware (the clock) cannot be removed.
 - Installing, updating or removing the app that is open closes it first.
 - The feed address is a setting on the same screen (`/data/config/feed`, [settings.md](settings.md#the-files)). The standard one is `https://m0lte.github.io/yealink-t48s-apps/index.json`, published by [M0LTE/yealink-t48s-apps](https://github.com/M0LTE/yealink-t48s-apps).
+
+| | |
+|---|---|
+| ![grouped by category](img/apps-categories.png) | ![the same on the T46S](img/t46s-apps-categories.png) |
 
 ## What is checked before an app is installed
 
@@ -37,11 +42,12 @@ Only then is the app moved into `/data/apps` with a rename, so a half-installed 
 | `apps[].size`, `sha256` | needed to install: an entry without them is listed but refused |
 | `apps[].api` | refused if higher than the shell's |
 | `apps[].name`, `version`, `description`, `permissions` | shown to the owner |
+| `apps[].category` | the group it is listed under; General when absent (issue [#30](https://github.com/M0LTE/yealink-t48s-apps/issues/30)). Firmware before it ignores the field |
 
 ## On the command line
 
 ```
-t48-app list                  # installed, and what the feed has
+t48-app list                  # installed, and what the feed has, with each app's category
 t48-app install hello         # from the feed
 t48-app install /tmp/my-0.1.0.t48app    # a file copied to the phone: no checksum to check it against
 t48-app update                # everything the feed has a newer version of
@@ -58,6 +64,7 @@ Each time `t48-app` reads the feed it keeps what the feed offers in `/data/phone
 ## Testing
 
 - `make -C shell check` runs [`tests/05-apps.script`](../shell/tests/05-apps.script) against two small feeds made on disk by [`tests/mkfeeds.sh`](../shell/tests/mkfeeds.sh): install, open, the app's settings, an update that keeps them, remove; and the refusals (an app for API level 2, a package one byte wrong, a package that climbs out of its folder, one holding a link, a feed address that is not https, removing the clock, a feed that is not there).
+- Categories: [`tests/23-app-categories.script`](../shell/tests/23-app-categories.script) and the T46S's [`tests/small/09-app-categories.script`](../shell/tests/small/09-app-categories.script) against a feed of apps in several categories, one only in the feed and one this firmware does not know; `webconfig/tests` the same on the web page; [`tools/test-pack.sh`](../tools/test-pack.sh) the packer's check and index.
 - `make -C shell check-live RUNNER=qemu-arm` uses the real feed: installs hello, links and waterfall from the Apps screen and starts each one (they are the phone's ARM programs, hence qemu).
 - On the phone: below.
 

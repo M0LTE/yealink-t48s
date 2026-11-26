@@ -5,6 +5,7 @@
   "description": "A clock, and the last key or touch",
   "api": 1,
   "exec": "clock",
+  "category": "General",
   "icon": "icon.ppm",
   "permissions": [],
   "settings": [

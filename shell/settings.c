@@ -38,7 +38,8 @@ enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_SIPADV, P_CODECS, P_NET, P_TIME, P_TZ, 
 static const char *const page_names[] = {"root", "accounts", "sip", "sipadvanced", "codecs", "network", "time", "timezone", "sound", "screen", "access", "about",
                                          "appsettings", "appconf", "store", "storeapp", "theme", "update", "install", "advanced", "forward"};
 
-enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
+enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION,
+                R_HEAD };   /* a group's name above its rows: never chosen, the keys step over it */
 enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16, F_HOST = 32, F_PROXY = 64,
        F_SECONDS = 128,   /* the value is shown with " s" after it */
        F_REGINT = 256,    /* register_seconds: 0, 60 to 86400 or empty */
@@ -436,6 +437,7 @@ int settings_app_updates(void)
 struct store_app {
     char id[64], name[64], have[24], offered[24], state[16], perms[96], description[160];
     long pkg_bytes, disk_bytes;
+    int category;   /* place in manifest_categories: the group it is listed under (issue 30) */
 };
 static struct store_app store[128];
 static int nstore;
@@ -558,8 +560,9 @@ static void job_line(char *line)
         if (!job.listed) { nstore = 0; job.listed = 1; }
         if (nstore >= 128) return;
         struct store_app *a = &store[nstore];
-        char *f[9] = {0}, *p = line + 4;
-        for (int i = 0; i < 9 && p; i++) {
+        /* the fields t48-app list --machine gives (pkg.c); any after these are for a newer shell */
+        char *f[10] = {0}, *p = line + 4;
+        for (int i = 0; i < 10 && p; i++) {
             f[i] = p;
             p = strchr(p, '\t');
             if (p) *p++ = 0;
@@ -575,6 +578,7 @@ static void job_line(char *line)
         snprintf(a->state, sizeof a->state, "%s", f[6]);
         snprintf(a->perms, sizeof a->perms, "%s", strcmp(f[7], "-") ? f[7] : "");
         snprintf(a->description, sizeof a->description, "%s", strcmp(f[8], "-") ? f[8] : "");
+        a->category = manifest_category(f[9] ? f[9] : "");
         nstore++;
     } else if (!strncmp(line, "feederror ", 10)) {
         snprintf(feed_error, sizeof feed_error, "%s", line + 10);
@@ -1278,6 +1282,9 @@ static void build_appconf(const char *id)
     snprintf(add_action("Reset to defaults", A_APP_DEFAULTS, m->id)->def, sizeof rows[0].def, "%s", m->id);
 }
 
+/* the group an app is listed under on the Apps page: its category (issue 30) */
+static int store_group(const struct store_app *a) { return a->category; }
+
 static void build_store(void)
 {
     int updates = 0;
@@ -1291,16 +1298,27 @@ static void build_store(void)
             snprintf(r->value, sizeof r->value, "Feed error: %s", feed_error);
             r->flags = F_DANGER;
         }
-        for (int i = 0; i < nstore; i++) {
-            const struct store_app *a = &store[i];
-            char v[100], size[24];
-            kb(size, sizeof size, a->disk_bytes ? a->disk_bytes : a->pkg_bytes);
-            if (!strcmp(a->state, "update")) { snprintf(v, sizeof v, "Update %s", a->offered); updates++; }
-            else if (!strcmp(a->state, "installed")) snprintf(v, sizeof v, "Installed %s", a->have);
-            else if (!strcmp(a->state, "builtin")) snprintf(v, sizeof v, "Built in %s", a->have);
-            else if (!strcmp(a->state, "unsupported")) snprintf(v, sizeof v, "Needs newer firmware");
-            else snprintf(v, sizeof v, "%s, %s", a->offered, size);
-            snprintf(add_menu(a->name, P_STOREAPP, v)->arg, sizeof rows[0].arg, "%s", a->id);
+        /* Grouped by category, in the fixed order, each group in the order t48-app listed
+         * them (installed, then the rest of the feed). With one group there is nothing to
+         * tell apart, so no heading. Another way to group, such as the feed an app came
+         * from, is another key in store_group(). */
+        int used[MANIFEST_CATEGORIES] = {0}, groups = 0;
+        for (int i = 0; i < nstore; i++) groups += !used[store_group(&store[i])]++;
+        for (int g = 0; g < MANIFEST_CATEGORIES; g++) {
+            if (!used[g]) continue;
+            if (groups > 1) add(R_HEAD, manifest_categories[g]);
+            for (int i = 0; i < nstore; i++) {
+                const struct store_app *a = &store[i];
+                char v[100], size[24];
+                if (store_group(a) != g) continue;
+                kb(size, sizeof size, a->disk_bytes ? a->disk_bytes : a->pkg_bytes);
+                if (!strcmp(a->state, "update")) { snprintf(v, sizeof v, "Update %s", a->offered); updates++; }
+                else if (!strcmp(a->state, "installed")) snprintf(v, sizeof v, "Installed %s", a->have);
+                else if (!strcmp(a->state, "builtin")) snprintf(v, sizeof v, "Built in %s", a->have);
+                else if (!strcmp(a->state, "unsupported")) snprintf(v, sizeof v, "Needs newer firmware");
+                else snprintf(v, sizeof v, "%s, %s", a->offered, size);
+                snprintf(add_menu(a->name, P_STOREAPP, v)->arg, sizeof rows[0].arg, "%s", a->id);
+            }
         }
         if (updates > 1) add_action("Update all", A_UPDATE_ALL, "");
         add_action("Refresh", A_REFRESH, "");
@@ -1410,6 +1428,10 @@ static void rebuild(void)
     /* the Update page gains and loses rows as work goes on: the chosen action stays chosen */
     if (stack[depth].page == P_UPDATE && stack[depth].sel < nrows && rows[stack[depth].sel].kind == R_ACTION)
         snprintf(keep, sizeof keep, "%s", rows[stack[depth].sel].label);
+    /* on Apps the chosen app stays chosen when an install moves it within its group */
+    char keep_app[64] = "";
+    if (stack[depth].page == P_STORE && stack[depth].sel < nrows && rows[stack[depth].sel].kind == R_MENU)
+        snprintf(keep_app, sizeof keep_app, "%s", rows[stack[depth].sel].arg);
     nrows = 0;
     switch (stack[depth].page) {
     case P_ROOT: build_root(); break;
@@ -1436,11 +1458,17 @@ static void rebuild(void)
     }
     for (int i = 0; keep[0] && i < nrows; i++)
         if (rows[i].kind == R_ACTION && !strcmp(rows[i].label, keep)) stack[depth].sel = i;
+    for (int i = 0; keep_app[0] && i < nrows; i++)
+        if (rows[i].kind == R_MENU && rows[i].target == P_STOREAPP && !strcmp(rows[i].arg, keep_app)) stack[depth].sel = i;
     /* the Install page has one thing to choose, and it stays chosen as the steps change */
     for (int i = 0; stack[depth].page == P_INSTALL && i < nrows; i++)
         if (rows[i].kind == R_ACTION) stack[depth].sel = i;
     if (stack[depth].sel >= nrows) stack[depth].sel = nrows ? nrows - 1 : 0;
+    /* a heading is never the chosen row: the one under it is */
+    if (stack[depth].sel + 1 < nrows && rows[stack[depth].sel].kind == R_HEAD) stack[depth].sel++;
     if (stack[depth].top > stack[depth].sel) stack[depth].top = stack[depth].sel;
+    /* and it stays in view above the first row of its group */
+    if (stack[depth].top == stack[depth].sel && stack[depth].top > 0 && rows[stack[depth].top - 1].kind == R_HEAD) stack[depth].top--;
     if (stack[depth].sel >= stack[depth].top + VISIBLE) stack[depth].top = stack[depth].sel - VISIBLE + 1;
     if (stack[depth].top + VISIBLE > nrows) stack[depth].top = nrows > VISIBLE ? nrows - VISIBLE : 0;
 }
@@ -1459,7 +1487,8 @@ static void push(enum page p, const char *arg)
     if (p == P_INSTALL) { fw.loaded = 0; fw.again[0] = 0; }
     rebuild();
     /* start on the first row that does something */
-    while (stack[depth].sel < nrows - 1 && (rows[stack[depth].sel].kind == R_NOTE || rows[stack[depth].sel].kind == R_INFO)) stack[depth].sel++;
+    while (stack[depth].sel < nrows - 1 && (rows[stack[depth].sel].kind == R_NOTE || rows[stack[depth].sel].kind == R_INFO ||
+                                            rows[stack[depth].sel].kind == R_HEAD)) stack[depth].sel++;
     if (p == P_TZ || p == P_THEME)
         for (int i = 0; i < nrows; i++)
             if (rows[i].value[0]) stack[depth].sel = i;
@@ -1470,6 +1499,9 @@ static void push(enum page p, const char *arg)
 static void pop(void)
 {
     if (dirty[0]) { run_apply(dirty); dirty[0] = 0; }
+    /* back from an app's page: that app is chosen on Apps, wherever an install moved it */
+    char app[64] = "";
+    if (stack[depth].page == P_STOREAPP) snprintf(app, sizeof app, "%s", stack[depth].arg);
     depth--;
     if (depth < 0) {
         kbd_open = 0;
@@ -1478,6 +1510,8 @@ static void pop(void)
         return;
     }
     rebuild();
+    for (int i = 0; app[0] && i < nrows; i++)
+        if (rows[i].kind == R_MENU && rows[i].target == P_STOREAPP && !strcmp(rows[i].arg, app)) { stack[depth].sel = i; rebuild(); break; }
 }
 
 void settings_open(int app_manager)
@@ -1879,6 +1913,14 @@ static void overlay_answer(int yes)
     if (k == O_CONFIRM && yes) confirmed(ov.act, ov.arg);
 }
 
+/* up or down a row, over headings; at a heading with nothing past it, stay */
+static void step_row(int dir)
+{
+    int *sel = &stack[depth].sel, to = *sel + dir;
+    while (to >= 0 && to < nrows && rows[to].kind == R_HEAD) to += dir;
+    if (to >= 0 && to < nrows) *sel = to;
+}
+
 void settings_key(int code, int down)
 {
     if (depth < 0) return;
@@ -1901,8 +1943,8 @@ void settings_key(int code, int down)
     if (stack[depth].page == P_THEME && (code == T48_KEY_LEFT || code == T48_KEY_RIGHT))
         code = code == T48_KEY_LEFT ? T48_KEY_UP : T48_KEY_DOWN;   /* they are side by side */
     switch (code) {
-    case T48_KEY_UP: if (*sel > 0) (*sel)--; break;
-    case T48_KEY_DOWN: if (*sel < nrows - 1) (*sel)++; break;
+    case T48_KEY_UP: step_row(-1); break;
+    case T48_KEY_DOWN: step_row(1); break;
     case T48_KEY_OK: if (*sel < nrows) activate(*sel, 1); break;
     case T48_KEY_RIGHT:
         if (*sel < nrows && (rows[*sel].kind == R_LEVEL || rows[*sel].kind == R_CHOICE || rows[*sel].kind == R_MENU)) activate(*sel, 1);
@@ -1989,11 +2031,14 @@ void settings_touch(int state, int x, int y)
         stack[depth].top = top;
         if (stack[depth].sel < top) stack[depth].sel = top;
         if (stack[depth].sel >= top + VISIBLE) stack[depth].sel = top + VISIBLE - 1;
+        /* never leave the cursor on a heading: the next row down, or up at the end */
+        while (stack[depth].sel < nrows - 1 && rows[stack[depth].sel].kind == R_HEAD) stack[depth].sel++;
+        while (stack[depth].sel > 0 && rows[stack[depth].sel].kind == R_HEAD) stack[depth].sel--;
         redraw_me();
         return;
     }
     int i = stack[depth].top + (y - LIST_Y) / ROW_H;
-    if (y < LIST_Y || i >= nrows || x < LIST_X || x >= LIST_X + w) return;
+    if (y < LIST_Y || i >= nrows || x < LIST_X || x >= LIST_X + w || rows[i].kind == R_HEAD) return;
     stack[depth].sel = i;
     if ((rows[i].flags & F_CODEC) && x >= CODEC_UP_X(LIST_X, w) && x < CODEC_UP_X(LIST_X, w) + 2 * CODEC_BTN_W + 8) {
         codec_change(i, x < CODEC_UP_X(LIST_X, w) + CODEC_BTN_W + 4 ? -1 : 1);
@@ -2106,6 +2151,12 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
     int ty = y + (h - f->height) / 2;
     struct row_ink ink;
 
+    if (r->kind == R_HEAD) {
+        /* a group's name, in quiet ink at the foot of its row, over the rows it names */
+        const t48_font *hf = SMALL ? &t48_font_small : &t48_font_bold;
+        t48_text(&ui, x + pad, y + h - hf->height - (SMALL ? 1 : 4), hf, C_DIM, r->label);
+        return;
+    }
     if (r->kind == R_NOTE && SMALL) {
         /* one line where it fits; two in the smallest face where it does not */
         uint32_t c = (r->flags & F_DANGER) ? C_BAD : C_DIM;
@@ -2396,6 +2447,12 @@ const char *settings_state(const char *key)
         snprintf(b, sizeof b, "%s", ov.kind != O_NONE ? ov.title : "-");
         for (char *p = b; *p; p++) if (*p == ' ') *p = '_';
         return b;
+    }
+    if (!strcmp(key, "settings.heading")) {
+        /* the group the chosen row is in: the nearest heading above it */
+        for (int i = depth >= 0 ? stack[depth].sel : -1; i >= 0 && i < nrows; i--)
+            if (rows[i].kind == R_HEAD) return rows[i].label;
+        return "-";
     }
     if (!strcmp(key, "store")) return store_state == ST_LOADING ? "loading" : store_state == ST_LOADED ? (feed_error[0] ? "error" : "loaded") : "none";
     if (!strncmp(key, "store.", 6)) {
