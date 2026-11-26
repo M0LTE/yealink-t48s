@@ -1,0 +1,133 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# A call the far end refuses: a short reason from the SIP status and the Q.850 cause, never the
+# far end's own words (those go to the log), and the status beside a fault. Then + from a held 0.
+wait 300
+waitstate reg ok 3000
+# a provider's whole Reason header: the cause says more than the status
+run sh -c "echo refuse '488 Not Acceptable Here,Q.850;cause=88;text=INCOMPATIBLE_DESTINATION' > simdata/sip.sock.cmd"
+key 0
+key 7
+key 7
+key 0
+key 0
+key 9
+key 0
+key 0
+key 1
+key 2
+key 3
+key ok
+waitstate phone ended 3000
+expectstate ended Call_settings_not_accepted
+expectstate ended.detail 488
+wait 200
+shot shots/phone-call-refused.png
+key x
+waitstate phone idle 3000
+# busy: the busy tone and no status
+run sh -c "echo refuse '486 Busy Here' > simdata/sip.sock.cmd"
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone ended 3000
+expectstate ended Busy
+expectstate ended.detail -
+key x
+waitstate phone idle 3000
+# the cause wins over the status
+run sh -c "echo refuse '480 Temporarily Unavailable,Q.850;cause=19;text=NO_ANSWER' > simdata/sip.sock.cmd"
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone ended 3000
+expectstate ended No_answer
+key x
+waitstate phone idle 3000
+run sh -c "echo refuse '404 Not Found,Q.850;cause=1' > simdata/sip.sock.cmd"
+key 1
+key 0
+key 0
+key 9
+key ok
+waitstate phone ended 3000
+expectstate ended Number_not_found
+expectstate ended.detail 404
+key x
+waitstate phone idle 3000
+run sh -c "echo refuse '503 Service Unavailable' > simdata/sip.sock.cmd"
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone ended 3000
+expectstate ended No_answer_from_network
+wait 200
+shot shots/phone-call-no-network.png
+key x
+waitstate phone idle 3000
+
+# ---- + is a 0 held down, as the first character only ----
+key 0
+expectstate number 0
+key x
+key x
+waitstate phone idle 3000
+keydown 0
+wait 800
+expectstate number +
+keyup 0
+key 4
+key 4
+key 7
+key 7
+key 0
+key 0
+expectstate number +447700
+wait 200
+shot shots/dial-plus.png
+key 9
+key 0
+key 0
+key 1
+key 2
+key 3
+key ok
+waitstate phone incall 3000
+expectstate peer +447700900123
+key speaker
+waitstate phone ended 3000
+expectstate last o:+447700900123
+key x
+waitstate phone idle 3000
+# not after the first character
+key 1
+keydown 0
+wait 800
+keyup 0
+expectstate number 10
+key x
+key x
+key x
+waitstate phone idle 3000
+# held on the screen's keypad, where the 0 key says so
+hook off
+expectstate phone dial
+touchdown 636 337
+wait 300
+expectstate number 0
+touchup 636 337
+wait 400
+expectstate number 0
+key x
+touchdown 636 337
+wait 800
+touchup 636 337
+expectstate number +
+hook on
+waitstate phone idle 3000
+quit

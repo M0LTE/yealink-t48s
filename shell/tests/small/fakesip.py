@@ -4,7 +4,9 @@ so that the call screens can be reached with no SIP service. Every account is re
 call that is dialled rings for a second and a half and is answered. A line written to
 SOCKET.cmd is done and the file removed:
     incoming NUMBER [NAME]    a call comes in
-    secure                    every call's audio is now SRTP (CALL_MENC, issue #78)"""
+    secure                    every call's audio is now SRTP (CALL_MENC, issue #78)
+    refuse REASON...          the next call dialled is refused with that reason, as baresip gives it
+    register AOR              that account is registered too"""
 import json
 import os
 import select
@@ -21,6 +23,7 @@ srv.bind(path)
 srv.listen(1)
 calls = {}      # id -> the event fields of that call
 answer_at = {}  # id -> when a dialled call is answered
+refuse = None   # the reason the next dialled call is refused with
 serial = 0
 
 
@@ -52,11 +55,17 @@ while True:
                 del answer_at[cid]
                 if cid in calls:
                     send(c, type="CALL_ESTABLISHED", **calls[cid])
-            if os.path.exists(cmd):
-                words = open(cmd).read().split()
+            text = open(cmd).read() if os.path.exists(cmd) else ""
+            if text.endswith("\n"):   # a file with no line end yet is still being written
                 os.unlink(cmd)
+                words = text.split()
                 if words and words[0] == "incoming":
                     send(c, type="CALL_INCOMING", **new_call("incoming", words[1], " ".join(words[2:])))
+                elif words and words[0] == "refuse":
+                    refuse = " ".join(words[1:])
+                elif words and words[0] == "register":
+                    aors.append(words[1])
+                    send(c, event=True, type="REGISTER_OK", accountaor=words[1], param="200 OK")
                 elif words and words[0] == "secure":
                     for call in calls.values():
                         send(c, type="CALL_MENC", **dict(call, param="0,audio,AES_CM_128_HMAC_SHA1_80"))
@@ -73,7 +82,13 @@ while True:
                 msg, buf = json.loads(rest[:int(n)]), rest[int(n) + 1:]
                 send(c, response=True, ok=True, token=msg.get("token", ""), data="")
                 what, arg = msg.get("command"), msg.get("params") or ""
-                if what == "dial":
+                if what == "dial" and refuse is not None:
+                    call = new_call("outgoing", arg)
+                    calls.pop(call["id"])
+                    send(c, type="CALL_OUTGOING", **call)
+                    send(c, type="CALL_CLOSED", **dict(call, param=refuse))
+                    refuse = None
+                elif what == "dial":
                     call = new_call("outgoing", arg)
                     send(c, type="CALL_RINGING", **call)
                     answer_at[call["id"]] = time.time() + 1.5

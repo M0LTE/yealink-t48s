@@ -320,6 +320,8 @@ static void draw_idle(void)
             def = 0;
         }
         acc_box(i, tiles, &x, &y, &w);
+        /* a name that would be cut short beside "Default" goes without it: the status bar names the default too */
+        if (def && t48_text_width(&t48_font_normal, line) > w - 112) def = 0;
         ui_tile(x, y, w, ACC_H, 0, &ink);
         ui_lamp(x + 12, y + ACC_H / 2 - 6, c);
         t48_text_fit(&ui, x + 34, y + (ACC_H - t48_font_normal.height) / 2, w - (def ? 112 : 44), &t48_font_normal, ink.text, line);
@@ -517,8 +519,16 @@ void shell_screen_flush(const uint32_t *src, int w, int h)
     screen_home();
 }
 
+/* While held, a redraw waits for the hold to end: one picture for several changes made together.
+ * A part of the call screen owed (shell_phone_part) is all that is drawn if nothing more is. */
+static int redraw_held, redraw_owed;
+static struct { void (*draw)(void); int x, y, w, h; } part_owed;
+
 static void redraw(void)
 {
+    if (redraw_held) { redraw_owed = 1; return; }
+    redraw_owed = 0;
+    part_owed.draw = NULL;
     idle_text(idle_shown, sizeof idle_shown);
     if (scr == SCR_APP && app_shown && app_pixels()) {
         if (app_flip() >= 0) app_flip_show();   /* its last whole picture, wherever that is kept */
@@ -784,7 +794,7 @@ static void soft_key(int b)
     case SCR_IDLE: shell_key(idle[b], 1); break;
     case SCR_LAUNCHER: if (b == 0) shell_key(T48_KEY_OK, 1); else if (b == 3) shell_key(T48_KEY_BACK, 1); break;
     case SCR_MESSAGE: if (b == 3) show(SCR_LAUNCHER); break;
-    case SCR_CALL: phone_soft(b); break;
+    case SCR_CALL: shell_hold_redraw(1); phone_soft(b); shell_hold_redraw(0); break;
     case SCR_HISTORY: phone_history_soft(b); break;
     case SCR_SETTINGS: settings_soft(b); break;
     case SCR_CONTACTS: contacts_soft(b); break;
@@ -797,7 +807,9 @@ void shell_key(int code, int down)
     if (backlight_key(code, down)) return;   /* it woke a dark screen, and that is all it does */
     if (code >= SK_VOLDOWN) {
         /* phone keys stay with the shell, whatever is on the screen */
+        shell_hold_redraw(1);
         phone_key(code, down);
+        shell_hold_redraw(0);
         return;
     }
     if (code >= SK_SOFT1 && code <= SK_SOFT4) {
@@ -833,7 +845,10 @@ void shell_key(int code, int down)
             settings_open(0);
             show(SCR_SETTINGS);
         } else if (down) {
-            phone_idle_key(code);   /* a digit starts the dialler */
+            /* a digit starts the dialler: one picture of it with the digit in, not one without first */
+            shell_hold_redraw(1);
+            phone_idle_key(code);
+            shell_hold_redraw(0);
         }
         break;
     case SCR_LAUNCHER:
@@ -843,7 +858,10 @@ void shell_key(int code, int down)
         if (down && (code == T48_KEY_OK || code == T48_KEY_BACK)) show(SCR_LAUNCHER);
         break;
     case SCR_CALL:
+        /* one picture for what the key did, however many things it changed */
+        shell_hold_redraw(1);
         phone_key(code, down);
+        shell_hold_redraw(0);
         break;
     case SCR_HISTORY:
         if (down) phone_history_key(code);
@@ -890,11 +908,14 @@ void shell_touch(int state, int x, int y)
     if (scr != SCR_CALL && watch_touch(state, x, y)) return;
     if (scr == SCR_SETTINGS) { settings_touch(state, x, y); return; }
     if (scr == SCR_CONTACTS) { contacts_touch(state, x, y); return; }
+    if (scr == SCR_CALL && state == T48_TOUCH_UP) { phone_touch_up(); return; }   /* a 0 held for + */
     if (state != T48_TOUCH_DOWN) return;
     if ((scr == SCR_LAUNCHER || scr == SCR_HISTORY) && y < HEAD_H && x < 130) {
         shell_key(T48_KEY_BACK, 1);   /* the way back in the header */
     } else if (scr == SCR_CALL) {
+        shell_hold_redraw(1);
         phone_touch(x, y);
+        shell_hold_redraw(0);
     } else if (scr == SCR_HISTORY) {
         phone_history_touch(x, y);
     } else if (scr == SCR_IDLE && idle_touched(x, y)) {
@@ -941,7 +962,9 @@ void shell_touch(int state, int x, int y)
 void shell_hook(int off_hook)
 {
     backlight_wake("the handset");
+    shell_hold_redraw(1);
     phone_hook(off_hook);
+    shell_hold_redraw(0);
 }
 
 /* ---------- the phone takes the screen, and gives it back ---------- */
@@ -968,9 +991,39 @@ void shell_phone_screen(int want)
     }
 }
 
+void shell_hold_redraw(int on)
+{
+    redraw_held += on ? 1 : -1;   /* held twice over: drawn when the outer hold ends */
+    if (redraw_held > 0) return;
+    redraw_held = 0;
+    if (redraw_owed) redraw();
+    else if (part_owed.draw) {
+        void (*draw)(void) = part_owed.draw;
+        part_owed.draw = NULL;
+        shell_phone_part(draw, part_owed.x, part_owed.y, part_owed.w, part_owed.h);
+    }
+}
+
 void shell_phone_changed(void)
 {
     if (scr != SCR_APP) redraw();
+}
+
+/* One part of the call screen has changed and nothing else: draw that part over the picture the screen
+ * already has, and send only its rectangle. 0 if the call screen is not showing, and nothing was done. */
+int shell_phone_part(void (*draw)(void), int x, int y, int w, int h)
+{
+    if (scr != SCR_CALL) return 0;
+    if (redraw_held) {
+        /* two parts owed: the whole screen, as they may differ */
+        if (part_owed.draw && part_owed.draw != draw) redraw_owed = 1;
+        part_owed.draw = draw;
+        part_owed.x = x; part_owed.y = y; part_owed.w = w; part_owed.h = h;
+        return 1;
+    }
+    draw();
+    be->flush(ui_px, SW, SW, SH, x, y, w, h);
+    return 1;
 }
 
 void shell_show_history(int on)

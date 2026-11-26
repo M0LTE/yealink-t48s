@@ -27,6 +27,7 @@
 #include <time.h>
 #include "shell.h"
 #include "dialplan.h"
+#include "names.h"
 
 enum ph { PH_IDLE, PH_DIAL, PH_OUTGOING, PH_INCOMING, PH_INCALL, PH_ENDED };
 static const char *const ph_names[] = {"idle", "dial", "outgoing", "incoming", "incall", "ended"};
@@ -47,6 +48,7 @@ enum reg { REG_NONE, REG_TRYING, REG_OK, REG_FAIL };
 #define MAX_ACCTS T48_ACCOUNTS
 #define MAX_REDIRECTS 3        /* a call out forwarded more often than this is given up: a loop */
 #define FWD_AFTER_DEF 20       /* seconds a call rings before No answer forwarding, unless the account says */
+#define PLUS_MS 600            /* 0 held this long as the first digit becomes +, as on a mobile */
 
 /* one call, as baresip has it */
 struct call {
@@ -79,6 +81,7 @@ static struct {
     int parked;                /* the call is on hold because the handset went down with nowhere for the sound to go */
     int dial_acct;             /* the account the next call goes out from */
     long long auto_at;         /* the dialler calls the number by itself at this time; 0: it will not */
+    long long plus_at;         /* the 0 being held becomes + at this time; 0: none is held */
     int dnd;                   /* do not disturb */
     int ringtone;              /* T48AC_RINGTONE_* of the call ringing now */
     int drop_next_out;         /* baresip is about to follow a forward we gave up on: hang that call up */
@@ -109,6 +112,7 @@ struct acct {
     int used;                  /* has a user and a domain */
     int on;                    /* used, and not switched off */
     char user[64], domain[64], label[32], voicemail[40];
+    char name[ACCT_NAME_MAX];  /* what the screens call it: its label, or its domain made short (names.c) */
     int inband;                /* DTMF as tones in the audio, made by t48audio (issue #77) */
     int keys_safe;             /* SRTP keys never travel in clear: SDES over TLS, or DTLS-SRTP (issue #78) */
     char aor[140];             /* "sip:user@domain", as baresip names it */
@@ -213,11 +217,11 @@ static int accts_on(void)
     return n;
 }
 
-/* what the owner calls an account: its label, or its user */
+/* what the owner calls an account: its label, or the short form of its domain */
 static const char *acct_label(int i)
 {
     if (i < 0 || i >= MAX_ACCTS || !A[i].used) return "";
-    return A[i].label[0] ? A[i].label : A[i].user;
+    return A[i].name;
 }
 
 /* the account baresip means by "sip:user@domain;..." */
@@ -272,6 +276,14 @@ static void load_accounts(void)
             a->msgs = was.msgs;
             snprintf(a->why, sizeof a->why, "%s", was.why);
         }
+    }
+    /* names for the screens, worked out together so that two the same can be told apart */
+    {
+        const char *u[MAX_ACCTS], *h[MAX_ACCTS], *l[MAX_ACCTS];
+        char names[MAX_ACCTS][ACCT_NAME_MAX];
+        for (int i = 0; i < MAX_ACCTS; i++) { u[i] = A[i].used ? A[i].user : ""; h[i] = A[i].domain; l[i] = A[i].label; }
+        acct_names(MAX_ACCTS, u, h, l, names);
+        for (int i = 0; i < MAX_ACCTS; i++) memcpy(A[i].name, names[i], ACCT_NAME_MAX);
     }
     def_acct = atoi(cfg_str("phone", "default_account", "1")) - 1;
     if (def_acct < 0 || def_acct >= MAX_ACCTS || !A[def_acct].on) {
@@ -660,19 +672,19 @@ static void established(void)
 
 static void call_closed(const char *why)
 {
-    int code = atoi(why);
     if (P.st == PH_INCOMING) { finish("Missed call", NULL, T48AC_TONE_OFF); return; }
     if (P.st == PH_INCALL) {
         finish(strstr(why, "ransfer") ? "Transferred" : "Call ended", NULL, T48AC_TONE_OFF);
         return;
     }
-    /* an outgoing call that never connected */
-    if (P.c.redirects > MAX_REDIRECTS) finish("Call failed", "Forwarded too often", T48AC_TONE_ERROR);
-    else if (code == 486 || code == 600) finish("Busy", NULL, T48AC_TONE_BUSY);
-    else if (code == 404 || code == 604) finish("Not found", why, T48AC_TONE_ERROR);
-    else if (code == 408 || code == 480) finish("No answer", why, T48AC_TONE_BUSY);
-    else if (code == 603) finish("Declined", NULL, T48AC_TONE_BUSY);
-    else finish("Call failed", why, T48AC_TONE_ERROR);
+    /* An outgoing call that never connected. The far end's words stay in the log; the screen
+     * says what they mean, and the status where it is a fault worth quoting. */
+    if (P.c.redirects > MAX_REDIRECTS) { finish("Call failed", "Forwarded too often", T48AC_TONE_ERROR); return; }
+    char reason[40], status[16] = "";
+    int sip, cause, busy = call_fail_reason(why, reason, sizeof reason, &sip, &cause);
+    logmsg("phone: call failed: %.200s", why[0] ? why : "no reason given");
+    if (!busy && sip >= 300 && sip < 700) snprintf(status, sizeof status, "%d", sip);
+    finish(reason, status[0] ? status : NULL, busy ? T48AC_TONE_BUSY : T48AC_TONE_ERROR);
 }
 
 /* ---------- two calls ---------- */
@@ -1078,11 +1090,30 @@ void phone_audio_state(void) {}
 
 /* ---------- keys ---------- */
 
+static void auto_check(int later);
+static void dial_refresh(void);
+
 static void type_char(int ch)
 {
     size_t k = strlen(P.number);
     if (k + 1 < sizeof P.number && k < 40) { P.number[k] = (char)ch; P.number[k + 1] = 0; }
     audioc_key(ch);
+    /* + is a 0 held down, and only as the first character */
+    P.plus_at = !strcmp(P.number, "0") ? t48_now_ms() + PLUS_MS : 0;
+}
+
+/* the 0 was let go before it became + */
+static void plus_up(void) { P.plus_at = 0; }
+
+/* the 0 has been held long enough: + in its place */
+static void plus_now(void)
+{
+    P.plus_at = 0;
+    if ((P.st != PH_DIAL && !(P.st == PH_INCALL && P.xfer)) || strcmp(P.number, "0")) return;
+    snprintf(P.number, sizeof P.number, "+");
+    logmsg("phone: 0 held: +");
+    if (P.st == PH_DIAL) { auto_check(1); dial_refresh(); }
+    else changed();
 }
 
 static void do_transfer(void)
@@ -1286,7 +1317,8 @@ static int hash_is_call(void)
 void phone_key(int code, int down)
 {
     int digit = (code >= '0' && code <= '9') || code == T48_KEY_STAR || code == T48_KEY_HASH;
-    if (!down) return;
+    int number_only = 0;       /* the key changed the dialler's number and nothing else on the screen */
+    if (!down) { if (code == '0') plus_up(); return; }
     switch (code) {
     case SK_SPEAKER: route_key(T48AC_ROUTE_SPEAKER); break;
     case SK_HEADSET: route_key(T48AC_ROUTE_HEADSET); break;
@@ -1312,6 +1344,7 @@ void phone_key(int code, int down)
                 dial_now();
             } else if (digit) {
                 if (!P.number[0]) set_tone(T48AC_TONE_OFF);
+                else number_only = 1;
                 type_char(code);
                 auto_check(0);
             } else if (code == T48_KEY_OK) {
@@ -1322,6 +1355,7 @@ void phone_key(int code, int down)
             } else if (code == T48_KEY_BACK) {
                 if (P.number[0]) {
                     delete_char();
+                    number_only = 1;
                     auto_check(1);
                     if (!P.number[0] && P.route != T48AC_ROUTE_NONE) set_tone(T48AC_TONE_DIAL);
                 } else {
@@ -1366,7 +1400,8 @@ void phone_key(int code, int down)
         }
     }
     update_lamps();
-    changed();
+    if (number_only) dial_refresh();
+    else changed();
 }
 
 /* The key test wants the screen. A dialler goes, with whatever has been typed in it, if the handset is
@@ -1465,6 +1500,7 @@ int phone_timeout(long long now)
     if (P.st == PH_INCALL && (t < 0 || t > 250)) t = 250;   /* the call timer */
     if (P.st == PH_INCOMING && P.c.fwd_at && (t < 0 || P.c.fwd_at - now < t)) t = P.c.fwd_at - now;
     if (P.o_st == O_WAITING && P.o.fwd_at && (t < 0 || P.o.fwd_at - now < t)) t = P.o.fwd_at - now;
+    if (P.plus_at && (t < 0 || P.plus_at - now < t)) t = P.plus_at > now ? P.plus_at - now : 0;
     if (P.auto_at) {
         /* the dialler counts down: the next whole second, or the call */
         long long left = P.auto_at - now, next = left % 1000 ? left % 1000 : 1000;
@@ -1480,6 +1516,7 @@ void phone_tick(long long now)
     static long long shown_secs = -1;
 
     if (P.st == PH_ENDED && now >= P.t_state + P.ended_ms) go_idle();
+    if (P.plus_at && now >= P.plus_at) plus_now();
     /* No answer forwarding */
     if (P.st == PH_INCOMING && P.c.fwd_at && now >= P.c.fwd_at && P.c.id[0]) forward_cur(A[P.c.acct].fwd_noanswer);
     if (P.o_st == O_WAITING && P.o.fwd_at && now >= P.o.fwd_at) { forward_waiting(A[P.o.acct].fwd_noanswer); update_lamps(); changed(); }
@@ -1504,7 +1541,7 @@ void phone_tick(long long now)
             changed();
         } else if (left != shown_left) {
             shown_left = left;
-            changed();
+            dial_refresh();
         }
     }
 }
@@ -1547,11 +1584,15 @@ static const char kp_chars[] = "123456789*0#";
 #define BAN_Y 258          /* in a call: the line about the second call */
 #define BAN_H 46
 
-static void keypad_draw(void)
+/* plus: the 0 key says that holding it gives +, where a number is being typed rather than tones sent */
+static void keypad_draw(int plus)
 {
     for (int i = 0; i < 12; i++) {
         char k[2] = {kp_chars[i], 0};
-        ui_key(KP_X + (i % 3) * (KP_W + KP_GAP), KP_Y + (i / 3) * (KP_H + KP_GAP), KP_W, KP_H, k);
+        int x = KP_X + (i % 3) * (KP_W + KP_GAP), y = KP_Y + (i / 3) * (KP_H + KP_GAP);
+        ui_key(x, y, KP_W, KP_H, k);
+        if (plus && kp_chars[i] == '0')
+            t48_text(&ui, x + KP_W / 2 + 16, y + (KP_H - t48_font_big.height) / 2, &t48_font_bold, t48_mix(T->on_key, T->key, 150), "+");
     }
 }
 
@@ -1595,14 +1636,24 @@ static void big_text(int cx, int y, int maxw, const char *s, uint32_t c)
     t48_text_centre(&ui, cx, y, f, c, s);
 }
 
+/* a line that must be read whole, such as why a call failed: the largest type it fits in, never cut */
+static void whole_text(int cx, int y, int maxw, const char *s, uint32_t c)
+{
+    const t48_font *f = &t48_font_big;
+    if (t48_text_width(f, s) > maxw) { f = &t48_font_head; y += 8; }
+    if (t48_text_width(f, s) > maxw) { f = &t48_font_bold; y += 4; }
+    t48_text_centre(&ui, cx, y, f, c, s);
+}
+
 static const char *who(void) { return call_who(&P.c); }
 
-/* "Work (1004@example.com)", or just the address if the account has no label */
+/* "Work (1004@example.com)"; with no label, the short name alone, as a long random user and
+ * host would only be cut off */
 static void acct_text(int i, char *out, size_t n)
 {
     if (i < 0 || i >= MAX_ACCTS || !A[i].used) { snprintf(out, n, "?"); return; }
     if (A[i].label[0]) snprintf(out, n, "%s (%s@%s)", A[i].label, A[i].user, A[i].domain);
-    else snprintf(out, n, "%s@%s", A[i].user, A[i].domain);
+    else snprintf(out, n, "%s", A[i].name);
 }
 
 /* ---------- the same screens on a small one (480x272): no keypad to touch, as the phone's own is
@@ -1610,9 +1661,17 @@ static void acct_text(int i, char *out, size_t n)
 
 #define SM 12   /* the margin */
 
-static void draw_dial_small(void)
+/* The part of the dialler a key changes: the number, the name it belongs to, the tags and the
+ * countdown. Drawn alone, on its own ground, when nothing else has changed (dial_refresh). */
+#define DT_SMALL_Y 36
+#define DT_SMALL_H (148 - DT_SMALL_Y)
+#define DT_Y (KP_Y - 4)
+#define DT_W (KP_X - 8)
+#define DT_H (FROM_Y - 4 - DT_Y)
+
+static void draw_dial_top_small(void)
 {
-    ui_header("Dial", 0, 0);
+    t48_fill(&ui, 0, DT_SMALL_Y, SW, DT_SMALL_H, C_BG);
     ui_panel(SM, 38, SW - 2 * SM, 70);
     if (P.number[0]) {
         const char *n = contacts_name(P.number);
@@ -1624,6 +1683,40 @@ static void draw_dial_small(void)
     chips(-1, SM, 116);
     if (!sipc_connected()) t48_text_right(&ui, SW - SM, 117, &t48_font_normal, C_BAD, "No service");
     else if (P.auto_at) t48_text_right(&ui, SW - SM, 117, &t48_font_normal, C_DIM, auto_text());
+}
+
+static void draw_dial_top(void)
+{
+    if (SMALL) { draw_dial_top_small(); return; }
+    t48_fill(&ui, 0, DT_Y, DT_W, DT_H, C_BG);
+    ui_panel(24, KP_Y, 448, 110);
+    if (P.number[0]) {
+        const char *n = contacts_name(P.number);
+        big_text(248, KP_Y + (n ? 18 : 30), 420, P.number, C_TEXT);
+        if (n) t48_text_centre(&ui, 248, KP_Y + 74, &t48_font_normal, C_DIM, n);
+    } else {
+        t48_text_centre(&ui, 248, KP_Y + 40, &t48_font_head, C_FAINT, "Number");
+    }
+    chips(-1, 24, KP_Y + 126);
+    if (P.auto_at) t48_text_right(&ui, 472, KP_Y + 127, &t48_font_normal, C_DIM, auto_text());
+    if (!sipc_connected()) t48_text(&ui, 28, KP_Y + 182, &t48_font_normal, C_BAD, "No service");
+}
+
+/* After a key that changed only the number (and so the countdown), on a screen that already shows
+ * the dialler with a number in it: that part alone, drawn and sent to the screen. A whole screen
+ * costs 29 ms on the phone, most of it filling and copying the 1.5 MB picture; this part 8 ms (docs/phone.md, Speed). */
+static void dial_refresh(void)
+{
+    inband_follow();
+    if (P.st != PH_DIAL || !P.number[0] || P.vol_until ||
+        !shell_phone_part(draw_dial_top, 0, SMALL ? DT_SMALL_Y : DT_Y, SMALL ? SW : DT_W, SMALL ? DT_SMALL_H : DT_H))
+        shell_phone_changed();
+}
+
+static void draw_dial_small(void)
+{
+    ui_header("Dial", 0, 0);
+    draw_dial_top_small();
     if (accts_on() > 1) {
         char b[120], a[100];
         enum reg r = A[P.dial_acct].reg;
@@ -1717,7 +1810,7 @@ static void draw_incall_small(void)
 static void draw_ended_small(void)
 {
     ui_header("Call", 0, 0);
-    big_text(SW / 2, 62, SW - 32, P.ended, C_TEXT);
+    whole_text(SW / 2, 62, SW - 32, P.ended, C_TEXT);
     if (hist[0].number[0] && nhist) {
         const char *n = hist_name(&hist[0]);
         t48_text_centre(&ui, SW / 2, 122, t48_text_width(&t48_font_head, n) > SW - 24 ? &t48_font_normal : &t48_font_head, C_DIM, n);
@@ -1774,17 +1867,7 @@ static void draw_dial(void)
 {
     if (SMALL) { draw_dial_small(); return; }
     ui_header("Dial", 0, 0);
-    ui_panel(24, KP_Y, 448, 110);
-    if (P.number[0]) {
-        const char *n = contacts_name(P.number);
-        big_text(248, KP_Y + (n ? 18 : 30), 420, P.number, C_TEXT);
-        if (n) t48_text_centre(&ui, 248, KP_Y + 74, &t48_font_normal, C_DIM, n);
-    } else {
-        t48_text_centre(&ui, 248, KP_Y + 40, &t48_font_head, C_FAINT, "Number");
-    }
-    chips(-1, 24, KP_Y + 126);
-    if (P.auto_at) t48_text_right(&ui, 472, KP_Y + 127, &t48_font_normal, C_DIM, auto_text());
-    if (!sipc_connected()) t48_text(&ui, 28, KP_Y + 182, &t48_font_normal, C_BAD, "No service");
+    draw_dial_top();
     if (accts_on() > 1) {
         char b[120], a[100];
         enum reg r = A[P.dial_acct].reg;
@@ -1797,7 +1880,7 @@ static void draw_dial(void)
         ui_chevron(424, FROM_Y + FROM_H / 2, 7, -1, 3, ink.dim);
         ui_chevron(448, FROM_Y + FROM_H / 2, 7, 1, 3, ink.dim);
     }
-    keypad_draw();
+    keypad_draw(1);
     ui_btn(24, ROW_Y, 216, ROW_H, "Call", P.number[0] ? B_GO : B_OFF);
     ui_btn(252, ROW_Y, 108, ROW_H, "<x", P.number[0] ? B_PLAIN : B_OFF);
     ui_btn(372, ROW_Y, 100, ROW_H, "Cancel", B_PLAIN);
@@ -1896,7 +1979,7 @@ static void draw_incall(void)
         if (P.c.name[0]) t48_text_centre(&ui, cx, 112, &t48_font_normal, C_DIM, P.c.peer);
         t48_text_centre(&ui, cx, 142, &t48_font_huge, P.c.held ? C_DIM : C_TEXT, t);
     }
-    if (side) keypad_draw();
+    if (side) keypad_draw(P.xfer);
     if (P.o_st && !P.xfer) {
         draw_banner(side);
         if (P.note[0]) t48_text_centre(&ui, cx, 362, &t48_font_small, C_DIM, P.note);
@@ -1925,7 +2008,7 @@ static void draw_ended(void)
 {
     if (SMALL) { draw_ended_small(); return; }
     ui_header("Call", 0, 0);
-    t48_text_centre(&ui, SW / 2, 120, &t48_font_big, C_TEXT, P.ended);
+    whole_text(SW / 2, 120, SW - 48, P.ended, C_TEXT);
     if (hist[0].number[0] && nhist) t48_text_centre(&ui, SW / 2, 196, &t48_font_head, C_DIM, hist_name(&hist[0]));
     if (P.ended_detail[0]) t48_text_centre(&ui, SW / 2, 250, &t48_font_normal, C_DIM, P.ended_detail);
 }
@@ -1959,6 +2042,9 @@ void phone_draw_overlay(void)
     for (int i = 0; i < T48AC_VOL_MAX; i++)
         t48_fill(&ui, x + 20 + i * step, y + 46, step - 4, 14, i < v ? ink.text : t48_mix(ink.text, ui_ground(), 200));
 }
+
+/* a finger lifted: a 0 held on the keypad is let go */
+void phone_touch_up(void) { plus_up(); }
 
 void phone_touch(int x, int y)
 {
@@ -2245,7 +2331,7 @@ void phone_account_text(char *out, size_t n, uint32_t *colour)
 {
     char acc[140];
     *colour = C_DIM;
-    if (A[def_acct].used) snprintf(acc, sizeof acc, "%s@%s", A[def_acct].user, A[def_acct].domain);
+    if (A[def_acct].used) snprintf(acc, sizeof acc, "%s", A[def_acct].name);
     else snprintf(acc, sizeof acc, "Account");
     if (!opt.sip || !sipc_connected()) { snprintf(out, n, "No service"); *colour = C_BAD; }
     else if (!A[def_acct].on || A[def_acct].reg == REG_NONE) snprintf(out, n, "No account");
@@ -2304,6 +2390,7 @@ const char *phone_state(const char *key)
     if (!strcmp(key, "name")) { snprintf(b, sizeof b, "%s", P.c.name); return under(b); }
     if (!strcmp(key, "dtmf")) return P.c.dtmf[0] ? P.c.dtmf : "-";
     if (!strcmp(key, "ended")) { snprintf(b, sizeof b, "%s", P.ended); return under(b); }
+    if (!strcmp(key, "ended.detail")) { snprintf(b, sizeof b, "%s", P.ended_detail); return under(b); }
     if (!strcmp(key, "note")) { snprintf(b, sizeof b, "%s", P.note); return under(b); }
     /* the second call */
     if (!strcmp(key, "other")) return other_names[P.o_st];
@@ -2321,6 +2408,9 @@ const char *phone_state(const char *key)
         return A[i].reg == REG_OK ? "ok" : A[i].reg == REG_FAIL ? "fail" : A[i].reg == REG_TRYING ? "trying" : "none";
     }
     if (!strcmp(key, "accounts")) { snprintf(b, sizeof b, "%d", accts_on()); return b; }
+    /* what the screens call account N, and the status bar's line */
+    if (!strncmp(key, "acct.name.", 10)) { snprintf(b, sizeof b, "%s", acct_label(atoi(key + 10) - 1)); return under(b); }
+    if (!strcmp(key, "acct.line")) { uint32_t c; phone_account_text(b, sizeof b, &c); return under(b); }
     if (!strcmp(key, "acct.default")) { snprintf(b, sizeof b, "%d", def_acct + 1); return b; }
     if (!strcmp(key, "acct")) {
         snprintf(b, sizeof b, "%d", (P.st == PH_IDLE || P.st == PH_DIAL || P.st == PH_ENDED ? P.dial_acct : P.c.acct) + 1);

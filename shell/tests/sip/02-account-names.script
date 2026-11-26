@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Accounts with no Account name are called by their provider's domain, not by a long random user at a
+# long host; two that would read the same get the start of their users; an Account name still wins.
+wait 300
+waitstate reg ok 3000
+expectstate acct.name.1 example.org
+expectstate acct.line example.org
+run ./t48-config --config simdata/config set sip user Xq7rT2mLp9
+run ./t48-config --config simdata/config set sip domain edge2-tls.prod.example.net
+run ./t48-config --config simdata/config set sip2 user Bv3kW8nQz1
+run ./t48-config --config simdata/config set sip2 domain sip.example.net
+run ./t48-config --config simdata/config set sip3 user 1001
+run ./t48-config --config simdata/config set sip3 domain voip.example.co.uk
+waitstate accounts 3 3000
+wait 1000
+run sh -c "echo register sip:Xq7rT2mLp9@edge2-tls.prod.example.net > simdata/sip.sock.cmd"
+wait 300
+run sh -c "echo register sip:Bv3kW8nQz1@sip.example.net > simdata/sip.sock.cmd"
+wait 300
+run sh -c "echo register sip:1001@voip.example.co.uk > simdata/sip.sock.cmd"
+waitstate reg.3 ok 3000
+waitstate reg.2 ok 3000
+waitstate reg.1 ok 3000
+expectstate acct.name.1 example.net_(Xq7r)
+expectstate acct.name.2 example.net_(Bv3k)
+expectstate acct.name.3 example.co.uk
+expectstate acct.line example.net_(Xq7r)
+wait 200
+shot shots/idle-account-names.png
+# the dialler's From line
+key 5
+expectstate phone dial
+wait 200
+shot shots/dial-account-names.png
+key x
+key x
+waitstate phone idle 3000
+# Settings, Accounts lists them the same way
+key down
+expect settings
+expectstate settings.row Accounts
+expectstate settings.value example.net_(Xq7r)_+2
+key ok
+expectstate settings.value example.net_(Xq7r)
+key down
+expectstate settings.value example.net_(Bv3k)
+key down
+expectstate settings.value example.co.uk
+key x
+key x
+expect idle
+# an Account name wins, and the other no longer needs its user
+run ./t48-config --config simdata/config set sip2 label Home
+waitstate acct.name.2 Home 3000
+expectstate acct.name.1 example.net
+expectstate acct.line example.net
+quit

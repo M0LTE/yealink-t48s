@@ -803,7 +803,7 @@ class Paired(unittest.TestCase):
         self.ok("/accounts/save", dict(base, forward_always="on", forward_always_to="1009"), "/accounts")
         self.assertIn("<span class='pill good'>On</span>" + pill + "</summary>", b.get("/accounts").body)
         self.assertNotIn("</span><span class='sum dim'>Not set", b.get("/accounts").body)
-        self.assertRegex(b.get("/").body, "1005@pbx.example.org +" + pill)
+        self.assertRegex(b.get("/").body, r"example.org \(1005\) +" + pill)
         p.set("sip5", "forward_always_to", "1005@pbx.example.org")   # by hand: the page refuses it, and the phone ignores it
         self.assertNotIn(pill, b.get("/").body)
         self.ok("/accounts/save", dict(base, forward_busy="on", forward_busy_to="1009"), "/accounts")
@@ -838,6 +838,25 @@ class Paired(unittest.TestCase):
         self.ok("/accounts/save", dict(base, srtp="off"), "/accounts")
         self.assertIsNone(p.get("sip3", "srtp"))
         self.ok("/accounts/remove", {"n": "3", "sure": "yes"}, "/accounts")
+
+    def test_17_account_names(self):
+        # an account with no Account name is called by its domain, as on the phone (shell/names.c)
+        b, p = self.b, self.p
+        self.ok("/accounts/save", {"n": "7", "user": "Xq7rT2mLp9", "domain": "edge2-tls.prod.example.net", "transport": "tls", "enabled": "on"}, "/accounts")
+        self.ok("/accounts/save", {"n": "8", "user": "Bv3kW8nQz1", "domain": "sip.example.net", "transport": "tls", "enabled": "on"}, "/accounts")
+        home, page = b.get("/").body, b.get("/accounts").body
+        for name in ("example.net (Xq7r)", "example.net (Bv3k)"):
+            self.assertIn("<p>" + name, home)
+            self.assertIn("<span class='sum'>" + name + "</span>", page)
+            self.assertRegex(page, "<option value='[78]'>[78]: " + re.escape(name) + "</option>")
+        self.assertNotIn("edge2-tls", home)
+        # the Account name wins, and the other no longer needs its user
+        p.set("sip8", "label", "Home")
+        home = b.get("/").body
+        self.assertIn("<p>Home", home)
+        self.assertIn("<p>example.net<", home)
+        for n in ("7", "8"):
+            self.ok("/accounts/remove", {"n": n, "sure": "yes"}, "/accounts")
 
     def test_16_certificates(self):
         # root certificates for SIP over TLS: added, listed, removed; hostile files refused and nothing kept (issue #78)

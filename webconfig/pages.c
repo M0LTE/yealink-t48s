@@ -21,6 +21,7 @@
 #include "web.h"
 #include "dialplan.h"
 #include "certs.h"
+#include "names.h"
 #include "zones.h"
 
 #ifndef T48_VERSION
@@ -200,6 +201,25 @@ static const char *contact_name(const char *number)
 
 static int account_used(int n) { return val(sip_file(n), "user", "")[0] && val(sip_file(n), "domain", "")[0]; }
 
+/* What the phone calls each account (shell/names.c): its Account name, or its domain made short.
+ * names_load() reads them for a page; acct_name(n), 1 to 16, is one of them. */
+static char names[MAX_ACCTS][ACCT_NAME_MAX];
+
+static void names_load(void)
+{
+    static char user[MAX_ACCTS][64], host[MAX_ACCTS][64], label[MAX_ACCTS][40];
+    const char *u[MAX_ACCTS], *h[MAX_ACCTS], *l[MAX_ACCTS];
+    for (int i = 0; i < MAX_ACCTS; i++) {
+        snprintf(user[i], sizeof user[i], "%s", account_used(i + 1) ? val(sip_file(i + 1), "user", "") : "");
+        snprintf(host[i], sizeof host[i], "%s", val(sip_file(i + 1), "domain", ""));
+        snprintf(label[i], sizeof label[i], "%s", val(sip_file(i + 1), "label", ""));
+        u[i] = user[i]; h[i] = host[i]; l[i] = label[i];
+    }
+    acct_names(MAX_ACCTS, u, h, l, names);
+}
+
+static const char *acct_name(int n) { return n >= 1 && n <= MAX_ACCTS ? names[n - 1] : ""; }
+
 static int account_on(int n)
 {
     const char *v = val(sip_file(n), "enabled", "on");
@@ -223,6 +243,7 @@ static int history_count(void)
     char path[300];
     int n = 0;
     snprintf(path, sizeof path, "%s/history", opt.state);
+    names_load();
     char *t = load_file(path, 64 * 1024);
     for (char *p = t; p && *p; p = strchr(p, '\n'), p = p ? p + 1 : NULL)
         if (strncmp(p, "seen ", 5) && strchr(p, '|')) n++;
@@ -264,15 +285,14 @@ void page_overview(struct req *r)
     int used = 0;
 
     page_begin(r, "Overview", "/");
+    names_load();
     H("<div class='grid'>");
 
     H("<a class='card tile' href='/accounts'><h2>Accounts</h2>");
     for (int n = 1; n <= MAX_ACCTS; n++) {
         if (!account_used(n)) continue;
-        const char *label = val(sip_file(n), "label", "");
         used++;
-        H("<p>%s@%s %r%s%r%r%r</p>", val(sip_file(n), "user", ""), val(sip_file(n), "domain", ""), label[0] ? "<span class='dim'>" : "", label,
-          label[0] ? "</span>" : "", account_on(n) ? "" : " <span class='pill'>Off</span>", forwarding(n) ? " <span class='pill warn'>Forwarding</span>" : "");
+        H("<p>%s%r%r</p>", acct_name(n), account_on(n) ? "" : " <span class='pill'>Off</span>", forwarding(n) ? " <span class='pill warn'>Forwarding</span>" : "");
     }
     if (!used) H("<p class='dim'>None</p>");
     if (dnd_on()) H("<p><span class='pill warn'>Do not disturb</span></p>");
@@ -488,6 +508,7 @@ static void page_accounts(struct req *r)
 {
     int used = 0, def = atoi(val("phone", "default_account", "1"));
     page_begin(r, "Accounts", "/accounts");
+    names_load();
     int dnd = dnd_on();
     H("<div class='card' id='dnd'><div class='apphead'><h2>Do not disturb</h2><span class='pill %r'>%r</span></div>", dnd ? "warn" : "", dnd ? "On" : "Off");
     form_begin(r, "/accounts/dnd", NULL);
@@ -500,7 +521,7 @@ static void page_accounts(struct req *r)
         H("<label class='field'><span>Default account</span><select name='n'>");
         for (int n = 1; n <= MAX_ACCTS; n++)
             if (account_on(n))
-                H("<option value='%d'%r>%d: %s@%s</option>", n, n == def ? " selected" : "", n, val(sip_file(n), "user", ""), val(sip_file(n), "domain", ""));
+                H("<option value='%d'%r>%d: %s</option>", n, n == def ? " selected" : "", n, acct_name(n));
         H("</select></label><button type='submit'>Save</button></form></div>");
     }
     /* the accounts that are set, and the first that is not, to add one (as the phone lists them) */
@@ -513,7 +534,7 @@ static void page_accounts(struct req *r)
         if (!has && spare++) continue;
         H("<details class='card' id='a%d'%r><summary><h2>Account %d</h2>", n, has || n == 1 ? " open" : "", n);
         if (account_used(n))
-            H("<span class='sum'>%s@%s</span><span class='pill %r'>%r</span>%r", val(f, "user", ""), val(f, "domain", ""), account_on(n) ? "good" : "",
+            H("<span class='sum'>%s</span><span class='pill %r'>%r</span>%r", acct_name(n), account_on(n) ? "good" : "",
               account_on(n) ? "On" : "Off", forwarding(n) ? "<span class='pill warn'>Forwarding</span>" : "");
         else H("<span class='sum dim'>Not set</span>");
         H("</summary>");
@@ -1283,8 +1304,7 @@ static void page_history(struct req *r)
         H("<tr><td>%s</td><td><span class='pill %r'>%r</span></td><td>%s%r<span class='mono'>%s</span></td><td>%s</td><td>",
           when, k == 'm' ? "bad" : k == 'o' ? "" : "good", k == 'm' ? "Missed" : k == 'o' ? "Out" : "In", name, name[0] ? " " : "", fld[3], len);
         if (acct >= 1 && acct <= MAX_ACCTS) {
-            const char *label = val(sip_file(acct), "label", "");
-            H("%s", label[0] ? label : val(sip_file(acct), "user", ""));
+            H("%s", acct_name(acct));
         }
         H("</td></tr>");
     }

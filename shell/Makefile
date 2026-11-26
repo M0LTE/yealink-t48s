@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # t48-shell and the PC simulator (the same program). Plain make.
 #   make            for this PC: build/t48-shell, build/t48-sim
-#   make check      run the simulator tests (pictures land in build/shots/; the T46S's are t46s-*.png); the last one needs ../audiod built too
+#   make check      run the simulator tests (pictures land in build/shots/; the T46S's are t46s-*.png); the last one needs ../audiod built too.
+#                   tests/small/ run as a T46S and tests/sip/ as a T48S, both with tests/small/fakesip.py for baresip
 #   make CC=~/src-build/t48s/bin/armcc O=build-arm     for the phone (static, musl)
 #   make LIB=/path/to/libt48.a $(O)/t48-shell   against an installed libt48 (Buildroot)
 CC ?= cc
@@ -11,7 +12,7 @@ CFLAGS ?= -O2
 AUDIOD_INCLUDE ?= ../audiod/include
 CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections -I../libt48/include -I$(AUDIOD_INCLUDE)
 LIB ?= ../libt48/$(O)/libt48.a
-SRC = main.c ui.c fit.c app.c manifest.c phone.c contacts.c sipc.c audioc.c leds.c backlight.c be_fb.c be_sim.c config.c settings.c pkg.c watch.c keytest.c dialplan.c certs.c
+SRC = main.c ui.c fit.c app.c manifest.c phone.c contacts.c sipc.c audioc.c leds.c backlight.c be_fb.c be_sim.c config.c settings.c pkg.c watch.c keytest.c dialplan.c certs.c names.c
 # what About shows; Buildroot passes it in, as its copy of the source has no git
 T48_VERSION ?= $(shell git describe --always --dirty 2>/dev/null)
 ifneq ($(T48_VERSION),)
@@ -26,7 +27,7 @@ $(LIB): FORCE
 	$(MAKE) -C ../libt48 CC="$(CC)" O=$(O)
 endif
 
-$(O)/t48-shell: $(SRC) shell.h zones.h dialplan.h certs.h $(LIB)
+$(O)/t48-shell: $(SRC) shell.h zones.h dialplan.h certs.h names.h $(LIB)
 	@mkdir -p $(O)
 	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@ $(SRC) $(LIB)
 
@@ -80,9 +81,15 @@ $(O)/test_certs: tests/test_certs.c certs.c certs.h
 	@mkdir -p $(O)
 	$(CC) $(CFLAGS) -o $@ tests/test_certs.c certs.c
 
-check: all $(O)/apps $(O)/extra $(O)/feeds $(O)/test_dialplan $(O)/test_certs
+# failure reasons and account names on their own (shell/names.c)
+$(O)/test_names: tests/test_names.c names.c names.h
+	@mkdir -p $(O)
+	$(CC) $(CFLAGS) -o $@ tests/test_names.c names.c
+
+check: all $(O)/apps $(O)/extra $(O)/feeds $(O)/test_dialplan $(O)/test_certs $(O)/test_names
 	$(O)/test_dialplan
 	$(O)/test_certs
+	$(O)/test_names
 	@mkdir -p $(O)/shots
 	cd $(O) && for t in ../tests/*.script; do echo "== $$t"; rm -rf simdata; \
 		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(FEEDS_ENV) $(SIM) --script $$t 2>sim.log || { cat sim.log; exit 1; }; cat sim.log; \
@@ -92,6 +99,12 @@ check: all $(O)/apps $(O)/extra $(O)/feeds $(O)/test_dialplan $(O)/test_certs
 		./t48-config --config simdata/config set sip user 1001 && ./t48-config --config simdata/config set sip domain pbx.example.org || exit 1; \
 		python3 ../tests/small/fakesip.py simdata/sip.sock sip:1001@pbx.example.org & fake=$$!; sleep 0.3; \
 		T48_BACKLIGHT=simdata/bl T48_INSTALL=../tests/install/t48-install T48_LIVE=simdata/live $(FEEDS_ENV) $(SIM) --model t46s --sip simdata/sip.sock --script $$t 2>sim.log; r=$$?; \
+		kill $$fake; cat sim.log; [ $$r = 0 ] || exit 1; done
+	@# the T48S's screens again with the stand-in for the SIP service: calls that fail, and accounts by name
+	cd $(O) && for t in ../tests/sip/*.script; do echo "== $$t"; rm -rf simdata; mkdir -p simdata/config; \
+		./t48-config --config simdata/config set sip user 1001 && ./t48-config --config simdata/config set sip domain pbx.example.org || exit 1; \
+		python3 ../tests/small/fakesip.py simdata/sip.sock sip:1001@pbx.example.org & fake=$$!; sleep 0.3; \
+		T48_BACKLIGHT=simdata/bl $(FEEDS_ENV) $(SIM) --sip simdata/sip.sock --script $$t 2>sim.log; r=$$?; \
 		kill $$fake; cat sim.log; [ $$r = 0 ] || exit 1; done
 	sh tests/feeds-trust.sh $(O)
 	sh tests/sound/sound-test.sh $(O)

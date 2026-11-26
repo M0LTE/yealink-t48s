@@ -14,12 +14,12 @@ shot shots/idle-eight-accounts.png
 touch 700 420
 expect settings
 expectstate settings.row Accounts
-expectstate settings.value 1001@pbx.example.org_+7
+expectstate settings.value Office_+7
 key ok
 expectstate settings.page accounts
 # accounts 1 and 3 to 8 and 16, account 2 to add, the default, and Advanced
 expectstate settings.rows 11
-expectstate settings.value Office:_1001@pbx.example.org
+expectstate settings.value Office
 key down
 expectstate settings.row Account_2
 expectstate settings.value Not_set
@@ -31,7 +31,7 @@ key down
 key down
 key down
 expectstate settings.row Account_16
-expectstate settings.value 1016@pbx.example.org
+expectstate settings.value example.org_(1016)
 shot shots/settings-accounts-sixteen.png
 key down
 expectstate settings.row Default_account

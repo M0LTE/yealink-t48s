@@ -112,7 +112,7 @@ expect idle
 expectstate tz UTC0
 run $B post /time zone=Europe/Berlin
 waitstate tz CET-1CEST,M3.5.0,M10.5.0/3 3000
-# an account: the phone has one, and Settings names it
+# an account: the phone has one, and Settings names it by its Account name
 expectstate accounts 0
 run $B post /accounts/save n=1 user=1001 domain=pbx.example.org password=hunter2 transport=udp enabled=on label=Home
 waitstate accounts 1 3000
@@ -125,7 +125,7 @@ run $B upload /accounts/cert cert $T48_TESTS/../../shell/tests/certs/test-root.p
 run $B expect /accounts "<td>T48 Test Root<br>"
 touch 700 420
 expectstate settings.row Accounts
-expectstate settings.value 1001@pbx.example.org
+expectstate settings.value Home
 # the certificate added on the page is on the phone's list
 key ok
 expectstate settings.page accounts

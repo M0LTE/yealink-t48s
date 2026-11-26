@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The T46S: a refused call shows a short reason, + is a 0 held down, and accounts with no Account name
+# are called by their domain. tests/sip/ has the same on the T48S.
+wait 300
+waitstate reg ok 3000
+run sh -c "echo refuse '488 Not Acceptable Here,Q.850;cause=88;text=INCOMPATIBLE_DESTINATION' > simdata/sip.sock.cmd"
+key 0
+key 7
+key 7
+key 0
+key 0
+key 9
+key 0
+key 0
+key 1
+key 2
+key 3
+key ok
+waitstate phone ended 3000
+expectstate ended Call_settings_not_accepted
+expectstate ended.detail 488
+wait 200
+shot shots/t46s-call-refused.png
+key x
+waitstate phone idle 3000
+run sh -c "echo refuse '486 Busy Here' > simdata/sip.sock.cmd"
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone ended 3000
+expectstate ended Busy
+key x
+waitstate phone idle 3000
+# + from a held 0
+keydown 0
+wait 800
+keyup 0
+expectstate number +
+key 4
+key 4
+key 7
+key 7
+key 0
+key 0
+expectstate number +447700
+wait 200
+shot shots/t46s-dial-plus.png
+key soft4
+waitstate phone idle 3000
+# two accounts at the same provider
+run ./t48-config --config simdata/config set sip user Xq7rT2mLp9
+run ./t48-config --config simdata/config set sip domain edge2-tls.prod.example.net
+run ./t48-config --config simdata/config set sip2 user Bv3kW8nQz1
+run ./t48-config --config simdata/config set sip2 domain sip.example.net
+waitstate accounts 2 3000
+wait 1500
+run sh -c "echo register sip:Xq7rT2mLp9@edge2-tls.prod.example.net > simdata/sip.sock.cmd"
+wait 300
+run sh -c "echo register sip:Bv3kW8nQz1@sip.example.net > simdata/sip.sock.cmd"
+waitstate reg.2 ok 3000
+waitstate reg.1 ok 3000
+expectstate acct.name.1 example.net_(Xq7r)
+expectstate acct.name.2 example.net_(Bv3k)
+wait 200
+shot shots/t46s-idle-account-names.png
+quit

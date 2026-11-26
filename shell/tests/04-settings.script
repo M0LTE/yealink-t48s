@@ -165,11 +165,11 @@ shot shots/settings-sip.png
 # leaving the page applies it: the idle screen's account follows
 key x
 expectstate settings.page accounts
-expectstate settings.value 1001@sip.lan
+expectstate settings.value sip.lan
 shot shots/settings-accounts.png
 key x
 expectstate settings.page root
-expectstate settings.value 1001@sip.lan
+expectstate settings.value sip.lan
 
 # ---- network ----
 key down

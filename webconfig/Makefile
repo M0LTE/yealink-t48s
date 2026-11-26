@@ -15,9 +15,9 @@ LIBT48_INCLUDE ?= ../libt48/include
 CFLAGS += -std=gnu99 -Wall -Wextra -Wno-format-truncation -D_GNU_SOURCE -ffunction-sections -fdata-sections \
 	-I. -I$(SHELL_DIR) -I$(LIBT48_INCLUDE) -I$(AUDIOD_INCLUDE)
 LIB ?= ../libt48/$(O)/libt48.a
-# the settings store, the reader of app manifests and the dial plan's checker are the shell's own files:
+# the settings store, the reader of app manifests, the dial plan's checker and the accounts' names are the shell's own files:
 # one implementation of each
-SRC = http.c pages.c wav.c $(O)/assets.c $(SHELL_DIR)/config.c $(SHELL_DIR)/manifest.c $(SHELL_DIR)/dialplan.c $(SHELL_DIR)/certs.c
+SRC = http.c pages.c wav.c $(O)/assets.c $(SHELL_DIR)/config.c $(SHELL_DIR)/manifest.c $(SHELL_DIR)/dialplan.c $(SHELL_DIR)/certs.c $(SHELL_DIR)/names.c
 T48_VERSION ?= $(shell git describe --always --dirty 2>/dev/null)
 ifneq ($(T48_VERSION),)
 CFLAGS += -DT48_VERSION='"$(T48_VERSION)"'
@@ -38,7 +38,7 @@ $(O)/assets.c: style.css t48.js $(FONTS) mkassets.sh
 	@mkdir -p $(O)
 	sh mkassets.sh style.css t48.js $(FONTS) > $@
 
-$(O)/t48-web: $(SRC) web.h $(SHELL_DIR)/shell.h $(SHELL_DIR)/zones.h $(SHELL_DIR)/certs.h $(LIB)
+$(O)/t48-web: $(SRC) web.h $(SHELL_DIR)/shell.h $(SHELL_DIR)/zones.h $(SHELL_DIR)/certs.h $(SHELL_DIR)/names.h $(LIB)
 	@mkdir -p $(O)
 	$(CC) $(CFLAGS) -Wl,--gc-sections -o $@ $(SRC) $(LIB) -lm
 

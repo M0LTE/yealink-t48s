@@ -27,6 +27,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "shell.h"
+#include "names.h"
 #include "dialplan.h"
 #include "certs.h"
 
@@ -777,13 +778,33 @@ static const struct manifest *installed(const char *id)
     return NULL;
 }
 
+/* What each account is called on the screens (names.c): its Account name, or its domain made short.
+ * From the files, so a page built just after a save has the new name. */
+static const char *sip_file(int n);
+static void account_names(char out[T48_ACCOUNTS][ACCT_NAME_MAX])
+{
+    static char user[T48_ACCOUNTS][64], host[T48_ACCOUNTS][64], label[T48_ACCOUNTS][40];
+    const char *u[T48_ACCOUNTS], *h[T48_ACCOUNTS], *l[T48_ACCOUNTS];
+    for (int i = 0; i < T48_ACCOUNTS; i++) {
+        const char *f = sip_file(i + 1);
+        cfg_get(f, "user", user[i], sizeof user[i]);
+        cfg_get(f, "domain", host[i], sizeof host[i]);
+        cfg_get(f, "label", label[i], sizeof label[i]);
+        u[i] = user[i]; h[i] = host[i]; l[i] = label[i];
+    }
+    acct_names(T48_ACCOUNTS, u, h, l, out);
+    for (int i = 0; i < T48_ACCOUNTS; i++)
+        if (user[i][0] && !out[i][0]) snprintf(out[i], ACCT_NAME_MAX, "%s", user[i]);   /* no server host yet */
+}
+
 static void build_root(void)
 {
-    char v[200], user[120];
+    char v[200], user[120], names[T48_ACCOUNTS][ACCT_NAME_MAX];
     int up;
     snprintf(title, sizeof title, "Settings");
     snprintf(user, sizeof user, "%s", cfg_str("sip", "user", ""));
-    if (user[0]) snprintf(v, sizeof v, "%s@%s", user, cfg_str("sip", "domain", "?"));
+    account_names(names);
+    if (user[0]) snprintf(v, sizeof v, "%s", names[0]);
     else snprintf(v, sizeof v, "Not set");
     int extra = 0;
     for (int i = 2; i <= T48_ACCOUNTS; i++) {
@@ -840,20 +861,19 @@ static int sip_usable(int n)
  * said. Those that are set, and the first that is not, to add one. */
 static void build_accounts(void)
 {
-    char label[40], v[200], choices[64] = "";
+    char label[40], v[200], choices[64] = "", names[T48_ACCOUNTS][ACCT_NAME_MAX];
     int spare = 0;
     snprintf(title, sizeof title, "Accounts");
+    account_names(names);
     for (int n = 1; n <= T48_ACCOUNTS; n++) {
         const char *f = sip_file(n);
-        char user[64] = "", domain[64] = "?", name[40] = "", on[8] = "on";
+        char user[64] = "", on[8] = "on";
         if (!cfg_str(f, "user", "")[0] && !cfg_str(f, "domain", "")[0] && spare++) continue;
         cfg_get(f, "user", user, sizeof user);
-        cfg_get(f, "domain", domain, sizeof domain);
-        cfg_get(f, "label", name, sizeof name);
         cfg_get(f, "enabled", on, sizeof on);
         snprintf(label, sizeof label, "Account %d", n);
         if (!user[0]) snprintf(v, sizeof v, "Not set");
-        else snprintf(v, sizeof v, "%s%s%s@%s%s", name, name[0] ? ": " : "", user, domain, strcmp(on, "off") ? "" : " (off)");
+        else snprintf(v, sizeof v, "%s%s", names[n - 1], strcmp(on, "off") ? "" : " (off)");
         snprintf(add_menu(label, P_SIP, v)->arg, sizeof rows[0].arg, "%d", n);
         if (sip_usable(n)) { size_t at = strlen(choices); snprintf(choices + at, sizeof choices - at, "%s%d", at ? "|" : "", n); }
     }

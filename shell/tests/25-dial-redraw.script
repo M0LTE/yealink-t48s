@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The dialler redraws only the number's part of the screen for a key that changes nothing else.
+# What that leaves on the screen must be what a whole redraw makes: Left, with one account, redraws it all.
+wait 300
+run ./t48-config --config simdata/config set phone dialplan xxxxxxxxxxxx
+key 0
+key 7
+key 7
+key 0
+key 0
+key 9
+key x
+key 9
+expectstate number 077009
+shot shots/redraw-part.ppm
+key left
+shot shots/redraw-whole.ppm
+run python3 ../tests/samepic.py shots/redraw-part.ppm shots/redraw-whole.ppm 48
+# with the handset lifted: a tag for the route
+hook off
+key 1
+key 2
+key 3
+key x
+shot shots/redraw-part.ppm
+key left
+shot shots/redraw-whole.ppm
+run python3 ../tests/samepic.py shots/redraw-part.ppm shots/redraw-whole.ppm 48
+# + from a held 0 redraws the same part
+hook on
+hook off
+keydown 0
+wait 800
+keyup 0
+expectstate number +
+key 4
+shot shots/redraw-part.ppm
+key left
+shot shots/redraw-whole.ppm
+run python3 ../tests/samepic.py shots/redraw-part.ppm shots/redraw-whole.ppm 48
+run rm shots/redraw-part.ppm shots/redraw-whole.ppm
+hook on
+quit

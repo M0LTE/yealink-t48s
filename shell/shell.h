@@ -203,6 +203,7 @@ void phone_init(void);
 void phone_key(int code, int down);          /* any key while a phone screen shows, and phone keys always */
 int phone_idle_key(int code);                /* a key on the idle screen: 1 if the phone took it */
 void phone_touch(int x, int y);              /* a tap on a phone screen */
+void phone_touch_up(void);                   /* a finger lifted from the call screen */
 void phone_hook(int off_hook);
 int phone_timeout(long long now);
 void phone_tick(long long now);
@@ -226,6 +227,8 @@ void phone_audio_state(void);
 /* from phone.c back to the shell */
 void shell_phone_screen(int want);           /* the phone wants the screen, or is done with it */
 void shell_phone_changed(void);              /* something a phone screen or the idle screen shows has changed */
+int shell_phone_part(void (*draw)(void), int x, int y, int w, int h);   /* only this part of the call screen has changed */
+void shell_hold_redraw(int on);               /* 1: changes to come make one picture, drawn at 0 */
 void shell_show_history(int on);
 
 void phone_reload_account(void);             /* a SIP settings file has changed */

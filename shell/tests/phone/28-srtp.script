@@ -56,7 +56,8 @@ key 0
 key 2
 key ok
 waitstate phone ended 8000
-expectstate ended Call_failed
+expectstate ended Call_settings_not_accepted
+expectstate ended.detail 488
 run $FAR $BOB waitcall none 2
 key x
 waitstate phone idle 3000
