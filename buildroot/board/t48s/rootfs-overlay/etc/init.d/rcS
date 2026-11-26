@@ -60,5 +60,7 @@ t48-services
 # an update that did not start is written down for the Update screen
 t48-update boot
 # a system slot on its one try becomes the phone's own once it has run for a
-# minute with the shell up (issue 31, t48-update)
-( sleep 60; t48-update confirm ) >/dev/null 2>&1 &
+# minute with the shell up and, with a cable in, an address (issue 31, #77,
+# t48-update). No address three minutes in: restart, back to the slot that
+# worked
+( sleep 60; t48-update confirm || { sleep 120; t48-update confirm last; } ) >/dev/null 2>&1 &

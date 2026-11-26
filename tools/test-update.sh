@@ -104,7 +104,21 @@ cmp -s "$T/dev/mtd7" "$T/k1.uimg" && pass "install leaves the kernel alone" || f
 
 # the restart: slot b on its try, then a healthy minute
 rm -rf "$T/run/t48-update"; state_write a b 0; printf 'slot=b\nnote=trial\n' > "$T/run/t48-slot"; echo v2 > "$T/release"
-$UPD boot; $UPD confirm >/dev/null
+$UPD boot
+# but first with a cable in and no address (the switch's link register as
+# the Ethernet driver shows it; eth0 as ifconfig does)
+echo "imp ctrl 0x0c (bcast on, put back 0 times), gblmgmt 0x80, imp enable 0x1d, link 0x0102" > "$T/diag"
+printf '#!/bin/sh\ncat %s 2>/dev/null\n' "$T/ifconfig" > "$T/bin/ifconfig"; chmod +x "$T/bin/ifconfig"
+printf '#!/bin/sh\necho reboot >> %s\n' "$T/reboots" > "$T/bin/fake-reboot"; chmod +x "$T/bin/fake-reboot"
+echo "eth0      Link encap:Ethernet  HWaddr 80:5E:C0:03:1C:05" > "$T/ifconfig"
+export T48_ETH_DIAG="$T/diag" T48_REBOOT=fake-reboot T48_CONSOLE=/dev/null
+! $UPD confirm 2>/dev/null && state_read && [ "$S_TRIAL" = b ] && [ ! -e "$T/reboots" ] && pass "a cable in and no address: not confirmed" || fail "confirmed with no network"
+! $UPD confirm last 2>/dev/null && state_read && [ "$S_TRIAL" = b ] && [ "$(cat "$T/reboots")" = reboot ] && pass "the last try restarts, so the start goes back" || fail "no restart on the last try"
+echo "link 0x0100" | sed 's/^/imp ctrl 0x0c, /' > "$T/diag"; rm -f "$T/reboots"
+$UPD confirm >/dev/null 2>&1; state_read; [ "$S_TRIAL" = - ] && pass "no cable in: no verdict, confirmed as before" || fail "no cable: not confirmed"
+state_write a b 0
+echo "imp ctrl 0x0c, gblmgmt 0x80, link 0x0102" > "$T/diag"; echo "          inet addr:10.0.0.5  Bcast:10.0.0.255" >> "$T/ifconfig"
+$UPD confirm >/dev/null
 state_read; [ "$S_ACTIVE $S_TRIAL" = "b -" ] && [ "$(info result)" = "v2 installed" ] && pass "after the restart and a minute: slot b active, last result v2 installed" || fail "confirm"
 [ "$(info update)" = unknown ] && [ -z "$(info latest)" ] && pass "what the check before the update found no longer counts once it runs" || fail "latest kept past the update: $(info update)"
 

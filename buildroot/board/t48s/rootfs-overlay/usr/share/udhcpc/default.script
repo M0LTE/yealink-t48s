@@ -3,22 +3,12 @@
 # busybox udhcpc hook: apply the lease. T48_ROOT moves /run, /etc and /dev
 # for tools/test-link.sh.
 R=${T48_ROOT:-}
-# run a daemon with nothing but 0, 1 and 2: it outlives us and must not keep
-# whatever we were given (a parent's sockets, our lock)
+# run a daemon without descriptors 3 to 9: it outlives us and must not keep
+# whatever we were given (a caller's sockets, our lock). Not by listing them
+# and not above 9: busybox ash keeps its own descriptors there (the copies it
+# restores after a redirection), and closing those makes it spin.
 daemon() {
-    (
-        # busybox ash takes "exec 12>&-"; a shell that does not would run "12"
-        big=; ( eval 'exec 10>&-' ) 2>/dev/null && big=1
-        for f in /proc/self/fd/*; do    # ours: the caller may be gone
-            n=${f##*/}
-            case $n in
-            0|1|2|*[!0-9]*) ;;
-            [3-9]) eval "exec $n>&-" 2>/dev/null ;;
-            *) [ -z "$big" ] || eval "exec $n>&-" 2>/dev/null ;;
-            esac
-        done
-        exec "$@"
-    )
+    ( exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- "$@" )
 }
 addr() { ifconfig "$interface" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p'; }
 case "$1" in

@@ -11,7 +11,10 @@
 #   for its address, and like ntpd keeps no descriptor of its caller's; a
 #   fixed address ignores link-up; a renewal leaves the route and ntpd alone
 #   unless they change
+# SH: the shell the scripts run under; the phone's is busybox ash, so
+#   SH="busybox ash" sh tools/test-link.sh   is the closer test (CI runs both)
 set -e
+SH=${SH:-sh}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 O=$HERE/buildroot/board/t48s/rootfs-overlay
 T=$(mktemp -d)
@@ -34,14 +37,15 @@ stub ifconfig 'if [ $# -eq 1 ]; then a=$(cat '"$T/addr"' 2>/dev/null); [ -z "$a"
 stub route 'case "$1" in -n) g=$(cat '"$T/gw"' 2>/dev/null); [ -z "$g" ] || echo "0.0.0.0 $g 0.0.0.0 UG 0 0 0 eth0" ;; del) [ -s '"$T/gw"' ] || exit 1; : > '"$T/gw"'; echo "route del" >> '"$L"' ;; add) echo "$4" > '"$T/gw"'; echo "route add $4" >> '"$L"' ;; esac'
 # t48-apply sip is what restarts baresip: logged; the rest is the real one
 cp "$O/usr/bin/t48-apply" "$T/t48-apply-real"
-stub t48-apply '[ "$1" = sip ] && { echo "t48-apply sip" >> '"$L"'; exit 0; }; exec sh '"$T/t48-apply-real"' "$@"'
+stub t48-apply '[ "$1" = sip ] && { echo "t48-apply sip" >> '"$L"'; exit 0; }; exec $SH '"$T/t48-apply-real"' "$@"'
 export PATH="$T/bin:$PATH" T48_ROOT="$T" interface=eth0
 # a descriptor of the caller's that the daemons must not keep (as udhcpc's
 # own sockets are, when it runs the DHCP script)
 exec 7>"$T/caller-fd"
 
-dhcp() { sh "$O/usr/share/udhcpc/default.script" "$@"; wait; }
-apply() { sh "$T/t48-apply-real" "$@"; wait; }
+# under a time limit: a script that hangs is a failure, not a hung test
+dhcp() { timeout 10 $SH "$O/usr/share/udhcpc/default.script" "$@" || fail "the DHCP script failed or hung"; }
+apply() { timeout 10 $SH "$T/t48-apply-real" "$@" || fail "t48-apply failed or hung"; }
 count() { grep -c "^$1" "$L" || true; }
 # udhcpc is started in the background and t48-apply does not wait for it:
 # wait for its line (the event), giving up after 5 s
