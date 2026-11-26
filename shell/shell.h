@@ -318,6 +318,10 @@ int settings_reaped(pid_t pid, int status);  /* 1 if that was ours */
 const char *settings_state(const char *key);
 const char *settings_tz(void);               /* the TZ string for the zone in the store */
 void settings_reload(void);                  /* the store changed under the screens: time zone, and the page showing */
+void settings_open_page(const char *name);   /* "update" or "apps": that page, from a notice on the home screen */
+void settings_update_watch(long long now);   /* once a second: what the daily check found */
+const char *settings_update_notice(void);    /* "Update available" for the home screen, or "" */
+int settings_app_updates(void);              /* installed apps the feed has newer */
 /* from settings.c back to the shell */
 void shell_theme_changed(void);              /* draw everything again */
 void shell_settings_changed(void);           /* redraw, if the settings are showing */
@@ -418,6 +422,10 @@ int manifest_may(const struct manifest *m, const char *perm);   /* a permission 
 /* read one app folder's manifest: 0, or -1 with the reason in err */
 int manifest_read(const char *dir, struct manifest *m, char *err, size_t errn);
 void manifest_free(struct manifest *m);
+int manifest_version_cmp(const char *a, const char *b);   /* <0, 0, >0 as a is older, the same, newer */
+/* what the feed offers, as t48-app last read it: a file in the state folder (docs/apps.md) */
+#define T48_OFFERS "app-offers"
+int manifest_updates(const char *state, const char *feed);   /* installed apps the feed has newer */
 
 /* ---------- the one running app ---------- */
 

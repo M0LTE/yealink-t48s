@@ -72,6 +72,10 @@ static int hold_scan, hold_key, left_scan, left_key, left_held;
 static int down_scan, down_key, down_held;   /* the key that went down last, and whether it is still down */
 static long long hold_deadline;
 static int idle_notices;             /* how many notices the idle screen's row had room for */
+/* the notices that open something when touched, as last drawn: an update (issue #80) */
+static struct { int x, y, w, h; const char *page; } idle_hit[5];
+static int idle_hits;
+static char idle_notes[400];         /* the notices shown, for the simulator's checks */
 static char idle_shown[2000];         /* time, date, network, accounts and notices as last drawn, to redraw only on a change */
 static volatile sig_atomic_t stopping;
 static int exit_status;
@@ -230,7 +234,7 @@ static void idle_text(char *out, size_t n)
     }
     char file[2][96];
     notice_read(file);
-    if (k < n) snprintf(out + k, n - k, "|%s|%s", file[0], file[1]);
+    if (k < n) snprintf(out + k, n - k, "|%s|%s|%s|%d", file[0], file[1], settings_update_notice(), settings_app_updates());
 }
 
 /* where the k-th of n account lines goes: a row of up to three, or two rows */
@@ -324,11 +328,12 @@ static void draw_idle(void)
     /* One row of notices, the most important first: the standing notice from a file
      * (t48-live: nothing is installed, which the owner must not lose sight of), missed
      * calls, voice messages. What does not fit the row is left out from the end: messages
-     * show on the lamp too. Do not disturb is a tag in the header, so a notice never crowds
-     * it out. */
-    char note[3][96], file[2][96];
-    int role[3];
-    int nn = 0, total = 0;
+     * show on the lamp too. Updates come last, and a touch on one opens its page (issue
+     * #80). Do not disturb is a tag in the header, so a notice never crowds it out. */
+    char note[5][96], file[2][96];
+    int role[5];
+    const char *opens[5] = {NULL};
+    int nn = 0, total = 0, ups = settings_app_updates();
     notice_read(file);
     if (file[0][0]) role[nn++] = B_FIRST;
     if (phone_missed()) {
@@ -338,6 +343,16 @@ static void draw_idle(void)
     if (phone_messages()) {
         snprintf(note[nn], sizeof note[0], "%d new message%s", phone_messages(), phone_messages() == 1 ? "" : "s");
         role[nn++] = B_LIT;
+    }
+    if (settings_update_notice()[0]) {
+        snprintf(note[nn], sizeof note[0], "%s", settings_update_notice());
+        opens[nn] = "update";
+        role[nn++] = B_PLAIN;
+    }
+    if (ups) {
+        snprintf(note[nn], sizeof note[0], "%d app update%s", ups, ups == 1 ? "" : "s");
+        opens[nn] = "apps";
+        role[nn++] = B_PLAIN;
     }
     /* a small screen sets the row in the small face when that is what it takes to show it all */
     for (int tight = 0; tight <= SMALL; tight++) {
@@ -355,7 +370,14 @@ static void draw_idle(void)
         }
         if (idle_notices == nn && (!file[0][0] || !strcmp(note[0], file[0]))) break;
     }
-    for (int i = 0, x = (SW - total) / 2; i < idle_notices; i++) x = ui_notice(x, ny, note[i], role[i]);
+    idle_hits = 0;
+    idle_notes[0] = 0;
+    for (int i = 0, x = (SW - total) / 2; i < idle_notices; i++) {
+        size_t at = strlen(idle_notes);
+        snprintf(idle_notes + at, sizeof idle_notes - at, "%s%s", at ? "|" : "", note[i]);
+        if (opens[i]) idle_hit[idle_hits++] = (typeof(idle_hit[0])){x, ny, ui_notice_width(note[i]), SMALL ? 30 : 42, opens[i]};
+        x = ui_notice(x, ny, note[i], role[i]);
+    }
     t48_ui_notice_tight(0);
     if (SMALL) {
         /* the soft keys; do not disturb is Right, and shows in the header */
@@ -842,6 +864,18 @@ int ui_inside(int x, int y, int bx, int by, int bw, int bh)
     return x >= bx && x < bx + bw && y >= by && y < by + bh;
 }
 
+/* a touch on a notice that opens something: Settings, Update or Settings, Apps */
+static int idle_touched(int x, int y)
+{
+    for (int i = 0; i < idle_hits; i++) {
+        if (!ui_inside(x, y, idle_hit[i].x, idle_hit[i].y, idle_hit[i].w, idle_hit[i].h)) continue;
+        settings_open_page(idle_hit[i].page);
+        show(SCR_SETTINGS);
+        return 1;
+    }
+    return 0;
+}
+
 void shell_touch(int state, int x, int y)
 {
     if (backlight_touch(state)) return;
@@ -863,6 +897,8 @@ void shell_touch(int state, int x, int y)
         phone_touch(x, y);
     } else if (scr == SCR_HISTORY) {
         phone_history_touch(x, y);
+    } else if (scr == SCR_IDLE && idle_touched(x, y)) {
+        /* a notice of an update: its page */
     } else if (SMALL && scr != SCR_LAUNCHER) {
         /* the idle screen and a message have nothing else to touch */
     } else if (scr == SCR_IDLE && ui_inside(x, y, IDLE_BTN_X(IB_APPS), IDLE_BTN_Y, IDLE_BTN_W, IDLE_BTN_H)) {
@@ -972,6 +1008,12 @@ const char *shell_state(const char *key)
         notice_read(note);
         for (char *p = note[0]; *p; p++) if (*p == ' ') *p = '_';
         return note[0][0] ? note[0] : "-";
+    }
+    if (!strcmp(key, "notes")) {
+        static char b[sizeof idle_notes];
+        snprintf(b, sizeof b, "%s", idle_notices ? idle_notes : "-");
+        for (char *p = b; *p; p++) if (*p == ' ') *p = '_';
+        return b;
     }
     if (!strcmp(key, "notices")) {
         static char n[4];
@@ -1183,6 +1225,7 @@ int main(int argc, char **argv)
         if (scr == SCR_KEYS && keytest_tick(now, &left_scan, &left_key)) { left_held = 1; show(SCR_IDLE); }
         if (now >= next_clock) {
             next_clock = now + 1000;
+            settings_update_watch(now);
             char b[sizeof idle_shown];
             if (scr != SCR_APP && (idle_text(b, sizeof b), strcmp(b, idle_shown))) redraw();
         }

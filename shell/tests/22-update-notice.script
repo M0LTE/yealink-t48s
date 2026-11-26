@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The home screen's notices of updates (issue 80): what the daily check found. A
+# firmware update says "Update available", with the channel when it is not stable;
+# app updates are a count. A touch opens Settings, Update or Settings, Apps; with
+# the keys, Settings opens with that row chosen, so OK opens it. The stand-in for
+# t48-update (tests/update/update.sh) plays the check; the apps are the real t48-app
+# against the feeds on disk (tests/mkfeeds.sh).
+wait 300
+expect idle
+expectstate notes -
+
+# ---- firmware, stable: the daily check finds one ----
+run mkdir -p simdata/update
+run echo v0.3.0 > simdata/update/offer
+run sh ../tests/update/update.sh check
+waitstate notes Update_available 3000
+expectstate notices 1
+shot shots/update-notice.png
+# a touch on it: Settings, Update, with Settings behind it
+touch 400 341
+expect settings
+expectstate settings.page update
+waitstate update.state idle 3000
+expectstate settings.row Check_now
+key down
+expectstate settings.row Install
+key x
+expectstate settings.page root
+key x
+expect idle
+# the keys: Settings opens on Update
+key down
+expect settings
+expectstate settings.row Update
+expectstate settings.value Update_available
+key ok
+expectstate settings.page update
+key x
+key x
+expect idle
+
+# ---- testing: the channel is said ----
+run sh ../tests/update/update.sh channel testing
+waitstate notes - 3000
+run sh ../tests/update/update.sh check
+waitstate notes Testing:_update_available 3000
+shot shots/update-notice-testing.png
+run sh ../tests/update/update.sh channel stable
+
+# ---- once installed and waiting for the restart: no notice ----
+run sh ../tests/update/update.sh check
+waitstate notes Update_available 3000
+run sh ../tests/update/update.sh install
+waitstate notes - 8000
+run rm -f simdata/update/state simdata/state/update-latest
+waitstate notes - 3000
+
+# ---- apps: an installed app the feed has newer ----
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/1/index.json
+run ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state install demo
+wait 1500
+expectstate installed.demo 1.0.0
+expectstate notes -
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/2/index.json
+run ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state check
+waitstate notes 1_app_update 3000
+shot shots/update-notice-apps.png
+# both
+run sh ../tests/update/update.sh check
+waitstate notes Update_available|1_app_update 3000
+shot shots/update-notice-both.png
+run rm -f simdata/state/update-latest
+waitstate notes 1_app_update 3000
+# a touch: Settings, Apps
+touch 400 341
+expect settings
+expectstate settings.page store
+waitstate store loaded 5000
+expectstate store.demo update
+key x
+expectstate settings.page root
+expectstate settings.row Apps
+key x
+# the keys: Settings opens on Apps, which says so
+key down
+expectstate settings.row Apps
+expectstate settings.value 3_installed,_1_update
+key ok
+expectstate settings.page store
+waitstate store loaded 5000
+# updated: the count goes at once
+key down
+key down
+expectstate settings.row Demo
+key ok
+expectstate settings.row Update
+key ok
+waitstate overlay message 10000
+expectstate installed.demo 1.1.0
+key ok
+key x
+key x
+key x
+expect idle
+waitstate notes - 3000

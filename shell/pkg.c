@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /*
- * t48-app: the app manager (issue #22). list, install, update, remove.
+ * t48-app: the app manager (issue #22). list, install, update, remove, and
+ * check (issue #80), which the daily check runs.
  *
  * A feed is an index.json at an https address (docs/apps.md); each entry
  * gives a package's address, size and SHA-256. A package (.t48app) is a
@@ -27,6 +28,7 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include "shell.h"
 
@@ -161,21 +163,6 @@ static long dir_size(const char *path)
     tree_bytes = 0;
     nftw(path, add_one, 16, FTW_PHYS);
     return tree_bytes;
-}
-
-/* compare versions number by number: 0.10.0 is newer than 0.9.1 */
-static int version_cmp(const char *a, const char *b)
-{
-    while (*a || *b) {
-        char *ea, *eb;
-        long x = strtol(a, &ea, 10), y = strtol(b, &eb, 10);
-        if (ea == a || eb == b) return strcmp(a, b);
-        if (x != y) return x < y ? -1 : 1;
-        a = *ea ? ea + 1 : ea;
-        b = *eb ? eb + 1 : eb;
-        if ((*ea && *ea != '.') || (*eb && *eb != '.')) return strcmp(ea, eb);
-    }
-    return 0;
 }
 
 /* Run curl and wait, saying how far it has got. 0, or -1 with the reason. */
@@ -377,6 +364,25 @@ static void work_dir(char *out, size_t n)
     snprintf(out, n, "%s/.tmp-%d", apps_dir, (int)getpid());
 }
 
+/* What the feed offers, kept for the home screen and the web setup page to count
+ * updates from without asking the feed (manifest_updates, issue 80). Written each
+ * time the feed is read, so it is as fresh as the last look: the Apps screen, an
+ * install, or the daily check. */
+static void offers_save(void)
+{
+    char path[400], tmp[410];
+    snprintf(path, sizeof path, "%s/" T48_OFFERS, opt.state);
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    shell_mkdirs(opt.state);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "feed=%s\nchecked=%ld\n", feed_url, (long)time(NULL));
+    for (int i = 0; i < nfeed; i++)
+        fprintf(f, "app %s %s %d\n", feed[i].id, feed[i].version[0] ? feed[i].version : "-", feed[i].api);
+    if (fclose(f) == 0) rename(tmp, path);
+    else unlink(tmp);
+}
+
 /* fetch and read the index: 0, or -1 with the reason */
 static int load_feed(void)
 {
@@ -439,6 +445,7 @@ static int load_feed(void)
         nfeed++;
     }
     free(txt);
+    offers_save();
     return 0;
 }
 
@@ -545,7 +552,7 @@ static int cmd_install(const char *what, int only_if_newer)
         const struct feed_app *fa = feed_find(what);
         const struct manifest *have = installed_find(what);
         if (!fa) { fail("%s is not in the feed", what); return -1; }
-        if (only_if_newer && have && version_cmp(fa->version, have->version) <= 0) {
+        if (only_if_newer && have && manifest_version_cmp(fa->version, have->version) <= 0) {
             if (machine) printf("done %s %s\n", fa->id, have->version);
             else printf("%s is up to date (%s)\n", fa->id, have->version);
             return 0;
@@ -587,7 +594,7 @@ static int cmd_update_all(void)
     if (load_feed() < 0) return -1;
     for (int i = 0; i < napps; i++) {
         const struct feed_app *fa = feed_find(apps[i].id);
-        if (!fa || version_cmp(fa->version, apps[i].version) <= 0) continue;
+        if (!fa || manifest_version_cmp(fa->version, apps[i].version) <= 0) continue;
         char id[64];
         snprintf(id, sizeof id, "%s", apps[i].id);
         n++;
@@ -659,7 +666,7 @@ static int cmd_list(void)
         const struct manifest *m = &apps[i];
         const struct feed_app *fa = feed_ok ? feed_find(m->id) : NULL;
         const char *state = !ours(m) ? "builtin" : "installed";
-        if (fa && version_cmp(fa->version, m->version) > 0) state = fa->api > T48_API_LEVEL ? "unsupported" : "update";
+        if (fa && manifest_version_cmp(fa->version, m->version) > 0) state = fa->api > T48_API_LEVEL ? "unsupported" : "update";
         list_line(m->id, m->name, m->version[0] ? m->version : "-", fa ? fa->version : "-", fa ? fa->size : 0, dir_size(m->dir),
                   state, m->perms, m->description[0] ? m->description : fa ? fa->description : "");
     }
@@ -677,6 +684,17 @@ static int cmd_list(void)
     return 0;
 }
 
+/* the daily check's question: how many installed apps the feed has newer */
+static int cmd_check(void)
+{
+    if (load_feed() < 0) return -1;
+    int n = manifest_updates(opt.state, feed_url);
+    if (machine) printf("updates %d\n", n);
+    else if (n) printf("%d update%s\n", n, n == 1 ? "" : "s");
+    else printf("Up to date\n");
+    return 0;
+}
+
 static int usage(void)
 {
     fprintf(stderr,
@@ -684,12 +702,14 @@ static int usage(void)
         "t48-app [options] install ID | FILE    from the feed, or a .t48app file copied to the phone\n"
         "t48-app [options] update [ID]          one app, or every app the feed has a newer version of\n"
         "t48-app [options] remove ID            the app, what it kept and its settings\n"
+        "t48-app [options] check                how many installed apps the feed has newer\n"
         "  --feed URL     the feed's index.json (default: \"url\" in %s/feed, else\n"
         "                 %s)\n"
         "  --apps DIRS    installed apps; new ones go in the first folder (%s)\n"
         "  --config DIR   settings (%s)      --data DIR   apps' own folders (%s)\n"
+        "  --state DIR    where what the feed offers is kept (%s)\n"
         "  --machine      output for the shell's Apps screen\n",
-        opt.config, pkg_default_feed(), opt.apps, opt.config, opt.data);
+        opt.config, pkg_default_feed(), opt.apps, opt.config, opt.data, opt.state);
     return 2;
 }
 
@@ -701,7 +721,8 @@ int pkg_main(int argc, char **argv)
     for (; i < argc && argv[i][0] == '-'; i++) {
         if (!strcmp(argv[i], "--machine")) { machine = 1; continue; }
         const char **dst = !strcmp(argv[i], "--feed") ? &feed_opt : !strcmp(argv[i], "--apps") ? &opt.apps :
-                           !strcmp(argv[i], "--config") ? &opt.config : !strcmp(argv[i], "--data") ? &opt.data : NULL;
+                           !strcmp(argv[i], "--config") ? &opt.config : !strcmp(argv[i], "--data") ? &opt.data :
+                           !strcmp(argv[i], "--state") ? &opt.state : NULL;
         if (!dst || i + 1 >= argc) return usage();
         *dst = argv[++i];
     }
@@ -747,6 +768,7 @@ int pkg_main(int argc, char **argv)
     else if (!strcmp(cmd, "update") && arg) r = installed_find(arg) ? cmd_install(arg, 1) : (fail("%s is not installed", arg), -1);
     else if (!strcmp(cmd, "update")) r = cmd_update_all();
     else if (!strcmp(cmd, "remove") && arg) r = cmd_remove(arg);
+    else if (!strcmp(cmd, "check") && !arg) r = cmd_check();
     else { unlink(lock); return usage(); }
 
     clean_leftovers();

@@ -9,10 +9,12 @@
 #   offer         the version the channel has; missing, the check fails
 #   kernel_offer  same (also when missing) or differs
 #   result        the last result, as two lines: result=..., result_time=...
-# and which this script writes: channel, latest, state, asked (one line for
-# each command run).
+# and which this script writes: channel, state, asked (one line for each
+# command run), and simdata/state/update-latest, where the real one keeps what
+# the last check found and the shell's home screen looks for a change.
 D=$PWD/simdata/update
-mkdir -p "$D"
+L=$PWD/simdata/state/update-latest
+mkdir -p "$D" "${L%/*}"
 get() { cat "$D/$1" 2>/dev/null || echo "$2"; }
 state() { printf 'state=%s\nmessage=%s\n' "$1" "$2" > "$D/state.new" && mv "$D/state.new" "$D/state"; }
 result() { printf 'result=%s\nresult_time=%s\n' "$1" "$(date +%s)" > "$D/result"; }
@@ -21,7 +23,7 @@ check() {
     offer=$(get offer "")
     [ -n "$offer" ] || return 1
     if [ "$offer" = "$(get version 20261124-ac7a8f4)" ]; then u=no; else u=yes; fi
-    printf 'latest=%s\nupdate=%s\nkernel=%s\nchecked=%s\n' "$offer" "$u" "$(get kernel_offer same)" "$(date +%s)" > "$D/latest"
+    printf 'latest=%s\nupdate=%s\nkernel=%s\nchecked=%s\n' "$offer" "$u" "$(get kernel_offer same)" "$(date +%s)" > "$L"
 }
 
 [ "$1" = info ] || echo "$*" >> "$D/asked"
@@ -36,7 +38,7 @@ info)
     c=$(get channel stable)
     echo "channel=$c"
     case "$c" in stable|testing) echo "url=https://example.org/$c" ;; *) echo "url=$c" ;; esac
-    cat "$D/latest" 2>/dev/null || printf 'latest=\nupdate=unknown\nkernel=unknown\nchecked=\n'
+    cat "$L" 2>/dev/null || printf 'latest=\nupdate=unknown\nkernel=unknown\nchecked=\n'
     cat "$D/state" 2>/dev/null || printf 'state=idle\nmessage=\n'
     cat "$D/result" 2>/dev/null || printf 'result=\nresult_time=\n' ;;
 check)
@@ -60,6 +62,6 @@ kernel)
     state restart "" ;;
 channel)
     echo "$2" > "$D/channel"
-    rm -f "$D/latest" ;;
+    rm -f "$L" ;;
 *) exit 2 ;;
 esac
