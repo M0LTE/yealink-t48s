@@ -221,6 +221,7 @@ An installed app is a folder holding `manifest.json`, the program and an icon. T
   "api": 1,
   "exec": "clock",
   "icon": "icon.ppm",
+  "category": "General",
   "permissions": ["network"],
   "settings": [
     { "key": "title", "label": "Title", "type": "text", "default": "Clock" }
@@ -231,6 +232,7 @@ An installed app is a folder holding `manifest.json`, the program and an icon. T
 - `id` (a-z, 0-9, `-`, `.`, `_`), `exec` (a path inside the folder) and `api` are required. An app asking for a higher API level than the shell speaks is not listed.
 - `"screen": "any"` (level 6): the app lays itself out for whatever size HELLO gives, and gets the screen's own ([The screen](#the-screen)). Without it the app is promised 800 x 480. It needs no higher `api`: a shell older than level 6 ignores the word, and its screen is 800 x 480 anyway.
 - `name`, `version` and `description` are shown to the owner; `t48-pack` (in the SDK) needs `name` and `version`, and copies `description` into the feed.
+- `category`: one of `General`, `Games`, `Radio`, `Tools`, `Media`, as written. The app manager groups apps by it ([apps.md](apps.md)); without one the app is General. `t48-pack` refuses any other value and copies it into the feed. Older firmware ignores it.
 - `icon` is a binary PPM (P6) up to 96 x 96 for now; without one the launcher shows the name's first letter. PNG will follow when libt48 can read it.
 - `permissions` is shown to the owner by the app manager ([apps.md](apps.md)). `audio-out` is enforced: without it the app is given no [sound](#sound). `lamps` is enforced: without it the app cannot set a [lamp](#lamps). `network` is not enforced yet.
 - `settings`: each has a `key`, a `label`, a `type` (`text`, `number`, `bool` or `password`) and a `default`, and reaches the app as a SETTING message. The value is the manifest's default unless the owner has changed it in Settings, App settings ([settings.md](settings.md#an-apps-settings)), which keeps it in `/data/config/apps/<id>.conf`.

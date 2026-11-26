@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# App categories on the small screen (issue 30): the same groups and headings as
+# tests/23-app-categories.script, and the keys step over the headings.
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/5/index.json
+wait 2500
+key soft1
+expect launcher
+# Clock, Crasher, Get apps
+key right
+key right
+key soft1
+expectstate settings.page store
+waitstate store loaded 5000
+expectstate settings.row Clock
+expectstate settings.heading General
+expectstate soft1 Open
+shot shots/t46s-apps-categories.png
+key down
+key down
+key down
+expectstate settings.row Blocks
+expectstate settings.heading Games
+key down
+expectstate settings.row Waves
+expectstate settings.heading Radio
+key down
+expectstate settings.row Meter
+expectstate settings.heading Tools
+shot shots/t46s-apps-categories-tools.png
+key up
+key up
+expectstate settings.row Blocks
+key soft1
+expectstate settings.page storeapp
+key soft4
+expectstate settings.row Blocks
+key soft4
+expect launcher
+quit

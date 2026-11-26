@@ -125,6 +125,8 @@ details.sub[open]>summary{margin-bottom:12px}
 .sum{overflow-wrap:anywhere;color:var(--dim)}
 .apphead{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px}
 .apphead h2{margin:0}
+h2.group{font-size:.88rem;color:var(--dim);margin:24px 0 8px}
+h2.group:first-of-type{margin-top:0}
 table.list{width:100%;border-collapse:collapse}
 table.list th{text-align:left;font-size:.88rem;font-weight:400;color:var(--dim);padding:4px 12px 8px 0}
 table.list td{padding:8px 12px 8px 0;border-top:2px solid var(--bg);vertical-align:middle;overflow-wrap:anywhere}

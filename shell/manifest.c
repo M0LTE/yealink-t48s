@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /* t48-shell: find installed apps and read their manifest.json files, and count
- * the ones the feed has newer (issue 80). */
+ * the ones the feed has newer (issue 80). Categories: issue 30, docs/app-protocol.md. */
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +20,17 @@ int manifest_id_ok(const char *id)
         if (!((*id >= 'a' && *id <= 'z') || (*id >= '0' && *id <= '9') || *id == '-' || *id == '.' || *id == '_'))
             return 0;
     return 1;
+}
+
+const char *const manifest_categories[MANIFEST_CATEGORIES] = {"General", "Games", "Radio", "Tools", "Media"};
+
+/* An app without a category, or with one this firmware does not know (a newer
+ * feed's, say), is General: it is still listed, just not in a group of its own. */
+int manifest_category(const char *name)
+{
+    for (int i = 0; i < MANIFEST_CATEGORIES; i++)
+        if (!strcasecmp(name, manifest_categories[i])) return i;
+    return 0;
 }
 
 /* does the manifest ask for this permission? */
@@ -79,6 +90,7 @@ int manifest_read(const char *dir, struct manifest *m, char *err, size_t errn)
         memcpy(m->name, m->id, sizeof m->name);
     t48_json_str(t48_json_get(txt, e, "version"), e, m->version, sizeof m->version);
     t48_json_str(t48_json_get(txt, e, "description"), e, m->description, sizeof m->description);
+    t48_json_str(t48_json_get(txt, e, "category"), e, m->category, sizeof m->category);
     /* "screen": "any": the app takes whatever size it is told. Without it, it is promised 800x480. */
     char screen[16];
     m->any_screen = t48_json_str(t48_json_get(txt, e, "screen"), e, screen, sizeof screen) && !strcmp(screen, "any");

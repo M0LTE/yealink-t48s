@@ -351,6 +351,7 @@ static int unpack(const char *pkg, const char *dest, char *id, size_t idn)
 
 struct feed_app {
     char id[64], name[64], version[24], url[400], sha[72], perms[96], description[160];
+    char category[16];   /* "" when the feed gives none: General (issue 30) */
     long size;
     int api;
 };
@@ -423,6 +424,7 @@ static int load_feed(void)
         t48_json_str(t48_json_get(a, e, "version"), e, fa->version, sizeof fa->version);
         t48_json_str(t48_json_get(a, e, "sha256"), e, fa->sha, sizeof fa->sha);
         t48_json_str(t48_json_get(a, e, "description"), e, fa->description, sizeof fa->description);
+        t48_json_str(t48_json_get(a, e, "category"), e, fa->category, sizeof fa->category);
         if (t48_json_num(t48_json_get(a, e, "size"), e, &num)) fa->size = (long)num;
         if (t48_json_num(t48_json_get(a, e, "api"), e, &num)) fa->api = (int)num;
         for (const char *p = t48_json_first(t48_json_get(a, e, "permissions"), e); p; p = t48_json_next(p, e)) {
@@ -629,6 +631,14 @@ static int cmd_remove(const char *id)
     return 0;
 }
 
+/* An installed app's category: its manifest's, or the feed's for an app installed
+ * before it had one, else General. Always one of the fixed set. */
+static const char *category_of(const struct manifest *m, const struct feed_app *fa)
+{
+    const char *c = m && m->category[0] ? m->category : fa ? fa->category : "";
+    return manifest_categories[manifest_category(c)];
+}
+
 /* one line per app, tabs between: nothing from a manifest or a feed may hold either */
 static const char *flat(const char *s)
 {
@@ -642,40 +652,41 @@ static const char *flat(const char *s)
 }
 
 static void list_line(const char *id, const char *name, const char *have, const char *offered, long pkg_bytes, long disk_bytes,
-                      const char *state, const char *perms, const char *description)
+                      const char *state, const char *perms, const char *description, const char *category)
 {
     name = flat(name);
     have = flat(have);
     perms = flat(perms);
     description = flat(description);
     if (machine) {
-        printf("app\t%s\t%s\t%s\t%s\t%ld\t%ld\t%s\t%s\t%s\n", id, name, have, offered, pkg_bytes, disk_bytes, state,
-               perms[0] ? perms : "-", description[0] ? description : "-");
+        /* new fields go on the end: readers take the ones they know and ignore the rest */
+        printf("app\t%s\t%s\t%s\t%s\t%ld\t%ld\t%s\t%s\t%s\t%s\n", id, name, have, offered, pkg_bytes, disk_bytes, state,
+               perms[0] ? perms : "-", description[0] ? description : "-", category);
     } else {
         char size[24] = "";
         long b = disk_bytes ? disk_bytes : pkg_bytes;
         if (b) snprintf(size, sizeof size, "%ld KB", (b + 1023) / 1024);
-        printf("%-14s %-10s %-10s %8s  %-11s %s\n", id, have, offered, size, state, name);
+        printf("%-14s %-10s %-10s %8s  %-11s %-8s %s\n", id, have, offered, size, state, category, name);
     }
 }
 
 static int cmd_list(void)
 {
     int feed_ok = load_feed() == 0;
-    if (!machine) printf("%-14s %-10s %-10s %8s  %-11s %s\n", "ID", "INSTALLED", "IN FEED", "SIZE", "", "NAME");
+    if (!machine) printf("%-14s %-10s %-10s %8s  %-11s %-8s %s\n", "ID", "INSTALLED", "IN FEED", "SIZE", "", "CATEGORY", "NAME");
     for (int i = 0; i < napps; i++) {
         const struct manifest *m = &apps[i];
         const struct feed_app *fa = feed_ok ? feed_find(m->id) : NULL;
         const char *state = !ours(m) ? "builtin" : "installed";
         if (fa && manifest_version_cmp(fa->version, m->version) > 0) state = fa->api > T48_API_LEVEL ? "unsupported" : "update";
         list_line(m->id, m->name, m->version[0] ? m->version : "-", fa ? fa->version : "-", fa ? fa->size : 0, dir_size(m->dir),
-                  state, m->perms, m->description[0] ? m->description : fa ? fa->description : "");
+                  state, m->perms, m->description[0] ? m->description : fa ? fa->description : "", category_of(m, fa));
     }
     for (int i = 0; i < nfeed; i++) {
         const struct feed_app *fa = &feed[i];
         if (installed_find(fa->id)) continue;
         list_line(fa->id, fa->name, "-", fa->version[0] ? fa->version : "-", fa->size, 0,
-                  fa->api > T48_API_LEVEL ? "unsupported" : "available", fa->perms, fa->description);
+                  fa->api > T48_API_LEVEL ? "unsupported" : "available", fa->perms, fa->description, category_of(NULL, fa));
     }
     if (!feed_ok) {
         if (machine) printf("feederror %s\n", errtxt);

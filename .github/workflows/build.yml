@@ -59,6 +59,9 @@ jobs:
       - name: USB stick tests (t48-usbmount, on folders)
         run: sh tools/test-usbmount.sh
 
+      - name: SDK packer tests (t48-pack)
+        run: sh tools/test-pack.sh
+
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
