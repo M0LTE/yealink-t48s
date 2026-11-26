@@ -43,7 +43,7 @@ const [url, statusFile, out] = process.argv.slice(2);
   }
   // Accounts, Advanced: the dial plan, open
   await page.goto(url + '/accounts');
-  await page.click('#advanced summary');
+  await page.$eval('#advanced', (d) => { d.open = true; });   // open already when certificates are kept
   await page.locator('#advanced').screenshot({ path: `${out}/web-accounts-advanced.png` });
   // its certificates for SIP over TLS (issue #78)
   await page.locator('#certs').screenshot({ path: `${out}/web-certs.png` });

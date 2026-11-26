@@ -584,9 +584,9 @@ static void account_certs(struct req *r)
     else H("<table class='list'><tbody>");
     for (int i = 0; i < n; i++) {
         cert_date(c[i].not_after, date, sizeof date);
-        H("<tr><td>%s%r<br><span class='dim small'>Issued by %s</span></td><td class='%r'>%r %s</td><td class='acts'>", c[i].subject,
-          c[i].ca ? "" : " <span class='dim small'>(not a CA)</span>", c[i].issuer, c[i].not_after < now ? "bad" : "dim",
-          c[i].not_after < now ? "Expired" : "Expires", date);
+        H("<tr><td>%s%r<br><span class='dim small'>Issued by %s</span></td><td>%r%s</span></td><td class='acts'>", c[i].subject,
+          c[i].ca ? "" : " <span class='dim small'>(not a CA)</span>", c[i].issuer,
+          c[i].not_after < now ? "<span class='pill bad'>Expired " : "<span class='dim'>Expires ", date);
         form_begin(r, "/accounts/cert-remove", "class='inline'");
         H("<input type='hidden' name='id' value='%s'><button type='submit' class='small bad' data-ask='Remove this certificate?'>Remove</button></form></td></tr>",
           c[i].id);

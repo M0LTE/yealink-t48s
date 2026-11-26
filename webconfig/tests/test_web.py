@@ -868,13 +868,13 @@ class Paired(unittest.TestCase):
         self.assertEqual(stored.replace(b"\n", b""), root.replace(b"\n", b""))   # the same certificate, written out again
         self.assertEqual(add(root), (False, "Already added."))
         page = b.get("/accounts").body
-        self.assertIn("<tr><td>T48 Test Root<br><span class='dim small'>Issued by T48 Test Root</span></td><td class='dim'>Expires 2036-11-23</td>", page)
+        self.assertIn("<tr><td>T48 Test Root<br><span class='dim small'>Issued by T48 Test Root</span></td><td><span class='dim'>Expires 2036-11-23</span></td>", page)
         self.assertIn("<details class='card' id='advanced' open>", page)
         # DER, and one that has expired (kept, and shown as such)
         der = subprocess.run(["base64", "-d"], input=b"".join(l for l in expired.splitlines(True) if not l.startswith(b"-----")),
                              capture_output=True).stdout
         self.assertEqual(add(der, "old.cer"), (False, "Added: Old Test Root."))
-        self.assertIn("<td class='bad'>Expired 2020-02-01</td>", b.get("/accounts").body)
+        self.assertIn("<td><span class='pill bad'>Expired 2020-02-01</span></td>", b.get("/accounts").body)
         self.assertEqual(len(kept()), 2)
         # refused, and nothing new kept
         for content, why in (
