@@ -546,9 +546,12 @@ static int job_start(int kind, const char *cmd, const char *arg)
     return 0;
 }
 
+static int store_again;   /* asked for while a list was being made: what it read may be out of date */
+
 static void store_refresh(void)
 {
-    if (job.pid > 0) return;
+    if (job.pid > 0) { store_again = job.kind == J_LIST; return; }
+    store_again = 0;
     /* what was listed before stays on the screen until the new list starts to arrive */
     store_state = job_start(J_LIST, "list", NULL) == 0 ? ST_LOADING : ST_NONE;
 }
@@ -655,6 +658,11 @@ int settings_reaped(pid_t pid, int status)
     job.fd = -1;
     job.pid = 0;
     int ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    if (job.kind == J_LIST && store_again) {
+        /* the feeds changed while it was reading them (one added, say): read them again */
+        store_refresh();
+        if (store_state == ST_LOADING) return 1;
+    }
     if (job.kind == J_LIST) {
         store_state = ST_LOADED;
         if (!job.listed) nstore = 0;
