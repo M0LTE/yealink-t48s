@@ -2031,6 +2031,9 @@ void settings_touch(int state, int x, int y)
         stack[depth].top = top;
         if (stack[depth].sel < top) stack[depth].sel = top;
         if (stack[depth].sel >= top + VISIBLE) stack[depth].sel = top + VISIBLE - 1;
+        /* never leave the cursor on a heading: the next row down, or up at the end */
+        while (stack[depth].sel < nrows - 1 && rows[stack[depth].sel].kind == R_HEAD) stack[depth].sel++;
+        while (stack[depth].sel > 0 && rows[stack[depth].sel].kind == R_HEAD) stack[depth].sel--;
         redraw_me();
         return;
     }
