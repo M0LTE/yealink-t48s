@@ -240,6 +240,19 @@ static void scan_apps(void)
 }
 
 static int ssh_is_on(void);
+struct update_info {
+    char installed[8], slot[8], version[64], channel[204], latest[64], update[12], kernel[12], checked[24];
+    char state[16], message[160], result[160], result_time[24];
+};
+static void update_read(struct update_info *u);
+static const char *update_notice(const struct update_info *u);
+
+/* installed apps the feed has newer, as t48-app last found: the home screen's count (issue #80) */
+static int app_updates(void)
+{
+    const char *feed = val("feed", "url", "");
+    return manifest_updates(opt.state, feed[0] ? feed : T48_DEFAULT_FEED);
+}
 
 void page_overview(struct req *r)
 {
@@ -279,14 +292,22 @@ void page_overview(struct req *r)
     H("<a class='card tile' href='/history'><h2>Calls</h2><p>%d</p></a>", history_count());
 
     scan_apps();
-    H("<a class='card tile' href='/apps'><h2>Apps</h2><p>%d installed</p></a>", napps);
+    int ups = app_updates();
+    H("<a class='card tile' href='/apps'><h2>Apps</h2><p>%d installed</p>", napps);
+    if (ups) H("<p><span class='pill warn'>%d update%r</span></p>", ups, ups == 1 ? "" : "s");
+    H("</a>");
 
     int ssh = ssh_is_on();
     H("<a class='card tile' href='/access'><h2>Access</h2><p><span class='pill %r'>SSH %r</span> %d key%r</p><p>%d browser%r paired</p></a>",
       ssh ? "good" : "", ssh ? "on" : "off", keys_count(), keys_count() == 1 ? "" : "s", sessions_count(), sessions_count() == 1 ? "" : "s");
 
     H("<a class='card tile' href='/backup'><h2>Backup</h2><p>Download or restore</p></a>");
-    H("<a class='card tile' href='/update'><h2>Update</h2><p>Check or install</p></a>");
+    /* what the daily check found, worded as on the phone's home screen */
+    struct update_info u;
+    update_read(&u);
+    const char *note = update_notice(&u);
+    if (note) H("<a class='card tile' href='/update'><h2>Update</h2><p><span class='pill warn'>%s</span></p></a>", note);
+    else H("<a class='card tile' href='/update'><h2>Update</h2><p>Check or install</p></a>");
     H("</div>");
     page_end(r);
 }
@@ -1184,12 +1205,13 @@ static void post_history_clear(struct req *r)
 
 static int app_command(const char *verb, const char *id, char *out, size_t n, int wait_ms)
 {
-    char *argv[12];
+    char *argv[16];
     int k = 0;
     argv[k++] = (char *)wopt.appcmd;
     argv[k++] = "--apps"; argv[k++] = (char *)opt.apps;
     argv[k++] = "--config"; argv[k++] = (char *)opt.config;
     argv[k++] = "--data"; argv[k++] = (char *)opt.data;
+    argv[k++] = "--state"; argv[k++] = (char *)opt.state;   /* where what the feed offers is kept (issue #80) */
     argv[k++] = "--machine";
     argv[k++] = (char *)verb;
     if (id) argv[k++] = (char *)id;
@@ -1822,10 +1844,6 @@ out:
 
 /* ---------- update: t48-update does the work (docs/install.md) ---------- */
 
-struct update_info {
-    char installed[8], slot[8], version[64], channel[204], latest[64], update[12], kernel[12], checked[24];
-    char state[16], message[160], result[160], result_time[24];
-};
 
 static int update_command(const char *verb, const char *arg, char *out, size_t n, int wait_ms)
 {
@@ -1857,6 +1875,14 @@ static void update_read(struct update_info *u)
         p = nl ? nl + 1 : NULL;
     }
     if (!u->version[0]) snprintf(u->version, sizeof u->version, "%s", T48_VERSION);
+}
+
+/* "Update available", as the phone's home screen says it; NULL for none */
+static const char *update_notice(const struct update_info *u)
+{
+    if (strcmp(u->installed, "yes") || strcmp(u->update, "yes") || !strcmp(u->state, "restart")) return NULL;
+    return !strcmp(u->channel, "stable") ? "Update available" : !strcmp(u->channel, "testing") ? "Testing: update available"
+                                                                                               : "Custom: update available";
 }
 
 static int update_busy(const struct update_info *u)
@@ -1961,7 +1987,10 @@ static void page_update(struct req *r)
           "<option value='testing'%r>Testing</option><option value='custom'%r>Custom</option></select></label>",
           !strcmp(u.channel, "stable") ? " selected" : "", !strcmp(u.channel, "testing") ? " selected" : "", named ? "" : " selected");
         field("Custom URL", "url", named ? "" : u.channel, "type='url' autocapitalize='none' spellcheck='false' placeholder='https://'", NULL);
-        H("</div><div class='actions'><button type='submit'>Save</button></div></form></div>");
+        /* firmware and apps, once a night (issue #80): it finds, and never installs */
+        H("</div><label class='check'><input type='checkbox' name='daily' value='on'%r> Daily check</label>",
+          strcmp(val("update", "daily", "on"), "off") ? " checked" : "");
+        H("<div class='actions'><button type='submit'>Save</button></div></form></div>");
     }
     page_end(r);
 }
@@ -2000,8 +2029,15 @@ static void post_update_channel(struct req *r)
     }
     update_read(&u);
     if (update_busy(&u) || update_pending(&u)) { flash(r, 1, "Update already running."); redirect(r, "/update"); return; }
+    if (cfg_set("update", "daily", !strcmp(form(r, "daily"), "on") ? "on" : "off") < 0) {
+        flash(r, 1, "Not saved: %s.", strerror(errno));
+        redirect(r, "/update");
+        return;
+    }
+    /* the same channel again: nothing for the updater, and what the last check found stays */
+    if (!strcmp(to, u.channel)) flash(r, 0, "Saved.");
     /* the updater has the last word on what a channel may be, and says why not */
-    if (update_command("channel", to, out, sizeof out, 10000) != 0) {
+    else if (update_command("channel", to, out, sizeof out, 10000) != 0) {
         out[strcspn(out, "\r\n")] = 0;
         flash(r, 1, "Not saved: %s.", out[0] ? out : "updater did not finish");
     } else flash(r, 0, "Channel saved.");

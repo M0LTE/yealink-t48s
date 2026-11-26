@@ -982,8 +982,11 @@ class Paired(unittest.TestCase):
         page = b.get("/apps").body
         self.assertIn("pill warn'>Update<", page)
         self.assertNotIn("/apps/update-all", page)     # one update: as on the phone, no Update all
+        # the overview counts it, as the phone's home screen does (issue 80)
+        self.assertIn("<h2>Apps</h2><p>3 installed</p><p><span class='pill warn'>1 update</span></p>", b.get("/").body)
         self.ok("/apps/update", {"id": "demo"}, "/apps")
         self.assertIn("Installed 1.1.0", b.get("/apps").body)
+        self.assertIn("<h2>Apps</h2><p>3 installed</p></a>", b.get("/").body)
         self.assertEqual(p.get("apps/demo", "title"), "Kitchen")
         self.ok("/apps/settings", {"id": "demo", "defaults": "yes"}, "/apps")
         self.assertIsNone(p.get("apps/demo", "title"))
@@ -1388,6 +1391,42 @@ class Update(unittest.TestCase):
         self.assertEqual(self.calls(), ["check", "channel testing", "channel https://builds.example.org/t48s/",
                                         "channel https://builds.example.org/?a=$(reboot)", "channel stable"])
         self.assertNotIn("builds.example.org", self.p.logtext())
+
+    def test_notice_on_the_overview(self):
+        # what the daily check found, worded as on the phone's home screen (issue 80)
+        tile = lambda: re.search(r"<a class='card tile' href='/update'>.*?</a>", self.b.get("/").body).group(0)
+        self.assertIn("<p>Check or install</p>", tile())
+        self.fake("offer", "latest=v0.3.0\nupdate=yes\nkernel=same\n")
+        self.post("/update/check")
+        self.page(lambda r: self.fact(r.body, "Status") == "Update available")
+        self.assertIn("<span class='pill warn'>Update available</span>", tile())
+        self.post("/update/channel", {"channel": "testing", "url": "", "daily": "on"})
+        self.assertIn("<p>Check or install</p>", tile())
+        self.post("/update/check")
+        self.page(lambda r: self.fact(r.body, "Status") == "Update available")
+        self.assertIn("<span class='pill warn'>Testing: update available</span>", tile())
+        # installed and waiting for the restart: no longer offered
+        self.post("/update/install")
+        self.page(lambda r: self.fact(r.body, "Status") == "Restart to finish")
+        self.assertIn("<p>Check or install</p>", tile())
+
+    def test_daily_check(self):
+        r = self.page()
+        self.assertIn("<input type='checkbox' name='daily' value='on' checked> Daily check", r.body)
+        # off: written to the settings the daily check reads; the channel is left alone
+        self.fake("offer", "latest=v0.3.0\nupdate=yes\nkernel=same\n")
+        self.post("/update/check")
+        self.page(lambda r: self.fact(r.body, "Status") == "Update available")
+        self.post("/update/channel", {"channel": "stable", "url": ""})
+        r = self.page()
+        self.assertEqual(self.flash(r), (False, "Saved."))
+        self.assertEqual(self.p.get("update", "daily"), "off")
+        self.assertIn("<input type='checkbox' name='daily' value='on'> Daily check", r.body)
+        self.assertEqual(self.fact(r.body, "Status"), "Update available")
+        self.assertEqual(self.calls(), ["check"])
+        self.post("/update/channel", {"channel": "stable", "url": "", "daily": "on"})
+        self.assertEqual(self.p.get("update", "daily"), "on")
+        self.assertIn("value='on' checked> Daily check", self.page().body)
 
     def test_kernel_differs(self):
         self.fake("offer", "latest=v0.3.0\nupdate=no\nkernel=differs\n")
