@@ -87,7 +87,7 @@ key down
 key down
 key down
 key down
-expectstate settings.row Label
+expectstate settings.row Account_name
 key ok
 key 9
 key 6
@@ -196,9 +196,6 @@ key ok
 key down
 key down
 key down
-key down
-key down
-key down
 expectstate settings.row Default_account
 key ok
 expectstate cfg.phone.default_account 2
@@ -206,13 +203,12 @@ expectstate acct.default 2
 key ok
 expectstate acct.default 1
 # ---- remove the second account: it asks, then the phone service restarts with one ----
-key up
-key up
-key up
+# (the list: accounts 1 and 2, account 3 to add, the default)
 key up
 key up
 expectstate settings.row Account_2
 key ok
+key down
 key down
 key down
 key down

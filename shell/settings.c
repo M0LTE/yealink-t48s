@@ -33,12 +33,16 @@
 #define T48_VERSION "development build"
 #endif
 
-enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_SIPADV, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE, P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL, P_ADVANCED, P_FWD };
-static const char *const page_names[] = {"root", "accounts", "sip", "sipadvanced", "network", "time", "timezone", "sound", "screen", "access", "about",
+enum page { P_ROOT, P_ACCOUNTS, P_SIP, P_SIPADV, P_CODECS, P_NET, P_TIME, P_TZ, P_SOUND, P_SCREEN, P_ACCESS, P_ABOUT, P_APPSETTINGS, P_APPCONF, P_STORE,
+             P_STOREAPP, P_THEME, P_UPDATE, P_INSTALL, P_ADVANCED, P_FWD };
+static const char *const page_names[] = {"root", "accounts", "sip", "sipadvanced", "codecs", "network", "time", "timezone", "sound", "screen", "access", "about",
                                          "appsettings", "appconf", "store", "storeapp", "theme", "update", "install", "advanced", "forward"};
 
 enum row_kind { R_MENU, R_TEXT, R_CHOICE, R_TOGGLE, R_LEVEL, R_INFO, R_NOTE, R_ACTION };
-enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16, F_HOST = 32, F_PROXY = 64, F_SECONDS = 128 };
+enum { F_DISABLED = 1, F_PASSWORD = 2, F_DIGITS = 4, F_IP = 8, F_DANGER = 16, F_HOST = 32, F_PROXY = 64,
+       F_SECONDS = 128,   /* the value is shown with " s" after it */
+       F_REGINT = 256,    /* register_seconds: 0, 60 to 86400 or empty */
+       F_CODEC = 512 };   /* a row of the Codecs page: a switch that also moves up and down */
 enum action { A_NONE, A_SET_TZ, A_REFRESH, A_INSTALL, A_UPDATE, A_REMOVE, A_OPEN, A_APP_DEFAULTS, A_FEED_DEFAULT, A_UPDATE_ALL,
               A_SSH, A_WEB, A_DOOR_OPEN, A_DOOR_SHOW, A_DOOR_CLOSE, A_FORGET_KEYS, A_ACCOUNT_REMOVE, A_SET_THEME,
               A_UPD_CHANNEL, A_UPD_CHECK, A_UPD_INSTALL, A_UPD_KERNEL, A_UPD_RESTART,
@@ -707,7 +711,7 @@ static void build_root(void)
     if (user[0]) snprintf(v, sizeof v, "%s@%s", user, cfg_str("sip", "domain", "?"));
     else snprintf(v, sizeof v, "Not set");
     int extra = 0;
-    for (int i = 2; i <= 6; i++) {
+    for (int i = 2; i <= T48_ACCOUNTS; i++) {
         char f[8];
         snprintf(f, sizeof f, "sip%d", i);
         if (cfg_str(f, "user", "")[0]) extra++;
@@ -734,7 +738,7 @@ static void build_root(void)
     if (fw_live()) add_menu("Install", P_INSTALL, "");
 }
 
-/* the settings file of account 1 to 6: sip, sip2, ... sip6 */
+/* the settings file of account 1 to 16: sip, sip2, ... sip16 */
 static const char *sip_file(int n)
 {
     static char f[4][8];
@@ -755,14 +759,17 @@ static int sip_usable(int n)
     return user[0] && domain[0] && strcmp(on, "off");
 }
 
-/* up to six accounts, and which one calls go out from when nothing else is said */
+/* Up to 16 accounts, and which one calls go out from when nothing else is
+ * said. Those that are set, and the first that is not, to add one. */
 static void build_accounts(void)
 {
-    char label[40], v[200], choices[24] = "";
+    char label[40], v[200], choices[64] = "";
+    int spare = 0;
     snprintf(title, sizeof title, "Accounts");
-    for (int n = 1; n <= 6; n++) {
+    for (int n = 1; n <= T48_ACCOUNTS; n++) {
         const char *f = sip_file(n);
         char user[64] = "", domain[64] = "?", name[40] = "", on[8] = "on";
+        if (!cfg_str(f, "user", "")[0] && !cfg_str(f, "domain", "")[0] && spare++) continue;
         cfg_get(f, "user", user, sizeof user);
         cfg_get(f, "domain", domain, sizeof domain);
         cfg_get(f, "label", name, sizeof name);
@@ -774,13 +781,24 @@ static void build_accounts(void)
         if (sip_usable(n)) { size_t at = strlen(choices); snprintf(choices + at, sizeof choices - at, "%s%d", at ? "|" : "", n); }
     }
     if (strchr(choices, '|')) {
-        static char keep[24];
+        static char keep[64];
         struct row *r;
         snprintf(keep, sizeof keep, "%s", choices);
         snprintf(v, sizeof v, "%d", atoi(phone_state("acct.default")));
         r = add_stored(R_CHOICE, "Default account", "phone", "default_account", v, 0);
         r->choices = keep;
-        if (!strstr(keep, r->value)) snprintf(r->value, sizeof r->value, "%s", v);
+        /* a whole item of 1|2|...: 1 is not in 10|11 */
+        char item[8];
+        snprintf(item, sizeof item, "%s", r->value);
+        size_t il = strlen(item);
+        const char *at = keep;
+        int found = 0;
+        while (!found && *at) {
+            size_t k = strcspn(at, "|");
+            found = il && k == il && !strncmp(at, item, k);
+            at += k + (at[k] == '|');
+        }
+        if (!found) snprintf(r->value, sizeof r->value, "%s", v);
     }
     add_menu("Advanced", P_ADVANCED, "");
 }
@@ -848,7 +866,7 @@ static void build_sip(const char *arg)
     add_stored(R_TEXT, "Auth user", f, "auth_user", "", 0);
     add_stored(R_TEXT, "Display name", f, "display_name", "", 0);
     add_stored(R_CHOICE, "Transport", f, "transport", "udp", 0)->choices = "udp|tcp|tls";
-    add_stored(R_TEXT, "Label", f, "label", "", 0);
+    add_stored(R_TEXT, "Account name", f, "label", "", 0);
     add_stored(R_TEXT, "Voicemail", f, "voicemail", "", F_DIGITS);
     {
         /* issue #77: the ringtone, and Custom once a sound has been given on the web setup page */
@@ -871,15 +889,42 @@ static void build_sip(const char *arg)
     rows[nrows - 1].flags |= rows[nrows - 1].kind == R_ACTION ? F_DANGER : 0;
 }
 
-/* the account's settings that are seldom changed (issue #77, docs/sip.md#interoperability) */
+/* the account's settings that are seldom changed (issue #77) */
 static void build_sipadv(const char *arg)
 {
-    const char *f = sip_file(atoi(arg) < 1 ? 1 : atoi(arg));
+    char v[60];
+    int n = atoi(arg) < 1 ? 1 : atoi(arg), order[T48_CODECS], on[T48_CODECS];
+    const char *f = sip_file(n);
     snprintf(title, sizeof title, "Advanced");
+    snprintf(v, sizeof v, "%d", T48_REG_DEFAULT);
+    add_stored(R_TEXT, "Registration expiry", f, "register_seconds", v, F_DIGITS | F_SECONDS | F_REGINT);
+    add_stored(R_CHOICE, "DTMF", f, "dtmf", "rfc2833", 0)->choices = "rfc2833|inband|info";
+    sip_codecs(cfg_str(f, "codecs", ""), order, on);
+    v[0] = 0;
+    for (int i = 0; i < T48_CODECS; i++)
+        if (on[i]) { size_t at = strlen(v); snprintf(v + at, sizeof v - at, "%s%s", at ? ", " : "", sip_codec_names[order[i]]); }
+    snprintf(add_menu("Codecs", P_CODECS, v)->arg, sizeof rows[0].arg, "%d", n);
+    add_stored(R_TOGGLE, "NAT keepalive", f, "keepalive", "on", 0);
+    /* interoperability (docs/sip.md#interoperability); 100rel's required is offered only to a file that already says it */
     add_stored(R_CHOICE, "Session timer", f, "session_timer", "off", 0)->choices = "off|300|600|1800|3600";
-    /* required is offered only to a file that already says it */
     struct row *r = add_stored(R_CHOICE, "100rel", f, "100rel", "off", 0);
     r->choices = !strcmp(r->value, "required") ? "off|on|required" : "off|on";
+}
+
+/* the codecs an account offers, in order: each a switch, moved with Up and Down */
+static void build_codecs(const char *arg)
+{
+    int n = atoi(arg) < 1 ? 1 : atoi(arg), order[T48_CODECS], on[T48_CODECS];
+    const char *f = sip_file(n);
+    snprintf(title, sizeof title, "Codecs");
+    sip_codecs(cfg_str(f, "codecs", ""), order, on);
+    for (int i = 0; i < T48_CODECS; i++) {
+        struct row *r = add(R_TOGGLE, sip_codec_names[order[i]]);
+        snprintf(r->file, sizeof r->file, "%s", f);
+        snprintf(r->key, sizeof r->key, "codecs");
+        snprintf(r->value, sizeof r->value, "%s", on[i] ? "on" : "off");
+        r->flags = F_CODEC;
+    }
 }
 
 static void build_net(void)
@@ -1312,6 +1357,7 @@ static void rebuild(void)
     case P_ACCOUNTS: build_accounts(); break;
     case P_SIP: build_sip(stack[depth].arg); break;
     case P_SIPADV: build_sipadv(stack[depth].arg); break;
+    case P_CODECS: build_codecs(stack[depth].arg); break;
     case P_NET: build_net(); break;
     case P_TIME: build_time(); break;
     case P_TZ: build_tz(); break;
@@ -1646,6 +1692,30 @@ static void confirmed(enum action act, const char *arg)
     }
 }
 
+/* The Codecs page: the codec in row i turned on or off (move 0), or moved
+ * up (-1) or down (1) the order. The page's rows are the stored order. */
+static void codec_change(int i, int move)
+{
+    int order[T48_CODECS], on[T48_CODECS], j = i + move, n = 0;
+    char v[64];
+    struct row r = rows[i];
+    if (i < 0 || i >= T48_CODECS || j < 0 || j >= T48_CODECS) return;
+    sip_codecs(cfg_str(r.file, "codecs", ""), order, on);
+    if (!move) {
+        for (int k = 0; k < T48_CODECS; k++) n += on[k];
+        if (on[i] && n == 1) { message("Not turned off", "One codec must stay on"); return; }
+        on[i] = !on[i];
+    } else {
+        int o = order[i], f = on[i];
+        order[i] = order[j]; on[i] = on[j];
+        order[j] = o; on[j] = f;
+        stack[depth].sel = j;
+    }
+    sip_codecs_str(order, on, v, sizeof v);
+    store_value(&r, v);
+    rebuild();
+}
+
 static void activate(int i, int dir)
 {
     struct row *r = &rows[i];
@@ -1662,10 +1732,10 @@ static void activate(int i, int dir)
         break;
     case R_CHOICE: {
         /* step to the next (or the one before) of a|b|c */
-        char list[100], *opts[8], *save = NULL;
+        char list[100], *opts[T48_ACCOUNTS], *save = NULL;
         int n = 0, at = 0;
         snprintf(list, sizeof list, "%s", r->choices);
-        for (char *p = strtok_r(list, "|", &save); p && n < 8; p = strtok_r(NULL, "|", &save)) {
+        for (char *p = strtok_r(list, "|", &save); p && n < T48_ACCOUNTS; p = strtok_r(NULL, "|", &save)) {
             if (!strcmp(p, r->value)) at = n;
             opts[n++] = p;
         }
@@ -1676,6 +1746,7 @@ static void activate(int i, int dir)
     }
     case R_TOGGLE: {
         int on = !strcmp(r->value, "on");
+        if (r->flags & F_CODEC) { codec_change(i, 0); break; }
         if (r->target) { do_action(r); break; }   /* a switch that asks first */
         if (r->choices) store_value(r, on ? "false" : "true");   /* an app's bool */
         else store_value(r, on ? "off" : "on");
@@ -1700,6 +1771,10 @@ static void kbd_done(void)
     }
     if (((kbd_row.flags & F_HOST) && !sip_host_ok(text, 0)) || ((kbd_row.flags & F_PROXY) && !sip_host_ok(text, 1))) {
         message("Not a host", "Use host or host:port, IPv6 in [ ]");
+        return;
+    }
+    if ((kbd_row.flags & F_REGINT) && !sip_regint_ok(text)) {
+        message("Out of range", "Use 0, 60 to 86400, or empty for 600");
         return;
     }
     if (!strcmp(kbd_row.file, "phone") && !strcmp(kbd_row.key, "dialplan") && text[0] && dp_check(text, NULL) < 0) {
@@ -1785,6 +1860,10 @@ void settings_key(int code, int down)
 
 static int list_w(void) { return SW - 2 * LIST_X - (nrows > VISIBLE ? SCROLL_W : 0); }
 
+/* a codec's Up and Down buttons, left of its switch */
+#define CODEC_BTN_W 64
+#define CODEC_UP_X(x, w) ((x) + (w) - 150 - 2 * CODEC_BTN_W)
+
 /* the Theme page: a picture of each, its name under it */
 #define TH_W (SMALL ? 144 : 240)
 #define TH_H (SMALL ? 150 : 222)
@@ -1845,7 +1924,9 @@ void settings_touch(int state, int x, int y)
     int i = stack[depth].top + (y - LIST_Y) / ROW_H;
     if (y < LIST_Y || i >= nrows || x < LIST_X || x >= LIST_X + w) return;
     stack[depth].sel = i;
-    if (rows[i].kind == R_LEVEL) {
+    if ((rows[i].flags & F_CODEC) && x >= CODEC_UP_X(LIST_X, w) && x < CODEC_UP_X(LIST_X, w) + 2 * CODEC_BTN_W + 8) {
+        codec_change(i, x < CODEC_UP_X(LIST_X, w) + CODEC_BTN_W + 4 ? -1 : 1);
+    } else if (rows[i].kind == R_LEVEL) {
         /* minus at the left of the bar, plus at the right */
         int mid = LIST_X + w - LEVEL_W / 2;
         if (x >= LIST_X + w - LEVEL_W) activate(i, x < mid ? -1 : 1);
@@ -1937,7 +2018,8 @@ static void two_lines_centred(int cx, int y, int w, const t48_font *f, uint32_t 
 static const char *choice_text(const char *v)
 {
     static const char *const map[][2] = {{"dhcp", "DHCP"}, {"static", "Static"}, {"udp", "UDP"}, {"tcp", "TCP"}, {"tls", "TLS"},
-                                             {"stable", "Stable"}, {"testing", "Testing"},
+                                             {"stable", "Stable"}, {"testing", "Testing"}, {"rfc2833", "RFC 2833"},
+                                             {"inband", "In-band"}, {"info", "SIP INFO"},
                                              {"standard", "Standard"}, {"long", "Long"}, {"chime", "Chime"}, {"pulse", "Pulse"},
                                              {"custom", "Custom"}, {"off", "Off"}, {"on", "On"}, {"required", "Required"},
                                              {"300", "5 min"}, {"600", "10 min"}, {"1800", "30 min"}, {"3600", "1 h"}};
@@ -1991,6 +2073,12 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
     if (r->kind == R_TOGGLE) {
         ui_switch(right, y, h, !strcmp(r->value, "on"), selected);
         t48_text_fit(&ui, x + pad, ty, w - 140, f, text, r->label);
+        if ((r->flags & F_CODEC) && !SMALL) {
+            /* touch: up and down the order, left of the switch (soft keys on a small screen) */
+            int i = (int)(r - rows);
+            ui_btn(CODEC_UP_X(x, w), y + 7, CODEC_BTN_W, h - 14, "^", i > 0 ? B_PLAIN : B_OFF);
+            ui_btn(CODEC_UP_X(x, w) + CODEC_BTN_W + 8, y + 7, CODEC_BTN_W, h - 14, "v", i < nrows - 1 ? B_PLAIN : B_OFF);
+        }
         return;
     }
     /* label on the left, value on the right; the value gives way first */
@@ -1998,7 +2086,7 @@ static void draw_row(const struct row *r, int x, int y, int w, int selected)
     if (lw > room * 2 / 3 && r->value[0]) lw = room * 2 / 3;
     t48_text_fit(&ui, x + pad, ty, lw + 2, f, r->kind == R_INFO && !selected ? ink.dim : text, r->label);
     if (r->value[0]) {
-        char secs[40];
+        char secs[220];
         const char *shown = r->kind == R_CHOICE ? choice_text(r->value) : r->value;
         if (r->flags & F_SECONDS) { snprintf(secs, sizeof secs, "%s s", r->value); shown = secs; }
         int vw = t48_text_width(f, shown), max = room - lw - 24;
@@ -2148,6 +2236,11 @@ static void bar_for_row(void)
         }
     }
     if (stack[depth].page == P_THEME) first = "Select";
+    if (r && (r->flags & F_CODEC)) {
+        int i = stack[depth].sel;
+        ui_bar(first, B_FIRST, "Up", i > 0 ? B_PLAIN : B_OFF, "Down", i < nrows - 1 ? B_PLAIN : B_OFF, "Back", B_PLAIN);
+        return;
+    }
     ui_bar(first, B_FIRST, NULL, 0, NULL, 0, "Back", B_PLAIN);
 }
 
@@ -2162,7 +2255,10 @@ void settings_soft(int b)
         redraw_me();
         return;
     }
-    if (stack[depth].sel < nrows && rows[stack[depth].sel].kind == R_LEVEL && b < 2) settings_key(b ? T48_KEY_RIGHT : T48_KEY_LEFT, 1);
+    if (stack[depth].sel < nrows && (rows[stack[depth].sel].flags & F_CODEC) && (b == 1 || b == 2)) {
+        codec_change(stack[depth].sel, b == 1 ? -1 : 1);
+        redraw_me();
+    } else if (stack[depth].sel < nrows && rows[stack[depth].sel].kind == R_LEVEL && b < 2) settings_key(b ? T48_KEY_RIGHT : T48_KEY_LEFT, 1);
     else if (b == 0) settings_key(T48_KEY_OK, 1);
     else if (b == 3) settings_key(T48_KEY_BACK, 1);
 }

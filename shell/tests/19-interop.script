@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# An account's Advanced page: session timer and 100rel (issue #77, docs/sip.md#interoperability).
+# An account's Advanced page: session timer and 100rel, after the account's other advanced settings (issue #77, docs/sip.md#interoperability).
 wait 200
 expect idle
 touch 700 420
@@ -24,6 +24,11 @@ key down
 expectstate settings.row Advanced
 key ok
 expectstate settings.page sipadvanced
+# after Registration expiry, DTMF, Codecs and NAT keepalive
+key down
+key down
+key down
+key down
 # the defaults, with nothing in the file: both off
 expectstate settings.row Session_timer
 expectstate settings.value off
@@ -60,6 +65,11 @@ wait 1500
 key ok
 expectstate settings.page sipadvanced
 key down
+key down
+key down
+key down
+key down
+expectstate settings.row 100rel
 expectstate settings.value required
 key ok
 expectstate cfg.sip.100rel off

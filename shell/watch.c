@@ -41,7 +41,8 @@ static int sig_changed(struct sig *s, const char *path)
     return 1;
 }
 
-static const char *const phone_files[] = {"sip", "sip2", "sip3", "sip4", "sip5", "sip6", "phone", "audio"};
+static const char *const phone_files[] = {"sip", "sip2", "sip3", "sip4", "sip5", "sip6", "sip7", "sip8", "sip9", "sip10",
+                                             "sip11", "sip12", "sip13", "sip14", "sip15", "sip16", "phone", "audio"};
 static const char *const other_files[] = {"network", "system", "screen", "access", "feed", "apps"};
 #define NPHONE ((int)(sizeof phone_files / sizeof phone_files[0]))
 #define NOTHER ((int)(sizeof other_files / sizeof other_files[0]))

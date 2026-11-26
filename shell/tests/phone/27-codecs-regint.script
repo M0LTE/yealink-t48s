@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Codecs and registration expiry per account (issue #77): the account's file decides which codecs are
+# offered and in what order, and the call uses the first the far end has. The expiry asked for reaches
+# baresip's accounts file. Set in the file and the phone service restarted, as Settings does.
+waitstate reg ok 8000
+# ---- G.711 first, PCMU then PCMA, the wideband ones after: the call is PCMU ----
+run $CONFIG set sip codecs pcmu,pcma,opus,g722
+run $CONFIG set sip register_seconds 120
+run ./apply sip
+wait 1500
+waitstate sip up 10000
+waitstate reg ok 15000
+run grep -q ";regint=120;" phone/run/accounts
+run grep -q ";audio_codecs=PCMU/8000/1,PCMA/8000/1,opus/48000/2,G722/16000/1" phone/run/accounts
+run : > phone/log
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone outgoing 2000
+run $FAR $BOB accept
+waitstate phone incall 5000
+wait 500
+run grep -q "Set audio encoder: PCMU " phone/log
+run ! grep -q "Set audio encoder: opus " phone/log
+run $FAR $BOB cmd hangup
+waitstate phone ended 5000
+key x
+waitstate phone idle 3000
+# ---- Opus and PCMU off, G.722 first: the call is G.722 ----
+run $CONFIG set sip codecs -opus,g722,-pcmu,pcma
+run $CONFIG unset sip register_seconds
+run ./apply sip
+wait 1500
+waitstate sip up 10000
+waitstate reg ok 15000
+run grep -q ";regint=600;" phone/run/accounts
+run grep -q ";audio_codecs=G722/16000/1,PCMA/8000/1" phone/run/accounts
+run : > phone/log
+key 1
+key 0
+key 0
+key 2
+key ok
+waitstate phone outgoing 2000
+run $FAR $BOB accept
+waitstate phone incall 5000
+wait 500
+run grep -q "Set audio encoder: G722 " phone/log
+run $FAR $BOB cmd hangup
+waitstate phone ended 5000
+key x
+waitstate phone idle 3000
+# ---- a call in from bob, who offers Opus first: still G.722, as Opus is off here ----
+run : > phone/log
+run $FAR $BOB cmd dial 1001
+waitstate phone incoming 5000
+key speaker
+waitstate phone incall 5000
+wait 500
+run grep -q "Set audio encoder: G722 " phone/log
+run $FAR $BOB cmd hangup
+waitstate phone ended 5000
+key x
+waitstate phone idle 3000
+# as phone-test.sh set it up
+run $CONFIG unset sip codecs
+run $CONFIG set sip register_seconds 60
+run ./apply sip
+wait 1500
+waitstate sip up 10000
+waitstate reg ok 15000
+quit

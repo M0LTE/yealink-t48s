@@ -24,6 +24,10 @@ expectstate settings.row Advanced
 expectstate soft1 Open
 key soft1
 expectstate settings.page sipadvanced
+key down
+key down
+key down
+key down
 expectstate settings.row Session_timer
 expectstate settings.value off
 expectstate soft1 Change
