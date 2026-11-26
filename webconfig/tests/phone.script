@@ -147,6 +147,15 @@ expectstate contacts.sel Zoe
 expectstate contacts.number 1003
 shot shots/web-phone-contact.png
 key x
+# do not disturb from the page: DND on the home screen; Right at the phone turns it off, and the page says so
+expectstate dnd off
+run $B post /accounts/dnd to=on
+waitstate dnd on 3000
+shot shots/web-phone-dnd.png
+key right
+expectstate dnd off
+expectstate cfg.phone.dnd off
+run $B expect /accounts "<h2>Do not disturb</h2><span class='pill '>Off</span>"
 # the call history: a missed call (written here as the phone writes one), then cleared from the page
 run printf 'seen 0\n%s|m|0|1003|Zoe|1\n' "$(date +%s)" > simdata/state/history.new && mv simdata/state/history.new simdata/state/history
 waitstate history 1 3000
