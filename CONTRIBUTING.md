@@ -23,6 +23,10 @@ Pull requests are welcome, small or large, written by hand or with an AI tool. T
 4. **Docs updated** in the same pull request: the page in `docs/` for that part, and [docs/status.md](docs/status.md) if what works has changed.
 5. **Tried on a phone** if it touches hardware, boot, flash or install: say what you ran and on which model. If you have no phone, say so; someone with one will try it.
 
+## The phone and the web setup page
+
+Every setting and every status the phone shows is also on the web setup page, with a test on each side: a screen script in `shell/tests/` and a test in `webconfig/tests/`. SSH on and off is on both. The exceptions need the phone itself, on purpose: turning the web setup page back on, firmware backup, install and restore from a USB stick, the key test, and opening an app.
+
 ## Testing without a phone
 
 Plain `make`, a C compiler and python3 are enough for most of it.
