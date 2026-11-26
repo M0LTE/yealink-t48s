@@ -30,7 +30,7 @@ Each 20 ms tick, driven by the hardware's own sample clock:
 4. microphone = DC removed, echo control on the speakerphone, silence if muted or on hook;
 5. play the loudspeaker frame, send the microphone frame to baresip.
 
-When nothing is wanted (on hook, no call audio, no tone, no app writing sound) the hardware is closed and the process sleeps. It uses no CPU at all while the phone is idle.
+When nothing is wanted (on hook, no call audio, no tone, no app writing sound) the hardware is closed and the process sleeps. It uses no CPU at all while the phone is idle. After a key's sound it stays running for 2 s, for the next key: closing and opening it between keys made the tones late ([phone.md](phone.md#speed)).
 
 Rules worth knowing:
 
@@ -301,7 +301,7 @@ Run on 2026-11-23. Nothing in this section touched the phone or any sound device
 | `test_msg` | messages whole, a byte at a time, oversized, and to a peer that has stopped reading |
 | `test_appsnd` | an app's sound. The ring: only a sealed memfd of the right size is taken; every sample comes out once and in order, round the ring many times; a sound starts on a whole frame and a short one is not kept waiting; an app that scribbles on the ring is emptied, not believed; off the screen nothing is taken and what waited is dropped. The engine: volume 15 is the limit and each step is 2 dB; silence when the app stops; faded out within a frame for ringing, a tone and a call, and back after; never past the limit with a key sound on top |
 | `socket_test.py`, an app | the real daemon with a stand-in for the shell and an app: an unsealed ring is refused; writing starts the hardware and is taken at 16000 samples a second without running dry; a full-scale tone at volume 15 lands on the limit; while the phone rings the app's sound is taken and not played; paused, what waited is dropped and nothing is taken; the hardware idles 2 s after; when the shell's connection closes the ring is let go |
-| `socket_test.py`, calls | the real daemon with a stand-in for baresip: 100 frames arrive 20.0 ms apart, numbered from 0; silence on hook, the microphone file off hook; three late answers are played as silence and counted; an old-version client is refused; tones, ringer and key sounds land in the loudspeaker file and the hardware goes idle after each |
+| `socket_test.py`, calls | the real daemon with a stand-in for baresip: 100 frames arrive 20.0 ms apart, numbered from 0; silence on hook, the microphone file off hook; three late answers are played as silence and counted; an old-version client is refused; tones, ringer and key sounds land in the loudspeaker file and the hardware goes idle after each, 2 s after the last key's |
 
 `sip/test/audiod-test.sh`, in the build container on another machine, through a throwaway Kamailio with password login:
 

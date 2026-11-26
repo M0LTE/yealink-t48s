@@ -10,6 +10,7 @@ Issues [#26](https://github.com/M0LTE/yealink-t48s/issues/26), [#27](https://git
 - **New (2026-11-25, #77):** up to 16 accounts; per account an Account name, and under Advanced registration expiry, DTMF mode (RFC 2833, SIP INFO, in-band), codecs and their order, NAT keepalive ([sip.md](sip.md#running-it)).
 - **New (2026-11-23, #36):** up to six SIP accounts, each with its own registration, and a choice of which one a call goes out from. See [Several accounts](#several-accounts).
 - **New (2026-11-25, #77):** with the handset lifted (or Speaker or Headset on), a number is called without the Call key: at once when it is complete, such as 999 or an eleven-digit UK number, otherwise 4 s after the last digit. See [Dial plan](#dial-plan).
+- **New (2026-11-26):** a refused call says why in a few words ("Busy", "Number not found", "Call settings not accepted") in place of the far end's status line; a held 0 types +; a key in the dialler redraws only the number, so the screen keeps up with typing (see [Speed](#speed)); an account with no Account name is called by its provider's domain, `example.net`, not by its user and host ([Several accounts](#several-accounts)).
 - **Tested in the simulator against the real services**: baresip with our modules, `t48-audiod` on its silent backend and a throwaway SIP server, with two more baresips as the people at the other end. Eighteen scripted scenarios pass, and pass again with the phone's own ARM builds of the shell, baresip and the audio service running under qemu. The new parts (#27, #36) have not run on the phone yet.
 - Apps can no longer reach call control: baresip's TCP control port is gone, replaced by our own module on a socket only root can open ([sip.md](sip.md#control-interface)).
 
@@ -29,6 +30,8 @@ Issues [#26](https://github.com/M0LTE/yealink-t48s/issues/26), [#27](https://git
 | ![messages waiting](img/phone-messages.png) | ![do not disturb](img/phone-dnd.png) |
 | ![two accounts on the idle screen](img/phone-idle-two-accounts.png) | ![choosing the account to call from](img/phone-dial-account.png) |
 | ![which account was called](img/phone-incoming-account.png) | ![the history with accounts](img/phone-history-accounts.png) |
+| ![a call refused for its settings](img/phone-call-refused.png) | ![+ from a held 0](img/phone-dial-plus.png) |
+| ![accounts named by their domain](img/phone-idle-account-names.png) | ![the T46S: a refused call](img/t46s/call-refused.png) |
 
 ## What each thing does
 
@@ -37,7 +40,7 @@ Issues [#26](https://github.com/M0LTE/yealink-t48s/issues/26), [#27](https://git
 | **Lift the handset** | dial tone | calls the number typed; else dial tone | answers | moves the sound to the handset |
 | **Put it down** | | closes the dialler | | ends the call, if the sound was on the handset |
 | **Speaker**, **Headset** | dial tone there | calls the number typed there | answers there | moves the sound there. Pressed again: back to the handset if it is lifted, otherwise ends the call |
-| **Digits, `*`, `#`** | start a number | add to it; with the sound on, the number goes when complete ([dial plan](#dial-plan)). `#` is Call where the plan has no place for it | | send tones |
+| **Digits, `*`, `#`** | start a number | add to it; with the sound on, the number goes when complete ([dial plan](#dial-plan)). `#` is Call where the plan has no place for it. 0 held for 0.6 s as the first character is + | | send tones |
 | **OK** | apps | calls (on the speaker if the handset is down) | answers | answers a call that is waiting; with a call on hold, swaps to it |
 | **X** | | rubs out a digit; closes when empty | declines | cancels a call that has not connected; turns away a call that is waiting; closes the keypad |
 | **Mute** | | | silences the ringer | microphone off and on; silences the call waiting beep |
@@ -55,7 +58,23 @@ Other things worth knowing:
 - Volumes are kept per place (handset, speaker, headset, ringer) in `/data/config/audio` and given to the audio service at start.
 - The touch screen has the same things as buttons: a keypad in the dialler and in a call, Answer and Decline, Mute, Hold, Keypad, Speaker, Transfer, End. The on-screen Speaker button only moves the sound; it never hangs up.
 - Two calls at most; a third caller hears busy.
-- A call that fails plays busy or error tone in the handset (or on the speaker) until you hang up. With the phone on the hook nothing is played.
+- A call that fails plays busy or error tone in the handset (or on the speaker) until you hang up. With the phone on the hook nothing is played. The screen says why in a few words, from the Q.850 cause if the far end gave one, otherwise from the SIP status; for a fault the status is shown under it, small. The far end's own words go to the log (`phone: call failed: ...`). [`shell/names.c`](../shell/names.c) has the table:
+
+  | Shown | SIP status | Q.850 cause | Tone |
+  |---|---|---|---|
+  | Busy | 486, 600 | 17 | busy |
+  | No answer | | 18, 19 | busy |
+  | Not available | 480 | 20, 27 | busy |
+  | Declined | 603 | 21 | busy |
+  | Network busy | | 34, 38, 41, 42 | busy |
+  | No answer from network | 408, 503, 504 | | busy |
+  | Cancelled | 487 | | busy |
+  | Number not found | 404, 410, 604 | 1, 3, 22 | error |
+  | Wrong number | 484 | 28 | error |
+  | Not allowed | 401, 403, 407 | | error |
+  | Call settings not accepted (codecs or encryption the far end will not take) | 415, 488, 606 | 88 | error |
+  | Call failed | anything else | | error |
+- **+** is a 0 held down for 0.6 s, on the keypad or the screen's, as the first character only; the screen's 0 key has a small + beside it. A number that starts with + goes to baresip as it is and is called as `sip:+44...@server`.
 - Missed calls are counted on the idle screen until the history has been looked at. History is the last 50 calls, in `/data/phone/history`. Picking one puts its number in the dialler. Its buttons: Dial, Add contact (for a number not in the list yet), Delete (that line) and Clear all (asks first).
 - If the shell is restarted in the middle of a call, the call carries on (it lives in baresip and the audio service) and the new shell picks it up: same screen, same timer, same route and mute.
 - If baresip stops, the idle screen says "No phone service" and a call in progress ends as "Call lost".
@@ -162,6 +181,7 @@ Up to 16, the stock firmware's number of lines, set in Settings, Accounts ([sett
 - **Calls go out from the default account** unless another is chosen: Left and Right in the dialler step through the accounts, as does a touch on the "From" line. A touch on an account's line on the idle screen opens the dialler already set to it.
 - **Which is the default** is set on the Accounts page. The status bar shows that one; with more than one account the idle screen has a line for each with its own dot. Over six, the sixth line is the rest: how many, and the dot of the worst of them; a touch on it opens the dialler. The small screen's one line becomes dots alone when the names do not fit.
 - **The history keeps the account** of each call, and Redial and the history call back from the same one.
+- **What an account is called** on the phone's screens and the web setup page: its Account name if it has one; otherwise its server host cut to the domain, the last two parts (`sip.example.net` becomes `example.net`) or three under a country's second level (`voip.example.co.uk` becomes `example.co.uk`; an IP address stays as it is). Two accounts that would read the same have the first four characters of the user added: `example.net (Xq7r)`. Some providers give out a random user and a long host per customer; the full address is on the account's own page. On the idle screen a name too long to sit beside "Default" goes without the word: the status bar names the default too.
 - An account can be switched off without forgetting it ("Enabled"), given an **Account name** for the phone's own screens (the idle screen, the dialler's From, the call list, and later the line keys; `label` in the file), and removed. Display name is different: it is what the far end is told.
 
 The dot beside an account is green when registered, amber while trying, red when the server refused or baresip is not running. The shell reads the same files `t48-sip` does ([sip.md](sip.md#running-it), example in [`sip/config/sip.example`](../sip/config/sip.example)), and only for what it shows; the passwords are baresip's business. No account is in the repository; the tests use made-up ones on a server that exists for a minute.
@@ -194,6 +214,21 @@ The message lamp was called "power" here until 2026-11-23 (Yealink's own files c
 ```
 
 `phone.c` is one small state machine: idle, dial, outgoing, incoming, in call, ended, for the call in front; beside it sits at most one other call, either waiting to be answered or on hold. It follows baresip's events (`CALL_INCOMING`, `CALL_RINGING`, `CALL_ESTABLISHED`, `CALL_CLOSED`, `REGISTER_OK`, ...) and tells the audio service what the owner should hear, in the order [audiod.md](audiod.md#the-control-socket-the-shell) asks for. Both clients keep trying once a second if their service is not there, and say everything again when it comes back.
+
+## Speed
+
+Reported on the phone (2026-11-26): typing in the dialler felt slow. Measured on the phone (a T48S, its 500 MHz ARM11) with the simulator's build run there, and from the shell's and the audio service's logs:
+
+- **The key's sound** was the larger part. Typing with the handset down, each key's tone opened the audio hardware and closed it again 0.3 s later, as the hardware stopped 100 ms after the last sound. Closing it waits for the outputs to ramp down (100 ms in the kernel driver), during which the audio service hears nothing else; opening it takes another 30 ms before the 40 ms of playback buffer. At an ordinary typing speed the next key often landed in that gap: its tone came 0.1 to 0.2 s late. The service now keeps the hardware running for 2 s after a key's sound, as it already did for an app's, so a key in a run of typing is heard 20 to 60 ms after it is pressed.
+- **The screen**: every key redrew and copied the whole 800 x 480 picture, 1.5 MB: 29 ms a key (20 ms to draw, most of it filling the background; 8 ms to copy). A key that changes only the number now redraws the number's part alone, 8 ms a key. The first digit, which lights the Call button, still redraws the screen, and does so once: opening the dialler from the idle screen drew it twice, once empty.
+
+| On the phone, per key in the dialler | Before | After |
+|---|---|---|
+| Screen | 29 ms | 8 ms |
+| First digit from the idle screen | 58 ms (two pictures) | 29 ms |
+| Key tone, typing on the hook | 70 to 190 ms, the hardware opened for each key | 20 to 60 ms |
+
+`shell/tests/25-dial-redraw.script` (and `small/12-dial-redraw.script`) checks that the part drawn alone leaves the same picture as a whole redraw.
 
 ## Testing
 
@@ -232,6 +267,8 @@ Result on 2026-11-23, all passing, both as PC builds and with `ARM=1`:
 | 20 several accounts | a second account is typed in on the Settings screens and the phone service restarts with both registered; a call out from the chosen account arrives from 1004, Redial uses it again, a plain call still goes from 1001; calls in to each say which was called; the history has the account; the usual account is changed and changed back; the account is removed and one is left |
 
 `make -C shell check` also runs `20-calls.script` (and `small/06-calls.script` on the T46S's screen): the ringtone row (Custom once there is a sound), the forwarding page and Block direct calls on the Advanced page, and FWD in the header.
+
+`make -C shell check` also runs `tests/sip/` on the T48S's screen and `small/11-failed-calls.script` on the T46S's, with `tests/small/fakesip.py` standing in for baresip: calls refused with a provider's whole Reason header, busy, no answer, number not found and the network not answering, each with its short reason; + from a held 0 on the keys and on the screen, and only as the first character, dialled as it is; and accounts at one provider named by its domain and the start of each user, on the idle screen, the dialler and Settings, Accounts. `tests/test_names.c` checks the reasons and the domain rule on their own.
 
 `make -C shell check` also runs `tests/test_dialplan.c` (the matcher: the syntax refused and taken, and what the default and other maps say of some 170 numbers), `19-dialplan.script` and `small/05-dialplan.script` (the dialler and the Advanced page on both models, with no services), and `08-contacts.script`: the contact list, the history's buttons and do not disturb with no services behind them.
 
