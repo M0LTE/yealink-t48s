@@ -762,6 +762,38 @@ class Paired(unittest.TestCase):
         self.assertIsNone(p.get("sip3", "100rel"))
         self.ok("/accounts/remove", {"n": "3", "sure": "yes"}, "/accounts")
 
+    def test_14_dnd_and_forwarding(self):
+        # do not disturb: the key the phone's switch writes, read back both ways
+        b, p = self.b, self.p
+        page = b.get("/accounts").body
+        self.assertIn("<h2>Do not disturb</h2><span class='pill '>Off</span>", page)
+        self.assertNotIn("Do not disturb", b.get("/").body)
+        self.assertEqual(self.ok("/accounts/dnd", {"to": "on"}, "/accounts"), "Do not disturb on.")
+        self.assertEqual(p.get("phone", "dnd"), "on")
+        self.assertIn("<h2>Do not disturb</h2><span class='pill warn'>On</span>", b.get("/accounts").body)
+        self.assertIn("<span class='pill warn'>Do not disturb</span>", b.get("/").body)
+        self.assertIn("name='to' value='off'><div class='actions'><button type='submit'>Turn off", b.get("/accounts").body)
+        p.set("phone", "dnd", "off")     # as the phone's Right key leaves it
+        self.assertIn("<span class='pill '>Off</span>", b.get("/accounts").body)
+        self.ok("/accounts/dnd", {"to": "off"}, "/accounts")
+        self.assertEqual(p.get("phone", "dnd"), "off")
+        self.assertEqual(b.post("/accounts/dnd", {"to": "on"}, csrf=False).status, 403)
+        self.assertEqual(p.get("phone", "dnd"), "off")
+        # forwarding every call, as the phone's FWD reads it: on, somewhere to go, not the account itself
+        base = {"n": "5", "user": "1005", "domain": "pbx.example.org", "transport": "udp", "enabled": "on", "fwd": "1"}
+        pill = "<span class='pill warn'>Forwarding</span>"
+        self.ok("/accounts/save", dict(base, forward_always="on", forward_always_to="1009"), "/accounts")
+        self.assertIn("<span class='pill good'>On</span>" + pill + "</summary>", b.get("/accounts").body)
+        self.assertNotIn("</span><span class='sum dim'>Not set", b.get("/accounts").body)
+        self.assertRegex(b.get("/").body, "1005@pbx.example.org +" + pill)
+        p.set("sip5", "forward_always_to", "1005@pbx.example.org")   # by hand: the page refuses it, and the phone ignores it
+        self.assertNotIn(pill, b.get("/").body)
+        self.ok("/accounts/save", dict(base, forward_busy="on", forward_busy_to="1009"), "/accounts")
+        self.assertNotIn(pill, b.get("/").body)
+        self.ok("/accounts/save", dict(base, forward_always="on", forward_always_to="1009", enabled=""), "/accounts")
+        self.assertNotIn(pill, b.get("/").body)
+        self.ok("/accounts/remove", {"n": "5", "sure": "yes"}, "/accounts")
+
     def test_20_network(self):
         b, p = self.b, self.p
         before = len(p.applied_list())
@@ -947,7 +979,9 @@ class Paired(unittest.TestCase):
         # an update from the second feed keeps them
         self.bad("/apps/feed", {"url": "http://plain.example/index.json"}, "/apps")
         self.ok("/apps/feed", {"url": "file://" + os.path.join(SHELL_BUILD, "feeds", "2", "index.json")}, "/apps")
-        self.assertIn("pill warn'>Update<", b.get("/apps").body)
+        page = b.get("/apps").body
+        self.assertIn("pill warn'>Update<", page)
+        self.assertNotIn("/apps/update-all", page)     # one update: as on the phone, no Update all
         self.ok("/apps/update", {"id": "demo"}, "/apps")
         self.assertIn("Installed 1.1.0", b.get("/apps").body)
         self.assertEqual(p.get("apps/demo", "title"), "Kitchen")
@@ -960,6 +994,28 @@ class Paired(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(p.installed, "demo")))
         self.assertIsNone(p.get("apps/demo", "title"))
         self.assertNotIn("4711", p.logtext())
+
+    def test_71_update_all(self):
+        b, p = self.b, self.p
+        feed = lambda n: {"url": "file://" + os.path.join(SHELL_BUILD, "feeds", str(n), "index.json")}
+        self.ok("/apps/feed", feed(3), "/apps")
+        self.ok("/apps/install", {"id": "demo"}, "/apps")
+        self.ok("/apps/install", {"id": "memo"}, "/apps")
+        self.ok("/apps/settings", {"id": "memo", "s_title": "Shopping"}, "/apps")
+        self.assertNotIn("/apps/update-all", b.get("/apps").body)
+        self.ok("/apps/feed", feed(4), "/apps")
+        page = b.get("/apps").body
+        self.assertIn("<h2>2 updates</h2>", page)
+        self.assertIn("action='/apps/update-all'", page)
+        self.assertEqual(self.ok("/apps/update-all", {}, "/apps"), "2 apps updated.")
+        page = b.get("/apps").body
+        self.assertEqual(page.count("Installed 1.1.0"), 2)
+        self.assertNotIn("/apps/update-all", page)
+        self.assertEqual(p.get("apps/memo", "title"), "Shopping")
+        self.assertEqual(self.ok("/apps/update-all", {}, "/apps"), "No updates.")
+        self.assertEqual(b.post("/apps/update-all", {}, csrf=False).status, 403)
+        for app in ("demo", "memo"):
+            self.ok("/apps/remove", {"id": app}, "/apps")
 
     def keys(self):
         path = os.path.join(self.p.keep, "ssh", "authorized_keys")

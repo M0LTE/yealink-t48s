@@ -5,13 +5,14 @@
 #   feeds/1: demo 1.0.0, "future" (written for an API level this shell does not
 #            speak) and "broken" (its package does not match its checksum)
 #   feeds/2: demo 1.1.0
+#   feeds/3: demo 1.0.0 and memo 1.0.0; feeds/4: both at 1.1.0 (Update all on the web page)
 # and feeds/evil.t48app, a package that tries to write outside its folder.
 set -e
 O=$1
 HERE=$(cd "$(dirname "$0")" && pwd)
 PACK="python3 $HERE/../../sdk/t48-pack"
 rm -rf "$O/feeds"
-mkdir -p "$O/feeds/1" "$O/feeds/2" "$O/feeds/src"
+mkdir -p "$O/feeds/1" "$O/feeds/2" "$O/feeds/3" "$O/feeds/4" "$O/feeds/src"
 app() {  # id name version api feed
     d="$O/feeds/src/$1-$3/$1"
     mkdir -p "$d"
@@ -30,8 +31,11 @@ app demo Demo 1.0.0 1 1
 app future Future 3.0.0 9 1
 app broken Broken 1.0.0 1 1
 app demo Demo 1.1.0 1 2
-$PACK --index "$O/feeds/1" >/dev/null
-$PACK --index "$O/feeds/2" >/dev/null
+app demo Demo 1.0.0 1 3
+app memo Memo 1.0.0 1 3
+app demo Demo 1.1.0 1 4
+app memo Memo 1.1.0 1 4
+for n in 1 2 3 4; do $PACK --index "$O/feeds/$n" >/dev/null; done
 # same size, one byte different: only the checksum can tell
 python3 - "$O/feeds/1/broken-1.0.0.t48app" <<'PY'
 import sys

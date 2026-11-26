@@ -205,6 +205,18 @@ static int account_on(int n)
     return account_used(n) && strcmp(v, "off") && strcmp(v, "no") && strcmp(v, "false") && strcmp(v, "0");
 }
 
+/* every call goes elsewhere: Always forwarding on an account that is on, to somewhere it can go,
+ * read as shell/phone.c reads it (FWD on the phone's home screen) */
+static int forwarding(int n)
+{
+    const char *f = sip_file(n), *to = val(f, "forward_always_to", "");
+    return account_on(n) && !strcmp(val(f, "forward_always", "off"), "on") && to[0] && !strpbrk(to, " <>\",;") &&
+           !forward_to_self(to, val(f, "user", ""), val(f, "domain", ""));
+}
+
+/* the phone's own switch: Right on the home screen, and a row in Settings */
+static int dnd_on(void) { return !strcmp(val("phone", "dnd", "off"), "on"); }
+
 static int history_count(void)
 {
     char path[300];
@@ -244,10 +256,11 @@ void page_overview(struct req *r)
         if (!account_used(n)) continue;
         const char *label = val(sip_file(n), "label", "");
         used++;
-        H("<p>%s@%s %r%s%r%r</p>", val(sip_file(n), "user", ""), val(sip_file(n), "domain", ""), label[0] ? "<span class='dim'>" : "", label,
-          label[0] ? "</span>" : "", account_on(n) ? "" : " <span class='pill'>Off</span>");
+        H("<p>%s@%s %r%s%r%r%r</p>", val(sip_file(n), "user", ""), val(sip_file(n), "domain", ""), label[0] ? "<span class='dim'>" : "", label,
+          label[0] ? "</span>" : "", account_on(n) ? "" : " <span class='pill'>Off</span>", forwarding(n) ? " <span class='pill warn'>Forwarding</span>" : "");
     }
     if (!used) H("<p class='dim'>None</p>");
+    if (dnd_on()) H("<p><span class='pill warn'>Do not disturb</span></p>");
     H("</a>");
 
     H("<a class='card tile' href='/network'><h2>Network</h2><p>%s</p><p class='dim'>%s</p></a>",
@@ -440,6 +453,11 @@ static void page_accounts(struct req *r)
 {
     int used = 0, def = atoi(val("phone", "default_account", "1"));
     page_begin(r, "Accounts", "/accounts");
+    int dnd = dnd_on();
+    H("<div class='card' id='dnd'><div class='apphead'><h2>Do not disturb</h2><span class='pill %r'>%r</span></div>", dnd ? "warn" : "", dnd ? "On" : "Off");
+    form_begin(r, "/accounts/dnd", NULL);
+    H("<input type='hidden' name='to' value='%r'><div class='actions'><button type='submit'>Turn %r</button></div></form></div>",
+      dnd ? "off" : "on", dnd ? "off" : "on");
     for (int n = 1; n <= MAX_ACCTS; n++) used += account_on(n);
     if (used > 1) {
         H("<div class='card'>");
@@ -460,7 +478,8 @@ static void page_accounts(struct req *r)
         if (!has && spare++) continue;
         H("<details class='card' id='a%d'%r><summary><h2>Account %d</h2>", n, has || n == 1 ? " open" : "", n);
         if (account_used(n))
-            H("<span class='sum'>%s@%s</span><span class='pill %r'>%r</span>", val(f, "user", ""), val(f, "domain", ""), account_on(n) ? "good" : "", account_on(n) ? "On" : "Off");
+            H("<span class='sum'>%s@%s</span><span class='pill %r'>%r</span>%r", val(f, "user", ""), val(f, "domain", ""), account_on(n) ? "good" : "",
+              account_on(n) ? "On" : "Off", forwarding(n) ? "<span class='pill warn'>Forwarding</span>" : "");
         else H("<span class='sum dim'>Not set</span>");
         H("</summary>");
         form_begin(r, "/accounts/save", NULL);
@@ -645,6 +664,19 @@ static void post_account_block(struct req *r)
         flash(r, 0, "Direct calls %s.", on ? "blocked" : "allowed");
     }
     redirect(r, "/accounts#advanced");
+}
+
+/* the same key the phone's switch writes; the shell reads it again within a second (shell/watch.c) */
+static void post_dnd(struct req *r)
+{
+    int on = !strcmp(form(r, "to"), "on");
+    if (cfg_set("phone", "dnd", on ? "on" : "off") < 0) {
+        flash(r, 1, "Not saved: %s.", strerror(errno));
+    } else {
+        logmsg("do not disturb %s", on ? "on" : "off");
+        flash(r, 0, "Do not disturb %s.", on ? "on" : "off");
+    }
+    redirect(r, "/accounts");
 }
 
 /* a WAV for an account's custom ringtone, made into the phone's format and kept */
@@ -1202,7 +1234,7 @@ static void page_apps(struct req *r)
 {
     static char out[32 * 1024];
     char err[200] = "";
-    int shown = 0;
+    int shown = 0, updates = 0;
     app_command("list", NULL, out, sizeof out, 25000);
     scan_apps();
     page_begin(r, "Apps", "/apps");
@@ -1221,6 +1253,7 @@ static void page_apps(struct req *r)
         const struct manifest *m = installed(id);
         long kb = (atol(f[6]) ? atol(f[6]) : atol(f[5])) / 1024 + 1;
         shown++;
+        updates += !strcmp(st, "update");
         H("<div class='card app'><div class='apphead'><h2>%s</h2><span class='pill %r'>%r</span></div>", f[2],
           !strcmp(st, "available") ? "" : !strcmp(st, "update") ? "warn" : !strcmp(st, "unsupported") ? "bad" : "good",
           !strcmp(st, "available") ? "Available" : !strcmp(st, "update") ? "Update" : !strcmp(st, "unsupported") ? "Needs newer firmware" :
@@ -1243,6 +1276,12 @@ static void page_apps(struct req *r)
         H("</div>");
     }
     if (!shown) H("<div class='card'><p class='dim'>No apps</p></div>");
+    /* as on the phone: offered when there is more than one */
+    if (updates > 1) {
+        H("<div class='card'><div class='apphead'><h2>%d updates</h2></div>", updates);
+        form_begin(r, "/apps/update-all", NULL);
+        H("<div class='actions'><button class='primary' type='submit'>Update all</button></div></form></div>");
+    }
     if (err[0]) H("<p class='flash bad'>Feed error: %s</p>", err);
 
     H("<div class='card'><h2>Feed</h2>");
@@ -1265,6 +1304,26 @@ static void post_app_change(struct req *r)
     if (st == 0) flash(r, 0, "%s %s.", id, !strcmp(verb, "remove") ? "removed" : !strcmp(verb, "update") ? "updated" : "installed");
     else flash(r, 1, "%s not %s: %s.", id, !strcmp(verb, "remove") ? "removed" : !strcmp(verb, "update") ? "updated" : "installed",
                why[0] ? why : "installer did not finish");
+    redirect(r, "/apps");
+}
+
+/* t48-app updates each app the feed has newer, one after another, and stops at the first that fails */
+static void post_app_update_all(struct req *r)
+{
+    static char out[8192];
+    char why[200] = "";
+    int done = 0;
+    int st = app_command("update", NULL, out, sizeof out, 240000);   /* under browsers' own timeouts */
+    for (char *p = out; p && *p; p = strchr(p, '\n'), p = p ? p + 1 : NULL) {
+        done += !strncmp(p, "done ", 5);
+        /* the app that failed, and why, in t48-app's own words: "t48-app: demo: checksum mismatch" */
+        if (!strncmp(p, "t48-app: ", 9)) snprintf(why, sizeof why, "%.*s", (int)strcspn(p + 9, "\n"), p + 9);
+        else if (!why[0] && !strncmp(p, "error ", 6)) snprintf(why, sizeof why, "%.*s", (int)strcspn(p + 6, "\n"), p + 6);
+    }
+    logmsg("app update all: %d updated, %s", done, st == 0 ? "done" : "failed");
+    if (st != 0) flash(r, 1, "%d updated, then stopped: %s.", done, why[0] ? why : "installer did not finish");
+    else if (!done) flash(r, 0, "No updates.");
+    else flash(r, 0, "%d app%s updated.", done, done == 1 ? "" : "s");
     redirect(r, "/apps");
 }
 
@@ -1976,6 +2035,7 @@ const struct route routes[] = {
     {"POST", "/accounts/advanced", post_account_advanced},
     {"POST", "/accounts/block", post_account_block},
     {"POST", "/accounts/ringtone", post_account_ringtone},
+    {"POST", "/accounts/dnd", post_dnd},
     {"POST", "/accounts/ringtone-remove", post_account_ringtone_remove},
     {"GET", "/network", page_network},
     {"POST", "/network", post_network},
@@ -1997,6 +2057,7 @@ const struct route routes[] = {
     {"POST", "/apps/install", post_app_change},
     {"POST", "/apps/update", post_app_change},
     {"POST", "/apps/remove", post_app_change},
+    {"POST", "/apps/update-all", post_app_update_all},
     {"POST", "/apps/settings", post_app_settings},
     {"POST", "/apps/feed", post_app_feed},
     {"GET", "/access", page_access},

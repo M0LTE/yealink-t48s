@@ -114,7 +114,7 @@ Emergency and service numbers, then the UK numbers that are always eleven digits
 
 ## Do not disturb
 
-Right on the idle screen, or Settings, Do not disturb, on both models. While it is on, callers are told the phone is not available (SIP 480), nothing rings, and each call is listed as missed. Calls out work as usual. It is kept in `/data/config/phone` (`dnd=on`) so it survives a restart. The idle screen's header says so with an amber lamp and DND after the network address, whatever notices are up.
+Right on the idle screen, Settings, Do not disturb, or the Accounts page of the web setup ([web.md](web.md)), on both models. While it is on, callers are told the phone is not available (SIP 480), nothing rings, and each call is listed as missed. Calls out work as usual. It is kept in `/data/config/phone` (`dnd=on`) so it survives a restart. The idle screen's header says so with an amber lamp and DND after the network address, whatever notices are up.
 
 ## Call forwarding
 
