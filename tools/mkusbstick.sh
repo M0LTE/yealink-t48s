@@ -4,7 +4,8 @@
 # firmware from (issue #7, docs/live-image.md). ERASES THE WHOLE STICK.
 #
 # DIR is what "tools/mkliveimage.py usb DIR ..." wrote: T48S.rom, T48S.bin,
-# T48S.rfs and README.txt. The stick gets what U-Boot 2.5.3.0 needs, as read from
+# T48S.rfs and README.txt (T46S.* for a T46S), usually with install/: an unpacked
+# t48s-stick.zip or t46s-stick.zip. The stick gets what U-Boot 2.5.3.0 needs, as read from
 # its code: an MBR partition table (not GPT, and not "no partition table"), one
 # primary partition, FAT32 (FAT16 under 1 GB), the files in the top folder. Then
 # it is read back the way U-Boot reads it (mkliveimage.py checkstick).
@@ -13,7 +14,10 @@
 # over 64 GB unless BIG=1 (a guard against picking the wrong disk). YES=1 skips
 # the question. Needs root, mkfs.vfat (dosfstools) and sfdisk or parted.
 set -e
-DEV=$1; DIR=$2; MODEL=${MODEL:-T48S}
+DEV=$1; DIR=$2
+# the model the folder is for: T46S when it holds T46S.rom and no T48S.rom
+[ -f "$DIR/T46S.rom" ] && [ ! -f "$DIR/T48S.rom" ] && MODEL=${MODEL:-T46S}
+MODEL=${MODEL:-T48S}
 HERE=$(cd "$(dirname "$0")" && pwd)
 [ -n "$DEV" ] && [ -d "$DIR" ] || { echo "usage: $0 /dev/sdX DIR   (erases the stick)" >&2; exit 2; }
 for f in $MODEL.rom $MODEL.bin $MODEL.rfs README.txt; do

@@ -11,14 +11,15 @@
 # The same runs also make t48s-sources.tar.gz, the source that goes with the
 # binaries (NOTICE.md).
 # Every build of main (pushed or started by hand) also updates the rolling
-# pre-release "system-latest": the system image and the kernel for the kernel
-# partition, with VERSION and SHA256SUMS. That is the updater's testing channel;
-# its stable channel is the newest v* release (t48-update, docs/install.md). A run
-# started by hand on any other branch publishes nothing: its files are artifacts only.
-# Every build also makes t46s-live.zip, the try-only set for the T46S
-# (docs/models.md, issue 10): that model's kernel, with no flash driver, and the
-# same system image. Builds of main publish it as the
-# rolling pre-release "t46s-latest"; a v* release carries it too.
+# pre-release "system-latest": the system image and each model's kernel for the
+# kernel partition (T48S-kernel.uimg, T46S-kernel.uimg), with VERSION and
+# SHA256SUMS. That is the updater's testing channel; its stable channel is the
+# newest v* release (t48-update, docs/install.md). A run started by hand on any
+# other branch publishes nothing: its files are artifacts only.
+# The SIP-T46S (docs/models.md, issue 10) gets the same from its own kernel and
+# the same system image: t46s-stick.zip and t46s-live.tar.gz. Builds of main
+# also publish its stick as the rolling pre-release "t46s-latest"; a v* release
+# carries it too.
 # No SSH keys go into anything built here, so what it builds starts with SSH off
 # (docs/access.md).
 # A separate quick job, check, runs the shell's and the web setup page's tests.
@@ -65,6 +66,9 @@ jobs:
 
       - name: SDK packer tests (t48-pack)
         run: sh tools/test-pack.sh
+
+      - name: Flash layout check (the driver's rule for writing anything, on made-up environments)
+        run: sh tools/test-layout.sh
 
   build:
     runs-on: ubuntu-24.04
@@ -173,13 +177,16 @@ jobs:
           mkdir "$RUNNER_TEMP/t48s-stick/install"
           cp "$RUNNER_TEMP/k6/T48S-kernel.uimg" "$RUNNER_TEMP/br/output/images/system.img" "$RUNNER_TEMP/t48s-stick/install/"
           (cd "$RUNNER_TEMP/t48s-stick/install" && sha256sum T48S-kernel.uimg system.img > SHA256SUMS)
-          # the T46S's try-only set (docs/models.md): that model's kernel, which has no
-          # flash driver, and the same system image. The README is the owner's steps
+          # the T46S (docs/models.md): the same three files, stick and install/ from
+          # that model's kernel and the same system image
           k6 -e MODEL=t46s -e LIVE=1 -e OUT=T46S.bin
           python3 tools/mkliveimage.py build "$RUNNER_TEMP/t46s-live" bin="$RUNNER_TEMP/k6/T46S.bin" system="$RUNNER_TEMP/br/output/images/system.img" model=T46S kernel=6.18
           python3 tools/mkliveimage.py check "$RUNNER_TEMP/t46s-live/T46S.rom" 66
-          (cd "$RUNNER_TEMP/t46s-live" && sha256sum T46S.rom T46S.bin T46S.rfs > SHA256SUMS)
-          sed "s/@VERSION@/$T48_VERSION/g; s/@COMMIT@/$GITHUB_SHA/g; s/\$/\r/" tools/t46s-live-readme.txt > "$RUNNER_TEMP/t46s-live/README.txt"
+          k6 -e MODEL=t46s -e FLASH=1 -e OUT=T46S-kernel.uimg
+          python3 tools/mkliveimage.py usb "$RUNNER_TEMP/t46s-stick" bin="$RUNNER_TEMP/k6/T46S.bin" system="$RUNNER_TEMP/br/output/images/system.img" model=T46S kernel=6.18
+          mkdir "$RUNNER_TEMP/t46s-stick/install"
+          cp "$RUNNER_TEMP/k6/T46S-kernel.uimg" "$RUNNER_TEMP/br/output/images/system.img" "$RUNNER_TEMP/t46s-stick/install/"
+          (cd "$RUNNER_TEMP/t46s-stick/install" && sha256sum T46S-kernel.uimg system.img > SHA256SUMS)
           ls k6-src/linux-*.tar.xz >/dev/null 2>&1 || cp "$RUNNER_TEMP"/k6/linux-*.tar.xz k6-src/
 
       # The source that goes with the binaries (NOTICE.md, "Source for the binaries"):
@@ -210,11 +217,12 @@ jobs:
       - name: Collect outputs
         run: |
           mkdir out
-          cp "$RUNNER_TEMP/k6/Image-kexec" "$RUNNER_TEMP/k/Image-kexec-linux3.6" "$RUNNER_TEMP/k6/T48S-kernel.uimg" out/
+          cp "$RUNNER_TEMP/k6/Image-kexec" "$RUNNER_TEMP/k/Image-kexec-linux3.6" "$RUNNER_TEMP/k6/T48S-kernel.uimg" "$RUNNER_TEMP/k6/T46S-kernel.uimg" out/
           echo "$T48_VERSION" > out/VERSION
           tar -C "$RUNNER_TEMP" -czf out/t48s-live.tar.gz t48s-live
+          tar -C "$RUNNER_TEMP" -czf out/t46s-live.tar.gz t46s-live
           (cd "$RUNNER_TEMP/t48s-stick" && zip -q -r "$OLDPWD/out/t48s-stick.zip" T48S.rom T48S.bin T48S.rfs README.txt install)
-          (cd "$RUNNER_TEMP/t46s-live" && zip -q "$OLDPWD/out/t46s-live.zip" T46S.rom T46S.bin T46S.rfs SHA256SUMS README.txt)
+          (cd "$RUNNER_TEMP/t46s-stick" && zip -q -r "$OLDPWD/out/t46s-stick.zip" T46S.rom T46S.bin T46S.rfs README.txt install)
           cp "$RUNNER_TEMP/br/output/images/rootfs.cpio" "$RUNNER_TEMP/br/output/images/system.img" out/
           if [ -f "$RUNNER_TEMP/t48s-sdk.tar.gz" ]; then cp "$RUNNER_TEMP/t48s-sdk.tar.gz" out/; fi
           if [ -f "$RUNNER_TEMP/t48s-sources.tar.gz" ]; then mv "$RUNNER_TEMP/t48s-sources.tar.gz" out/; fi
@@ -244,15 +252,16 @@ jobs:
           gh release upload sdk-latest out/t48s-sdk.tar.gz out/t48s-sdk.tar.gz.sha256 --clobber
           rm out/t48s-sdk.tar.gz.sha256
 
-      # The updater's testing channel. No SSH keys in either file (docs/access.md).
+      # The updater's testing channel. No SSH keys in any file (docs/access.md).
+      # Each phone takes the kernel named for its model; the system image is shared.
       - name: System image and kernel as the rolling pre-release system-latest
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir latest
-          cp out/VERSION out/system.img out/T48S-kernel.uimg latest/
-          (cd latest && sha256sum VERSION system.img T48S-kernel.uimg > SHA256SUMS)
+          cp out/VERSION out/system.img out/T48S-kernel.uimg out/T46S-kernel.uimg latest/
+          (cd latest && sha256sum VERSION system.img T48S-kernel.uimg T46S-kernel.uimg > SHA256SUMS)
           git push -f origin "$GITHUB_SHA:refs/tags/system-latest"
           notes="The newest build of the system image and the kernel, for testing: $T48_VERSION, built from $GITHUB_REF_NAME at $GITHUB_SHA. An installed phone follows it with: t48-update channel testing (docs/install.md). No SSH keys inside. Source for Linux, busybox and the other third-party parts: NOTICE.md in the repository."
           if gh release view system-latest >/dev/null 2>&1; then
@@ -262,25 +271,28 @@ jobs:
           fi
           # the checksums last: a phone that checks half way through an upload
           # finds files that do not match them yet and refuses
-          gh release upload system-latest latest/VERSION latest/system.img latest/T48S-kernel.uimg --clobber
+          gh release upload system-latest latest/VERSION latest/system.img latest/T48S-kernel.uimg latest/T46S-kernel.uimg --clobber
           gh release upload system-latest latest/SHA256SUMS --clobber
 
-      # For a T46S owner to try (docs/models.md). Not started on a T46S yet.
-      - name: "T46S try-only set as the rolling pre-release t46s-latest"
+      # The T46S owner's stick from the newest build of main (docs/models.md), until
+      # a v* release carries it
+      - name: "T46S stick as the rolling pre-release t46s-latest"
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git push -f origin "$GITHUB_SHA:refs/tags/t46s-latest"
-          notes="For the SIP-T46S only: $T48_VERSION, built from $GITHUB_REF_NAME at $GITHUB_SHA. Not yet started on a T46S. It runs from memory and has no flash driver, so nothing is written to the phone. Unpack t46s-live.zip and follow its README.txt; report on issue #10. Details: docs/models.md. No SSH keys inside. Source for Linux, busybox and the other third-party parts: NOTICE.md in the repository."
+          notes="For the SIP-T46S: the newest build of main, $T48_VERSION, built from $GITHUB_REF_NAME at $GITHUB_SHA. Unpack t46s-stick.zip onto a FAT32 USB stick, start the phone from it, and install from the phone's own screen if you want to keep it (docs/guide.md). It installs only on a phone whose flash is laid out as expected (docs/models.md). No SSH keys inside. Source for Linux, busybox and the other third-party parts: NOTICE.md in the repository."
           if gh release view t46s-latest >/dev/null 2>&1; then
-            gh release edit t46s-latest --prerelease --latest=false --title "T46S live set (try-only, untested)" --notes "$notes"
+            gh release edit t46s-latest --prerelease --latest=false --title "T46S stick (latest build)" --notes "$notes"
           else
-            gh release create t46s-latest --prerelease --latest=false --verify-tag --title "T46S live set (try-only, untested)" --notes "$notes"
+            gh release create t46s-latest --prerelease --latest=false --verify-tag --title "T46S stick (latest build)" --notes "$notes"
           fi
-          (cd out && sha256sum t46s-live.zip > t46s-live.zip.sha256)
-          gh release upload t46s-latest out/t46s-live.zip out/t46s-live.zip.sha256 --clobber
-          rm out/t46s-live.zip.sha256
+          (cd out && sha256sum t46s-stick.zip > t46s-stick.zip.sha256)
+          gh release upload t46s-latest out/t46s-stick.zip out/t46s-stick.zip.sha256 --clobber
+          rm out/t46s-stick.zip.sha256
+          # the try-only set it replaces, so that nobody starts an old one
+          for a in t46s-live.zip t46s-live.zip.sha256; do gh release delete-asset t46s-latest "$a" -y 2>/dev/null || true; done
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -288,4 +300,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --title "$GITHUB_REF_NAME" \
-            --notes "t48s-stick.zip is what a phone owner needs: unpack it onto a FAT32 USB stick, start the phone from it, and install from the phone's own screen if you want to keep it (docs/guide.md). Use a 5 V power supply of 1.5 A or more. It holds no keys and no password; SSH is off until it is turned on at the phone's screen (Settings, Access). The rest is for developers and for the updater: t48s-live.tar.gz is the same three start files for a TFTP server (docs/live-image.md); t46s-live.zip is a try-only set for the SIP-T46S, not yet started on one (docs/models.md); system.img and T48S-kernel.uimg are what an installed phone on the stable channel updates itself from (docs/install.md); rootfs.cpio.gz is the system image's files as an archive; Image-kexec (Linux 6.18) and Image-kexec-linux3.6 (the old kernel, kept as a fallback for this release only) start by kexec from Yealink's firmware; t48s-sdk.tar.gz is the app SDK (sdk/README.md). t48s-sources.tar.gz is the source that goes with these binaries: Linux, busybox and the other third-party packages, with their licences (NOTICE.md). Not affiliated with or endorsed by Yealink. Use at your own risk."
+            --notes "t48s-stick.zip (SIP-T48S) or t46s-stick.zip (SIP-T46S) is what a phone owner needs: unpack it onto a FAT32 USB stick, start the phone from it, and install from the phone's own screen if you want to keep it (docs/guide.md). Use a 5 V power supply of 1.5 A or more. It holds no keys and no password; SSH is off until it is turned on at the phone's screen (Settings, Access). The rest is for developers and for the updater: t48s-live.tar.gz and t46s-live.tar.gz are the same three start files for a TFTP server (docs/live-image.md); system.img, T48S-kernel.uimg and T46S-kernel.uimg are what an installed phone on the stable channel updates itself from, each phone its own model's kernel (docs/install.md); rootfs.cpio.gz is the system image's files as an archive; Image-kexec (Linux 6.18) and Image-kexec-linux3.6 (the old kernel, kept as a fallback for this release only) start by kexec from Yealink's firmware; t48s-sdk.tar.gz is the app SDK (sdk/README.md). t48s-sources.tar.gz is the source that goes with these binaries: Linux, busybox and the other third-party packages, with their licences (NOTICE.md). Not affiliated with or endorsed by Yealink. Use at your own risk."

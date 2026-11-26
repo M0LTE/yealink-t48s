@@ -462,7 +462,7 @@ On the phone: Settings, Install. The page offers one step at a time.
 2. Install. About 3 minutes. Do not unplug.
 3. When the screen says Installed, take this stick out. The phone
    restarts by itself.
-Keep the t48s-backup folder: it is the way back to Yealink's firmware.
+Keep the {backup} folder: it is the way back to Yealink's firmware.
 To go back, start from this stick again: the same page then offers
 Restore Yealink firmware, and ends the same way.
 
@@ -547,7 +547,7 @@ def write_set(outdir, bin_path, rfs_path, system_path, model="T48S", readme=Fals
         print("wrote %s (%d bytes): %s" % (os.path.join(outdir, name), len(data), what))
         listing += "%-9s %8d bytes  sha256 %s\n" % (name, len(data), hashlib.sha256(data).hexdigest())
     if readme:
-        text = README.format(model=model, files=listing)
+        text = README.format(model=model, files=listing, backup=model.lower() + "-backup")
         text.encode("ascii")                 # plain ASCII or this raises
         with open(os.path.join(outdir, "README.txt"), "w", newline="\r\n") as f:
             f.write(text)

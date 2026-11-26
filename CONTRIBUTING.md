@@ -38,11 +38,12 @@ sh tools/test-update.sh          # the updater, on files
 sh tools/test-usbmount.sh        # USB sticks, on folders
 sh tools/test-link.sh            # cable back: DHCP and baresip, on files
 sh tools/test-pack.sh            # the SDK's packer
+sh tools/test-layout.sh          # the flash driver's layout check and kernel-model rule
 tools/test-userenv.sh; tools/test-bootmode.sh; tools/test-live.sh
 tools/test-owner.sh bytes SET BACKUP     # the on-phone installer on a flash in a file
 ```
 
-The first six are what CI runs. Real calls (baresip, the audio service, a Kamailio on loopback) run in the `sip/Dockerfile` container: `sip/test/phone-test.sh`, and `ARM=1` for the ARM builds under qemu-arm ([docs/phone.md](docs/phone.md#testing)).
+The first seven are what CI runs. Real calls (baresip, the audio service, a Kamailio on loopback) run in the `sip/Dockerfile` container: `sip/test/phone-test.sh`, and `ARM=1` for the ARM builds under qemu-arm ([docs/phone.md](docs/phone.md#testing)).
 
 **The simulator** is the shell itself with the screen in memory. `t48-sim --apps DIR --script FILE` runs a script of keys, touches and checks; `shot FILE` in a script saves a picture; `--model t46s` is the small screen. Commands: [docs/shell.md](docs/shell.md#the-simulator). Pictures of all three themes: `docs/design/render.sh` and `docs/design/web.sh` ([docs/design/README.md](docs/design/README.md)).
 
