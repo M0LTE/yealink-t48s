@@ -14,6 +14,11 @@ PORT=${WEB_PORT:-8438}
 T=$(mktemp -d)
 trap 'kill $PID 2>/dev/null; rm -rf "$T"' EXIT
 cfg() { "$SB/t48-config" --config "$T/config" set "$@"; }
+# the official feed is one on disk with no apps (tests/mkfeeds.sh); two more feeds are added, a club's
+# (a folder pointed at feed 3, then 4, so it has updates) and another that shares an app with it
+export T48_OFFICIAL_FEED="file://$SB/feeds/official/index.json"
+ln -s "$SB/feeds/3" "$T/radio-club"
+ln -s "$SB/feeds/7" "$T/extras"
 mkdir -p "$T/config" "$T/phone" "$T/access" "$T/keep/ssh" "$T/installed"
 cfg access web on
 cfg access ssh on
@@ -26,7 +31,7 @@ cfg phone default_account 1; cfg phone dnd on
 cfg system timezone Europe/London
 cfg audio ringer 9; cfg audio handset 10; cfg audio speaker 12; cfg audio headset 8
 cfg screen brightness 8
-cfg feed url "file://$SB/feeds/3/index.json"
+cfg feed url1 "file://$T/radio-club/index.json"; cfg feed url2 "file://$T/extras/index.json"
 printf '%s\n' 'Alice Example|1002' 'Bob Example|+441184960123' 'Club bar|2001' 'Front door|*8' 'Mum|01184960456' > "$T/phone/contacts"
 now=$(date +%s)
 printf 'seen %s\n%s|o|312|1002|Alice Example|1\n%s|i|64|2001|Club bar|2\n%s|m|0|07700900123||1\n%s|o|0|01184960456|Mum|1\n%s|i|1275|+441184960123|Bob Example|1\n' \
@@ -35,7 +40,7 @@ echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOeStCLCiE0njMGEkRNUHaNmd+dNxoLC9NECKx
 printf 'dev=no\nssh=on\nhost_key=SHA256:6Ru8gBwrS00sNCkM/wL0/lOtLVJuGwKvLVdhZR08WAg (ed25519)\ndoor=closed\nkey=ssh-ed25519 tom@desk\nkeys=1\n' > "$T/access/status"
 # two apps a release behind, for Update all
 for a in demo memo; do "$SB/t48-app" --apps "$T/installed:$SB/apps" --config "$T/config" --data "$T/appdata" --state "$T/phone" install $a >/dev/null; done
-cfg feed url "file://$SB/feeds/4/index.json"
+ln -sfn "$SB/feeds/4" "$T/radio-club"
 "$SB/t48-app" --apps "$T/installed:$SB/apps" --config "$T/config" --data "$T/appdata" --state "$T/phone" check >/dev/null
 # the stand-in for t48-update (tests/update.sh), with a release the daily check has found
 mkdir -p "$T/update"

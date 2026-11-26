@@ -16,6 +16,12 @@ BUILD = os.path.abspath(sys.argv.pop(1) if len(sys.argv) > 1 else "build")
 SHELL_BUILD = os.environ.get("SHELL_BUILD") or os.path.join(HERE, "..", "..", "shell", os.path.basename(BUILD))
 RUNNER = os.environ.get("RUNNER", "").split()
 WEB = os.path.join(BUILD, "t48-web")
+FEEDS = os.path.abspath(os.path.join(SHELL_BUILD, "feeds"))
+# the official feed is one on disk with no apps (the tests never reach the internet), and a feed
+# that does not answer is given up on after 2 seconds (shell/pkg.c); t48-web and t48-app inherit these
+OFFICIAL = "file://" + os.path.join(FEEDS, "official", "index.json")
+os.environ["T48_OFFICIAL_FEED"] = OFFICIAL
+os.environ["T48_FEED_TIMEOUT"] = "2"
 KEY1 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOeStCLCiE0njMGEkRNUHaNmd+dNxoLC9NECKxV/wLQ9 tom@desk"
 KEY2 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFf1h3n4kq0m3Qy0dJm1o0mC2aQy8vHk1W9cJ8H2Yb7Q laptop"
 
@@ -356,7 +362,11 @@ class Paired(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.p = Phone()
-        cls.p.set("feed", "url", "file://" + os.path.join(SHELL_BUILD, "feeds", "1", "index.json"))
+        # the one feed setting of firmware before issue 81: a folder the tests point at feed 1, 2...,
+        # so a newer version turns up in the feed an app came from
+        cls.feed = os.path.join(cls.p.dir, "feed")
+        os.symlink(os.path.join(FEEDS, "1"), cls.feed)
+        cls.p.set("feed", "url", "file://" + os.path.join(cls.feed, "index.json"))
         cls.p.start()
         cls.b = Browser(cls.p).pair()
 
@@ -370,6 +380,13 @@ class Paired(unittest.TestCase):
         bad, text = self.b.flash(back)
         self.assertIs(bad, False, text)
         return text
+
+    def point(self, link, n):
+        """a feed folder in the phone's tree, pointed at feeds/N"""
+        if os.path.islink(link):
+            os.unlink(link)
+        os.symlink(os.path.join(FEEDS, str(n)), link)
+        return "file://" + os.path.join(link, "index.json")
 
     def bad(self, path, fields, back):
         r = self.b.post(path, fields)
@@ -977,8 +994,7 @@ class Paired(unittest.TestCase):
         self.assertEqual(p.get("apps/demo", "pin"), "app-pin-4711")
         self.assertEqual(p.get("apps/demo", "seconds"), "true")
         # an update from the second feed keeps them
-        self.bad("/apps/feed", {"url": "http://plain.example/index.json"}, "/apps")
-        self.ok("/apps/feed", {"url": "file://" + os.path.join(SHELL_BUILD, "feeds", "2", "index.json")}, "/apps")
+        self.point(self.feed, 2)
         page = b.get("/apps").body
         self.assertIn("pill warn'>Update<", page)
         self.assertNotIn("/apps/update-all", page)     # one update: as on the phone, no Update all
@@ -1000,13 +1016,12 @@ class Paired(unittest.TestCase):
 
     def test_71_update_all(self):
         b, p = self.b, self.p
-        feed = lambda n: {"url": "file://" + os.path.join(SHELL_BUILD, "feeds", str(n), "index.json")}
-        self.ok("/apps/feed", feed(3), "/apps")
+        self.point(self.feed, 3)
         self.ok("/apps/install", {"id": "demo"}, "/apps")
         self.ok("/apps/install", {"id": "memo"}, "/apps")
         self.ok("/apps/settings", {"id": "memo", "s_title": "Shopping"}, "/apps")
         self.assertNotIn("/apps/update-all", b.get("/apps").body)
-        self.ok("/apps/feed", feed(4), "/apps")
+        self.point(self.feed, 4)
         page = b.get("/apps").body
         self.assertIn("<h2>2 updates</h2>", page)
         self.assertIn("action='/apps/update-all'", page)
@@ -1021,13 +1036,12 @@ class Paired(unittest.TestCase):
             self.ok("/apps/remove", {"id": app}, "/apps")
 
     def test_72_app_categories(self):
-        b, was = self.b, self.p.get("feed", "url")
-        feed = lambda n: {"url": "file://" + os.path.join(SHELL_BUILD, "feeds", str(n), "index.json")}
+        b = self.b
         # an old feed, no categories: one group, so no headings (issue 30)
-        self.ok("/apps/feed", feed(1), "/apps")
+        self.point(self.feed, 1)
         self.assertNotIn("class='group'", b.get("/apps").body)
         # feed 5: in the fixed order, each app under its own; one this firmware does not know is General
-        self.ok("/apps/feed", feed(5), "/apps")
+        self.point(self.feed, 5)
         page = b.get("/apps").body
         found = re.findall(r"<h2 class='group'>(\w+)</h2>|<div class='apphead'><h2>(\w+)</h2>", page)
         self.assertEqual([g or n for g, n in found],
@@ -1038,7 +1052,87 @@ class Paired(unittest.TestCase):
         self.assertLess(page.index("<h2 class='group'>Tools</h2>"), page.index("<h2>Notes</h2>"))
         self.assertLess(page.index("<h2>Notes</h2>"), page.index("<h2>Meter</h2>"))
         self.ok("/apps/remove", {"id": "notes"}, "/apps")
-        self.ok("/apps/feed", {"url": was}, "/apps")
+        self.point(self.feed, 1)
+
+    def test_73_feeds(self):
+        # more than one feed (issue 81)
+        b, p = self.b, self.p
+        legacy = p.get("feed", "url")
+        page = b.get("/apps").body
+        self.assertIn("<h2>Feeds</h2>", page)
+        self.assertIn("Apps from other feeds are not checked by this project.", page)
+        # the old one feed setting is now the first added feed; the official one stays first, and has no Remove
+        self.assertLess(page.index(OFFICIAL), page.index(legacy))
+        self.assertEqual(page.count("action='/apps/feeds/remove'"), 1)
+        self.assertIn("Source: feed", page)
+        self.bad("/apps/feeds/add", {"url": "http://plain.example/index.json"}, "/apps")
+        self.assertIn("already in the list", self.bad("/apps/feeds/add", {"url": legacy}, "/apps"))
+        self.bad("/apps/feeds/remove", {"url": OFFICIAL}, "/apps")
+        self.ok("/apps/feeds/remove", {"url": legacy}, "/apps")
+        self.assertIsNone(p.get("feed", "url"))
+        # two feeds that share apps, one that is not a feed, one that never answers
+        club = self.point(os.path.join(p.dir, "radio-club"), 6)
+        extras = self.point(os.path.join(p.dir, "extras"), 7)
+        os.makedirs(os.path.join(p.dir, "slow"))
+        os.mkfifo(os.path.join(p.dir, "slow", "index.json"))
+        broken, slow = "file://" + os.path.join(FEEDS, "bad", "index.json"), "file://" + os.path.join(p.dir, "slow", "index.json")
+        for u in (club, extras, broken, slow):
+            self.assertEqual(self.ok("/apps/feeds/add", {"url": u}, "/apps"), "Feed added.")
+        self.assertEqual([p.get("feed", "url%d" % n) for n in range(1, 5)], [club, extras, broken, slow])
+        started = time.time()
+        page = b.get("/apps").body
+        self.assertLess(time.time() - started, 15)
+        self.assertIn("<p class='flash bad'>bad: not an app feed</p>", page)
+        self.assertIn("<p class='flash bad'>slow: download timed out</p>", page)
+        # demo is in both: shown once, from the first, the other named
+        self.assertEqual(page.count("<h2>Demo</h2>"), 1)
+        demo = page[page.index("<h2>Demo</h2>"):]
+        demo = demo[:demo.index("</p><div class='actions'>")]
+        self.assertIn("In the feed 1.0.0", demo)
+        self.assertIn("<span class='src'>Source: radio-club</span>. Also in extras", demo)
+        self.assertIn("Source: extras", page[page.index("<h2>Lark</h2>"):])
+        # what a feed says is shown as text
+        self.assertIn("Notes &lt;script&gt;alert(&#39;lark&#39;)&lt;/script&gt; &amp; more", page)
+        self.assertNotIn("<script>alert", page)
+        # installed from the feed that listed it; updates come from that feed only
+        self.ok("/apps/install", {"id": "demo"}, "/apps")
+        self.ok("/apps/install", {"id": "lark"}, "/apps")
+        self.assertIn("demo " + club + "\n", read(os.path.join(p.state, "app-sources")))
+        self.assertIn("lark " + extras + "\n", read(os.path.join(p.state, "app-sources")))
+        self.assertNotIn("pill warn'>Update<", b.get("/apps").body)    # extras' demo 1.1.0 is not for it
+        self.point(os.path.join(p.dir, "radio-club"), 8)
+        self.point(os.path.join(p.dir, "extras"), 9)
+        page = b.get("/apps").body
+        self.assertEqual(page.count("pill warn'>Update<"), 2)
+        self.assertIn("In the feed 1.2.0", page[page.index("<h2>Demo</h2>"):])
+        # the overview counts both, each from its own feed, as the daily check does
+        self.assertIn("<span class='pill warn'>2 updates</span>", b.get("/").body)
+        check = subprocess.run([os.path.join(SHELL_BUILD, "t48-app"), "--apps", p.installed + ":" + os.path.join(SHELL_BUILD, "apps"),
+                                "--config", p.config, "--state", p.state, "check"], capture_output=True, text=True)
+        self.assertEqual(check.stdout, "2 updates, 2 feeds not reached\n")
+        self.assertEqual(self.ok("/apps/update-all", {}, "/apps"), "2 apps updated.")
+        self.assertIn('"version": "1.2.0"', read(os.path.join(p.installed, "demo", "manifest.json")))
+        self.assertIn('"version": "1.1.0"', read(os.path.join(p.installed, "lark", "manifest.json")))
+        # a feed removed: its apps stay, and still say where they came from
+        self.ok("/apps/feeds/remove", {"url": extras}, "/apps")
+        self.assertEqual([p.get("feed", "url%d" % n) for n in range(1, 5)], [club, broken, slow, None])
+        page = b.get("/apps").body
+        self.assertIn("Source: extras", page[page.index("<h2>Lark</h2>"):])
+        self.assertIn("lark: its feed was removed", self.bad("/apps/update", {"id": "lark"}, "/apps"))
+        # eight at most, the official one among them
+        for n in range(4):
+            self.ok("/apps/feeds/add", {"url": "file:///nowhere/%d/index.json" % n}, "/apps")
+        self.assertIn("8 feeds", self.bad("/apps/feeds/add", {"url": "file:///nowhere/9/index.json"}, "/apps"))
+        page = b.get("/apps").body
+        self.assertIn("8 feeds, the most there can be.", page)
+        self.assertNotIn("action='/apps/feeds/add'", page)
+        for n in range(1, 8):
+            self.ok("/apps/feeds/remove", {"url": p.get("feed", "url1")}, "/apps")
+        self.assertNotIn("url", read(os.path.join(p.config, "feed")).replace("\n", ""))
+        for app in ("demo", "lark"):
+            self.ok("/apps/remove", {"id": app}, "/apps")
+        self.assertEqual(read(os.path.join(p.state, "app-sources")), "")
+        p.set("feed", "url", legacy)
 
     def keys(self):
         path = os.path.join(self.p.keep, "ssh", "authorized_keys")

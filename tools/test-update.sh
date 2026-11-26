@@ -168,6 +168,13 @@ $UPD channel testing >/dev/null
 [ "$($UPD daily now)" = "daily check: firmware v5 available, 2 app updates" ] && [ "$(info latest)" = v5 ] && pass "daily check, testing: the rolling build" || fail "daily testing"
 [ "$(sum "$T/dev/ubi0_0")" = "$before_a" ] && [ "$(sum "$T/dev/ubi0_1")" = "$before_b" ] && cmp -s "$T/dev/mtd7" "$T/k2.uimg" && [ ! -e "$T/data/phone/update-pending" ] && pass "it installs nothing: both slots and the kernel as they were" || fail "the daily check wrote something"
 grep -q '^running=v2$' "$T/data/phone/update-latest" && pass "what it found is kept in /data, with the version it was compared with" || fail "update-latest"
+# several feeds (issue 81): one not reached is said on the same line, the others still counted
+printf '#!/bin/sh\n[ "$1" = check ] || exit 2\necho "Up to date, 1 feed not reached"\n' > "$T/bin/t48-app"
+line=$($UPD daily now)
+[ "$line" = "daily check: firmware v5 available, apps up to date, 1 feed not reached" ] && pass "one feed of several not reached: $line" || fail "daily feeds: $line"
+printf '#!/bin/sh\n[ "$1" = check ] || exit 2\necho "1 update, 2 feeds not reached"\n' > "$T/bin/t48-app"
+line=$($UPD daily now)
+[ "$line" = "daily check: firmware v5 available, 1 app update, 2 feeds not reached" ] && pass "an update, two feeds not reached: $line" || fail "daily feeds: $line"
 rm -rf "$T/run/t48-update"
 [ "$(info latest)" = v5 ] && [ "$(info update)" = yes ] && pass "after a restart on the same version it still counts" || fail "latest lost at restart"
 # quiet when it fails: no status, no result, what was found stays

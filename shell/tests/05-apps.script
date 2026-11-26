@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # The app manager (issue 22), against two small feeds on disk made by
 # tests/mkfeeds.sh: install, open, settings, update, remove, and the refusals.
-run ./t48-config --config simdata/config set feed url file://$PWD/feeds/1/index.json
+# the feed is a folder that the test points at feed 1, then feed 2: the same feed, a newer version in it
+run mkdir -p simdata && ln -sfn $PWD/feeds/1 simdata/feed
+run ./t48-config --config simdata/config set feed url file://$PWD/simdata/feed/index.json
 wait 200
 key ok
 expect launcher
@@ -85,7 +87,7 @@ key x
 expect idle
 
 # ---- a newer version appears in the feed: update, and the settings stay ----
-run ./t48-config --config simdata/config set feed url file://$PWD/feeds/2/index.json
+run ln -sfn $PWD/feeds/2 simdata/feed
 key ok
 key right
 key right
@@ -142,7 +144,7 @@ run test ! -e simdata/appdata/demo
 run test ! -e simdata/config/apps/demo.conf
 
 # ---- what must be refused ----
-# the feed address has to be https (the tests' file:// is the one exception)
+# a feed that is not there: the store says which, and lists what the others have
 run ./t48-config --config simdata/config set feed url file:///x
 waitstate store loaded 5000
 key up
@@ -157,27 +159,38 @@ key down
 expectstate settings.row Refresh
 key ok
 waitstate store error 5000
-# the list now starts with a line about the feed; Feed address is the row after Look again
+# the list now starts with a line about the feed; Feeds is the row after Refresh
 expectstate settings.row Refresh
+expectstate store.errors 1
 key down
-expectstate settings.row Feed_URL
+expectstate settings.row Feeds
+expectstate settings.value 2
+# a feed address has to be https (the tests' file:// is the one exception), and is added once
 key ok
-expectstate kbd.text file:///x
-key left
-key left
-key left
-key left
-key left
-key left
-key left
-key left
-key left
-key 4
+expectstate settings.page feeds
+expectstate settings.row Official
+key down
+expectstate settings.row file
+key down
+expectstate settings.row Add_feed
+key ok
+expectstate kbd open
+type http://plain.example/index.json
 key ok
 expectstate overlay message
 expectstate overlay.title Not_a_feed_URL
 key ok
+key ok
+type file:///x
+key ok
+expectstate overlay.title Not_added
+expectstate overlay.text Already_in_the_list
+key ok
+expectstate feeds 2
 expectstate cfg.feed.url file:///x
+expectstate cfg.feed.url1 (unset)
+key x
+expectstate settings.page store
 # an app for a newer API level: no Install on its page, and the command line says why
 run ./t48-config --config simdata/config set feed url file://$PWD/feeds/1/index.json
 key up
@@ -199,7 +212,7 @@ key down
 expectstate settings.row Future
 expectstate settings.value Needs_newer_firmware
 key ok
-expectstate settings.rows 5
+expectstate settings.rows 6
 shot shots/apps-unsupported.png
 key x
 run ! ./t48-app --apps simdata/installed:apps --config simdata/config install future 2>simdata/err; grep -q "API level 9" simdata/err; test ! -e simdata/installed/future

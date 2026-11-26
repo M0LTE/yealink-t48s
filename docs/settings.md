@@ -54,7 +54,7 @@ Plain text in `/data/config`, one file per subject, `key=value` a line, `#` for 
 | `audio` | `ringer`, `handset`, `speaker`, `headset`: 0 to 15 |
 | `screen` | `brightness`: 1 to 10. `theme`: `switchboard` (also when missing or unknown), `directory` or `twotone`. Not on the screen: `dim_seconds` (120) and `off_seconds` (1800), how long nothing is touched before the screen dims and goes off; 0 is never. The shell picks changes to this file up within five seconds |
 | `access` | `ssh`: on or off (off when missing); `web`: the web setup page, the same ([web.md](web.md)); `t48-apply access` makes it so |
-| `feed` | `url`: the app feed, if not the standard one |
+| `feed` | `url1` to `url7`: app feeds added after the official one, in order ([apps.md](apps.md#feeds)); `url`, the one feed of older firmware, counts as the first added |
 | `update` | `channel`: stable (also when missing), testing or a URL, set by `t48-update channel`. `daily`: on (also when missing) or off, the daily check ([install.md](install.md#the-daily-check)) |
 | `apps/ID.conf` | that app's settings, by the keys in its manifest |
 
