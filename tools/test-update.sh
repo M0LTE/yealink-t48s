@@ -37,6 +37,10 @@ cat > "$T/bin/nandrestore" <<'EOS'
 cat > "$2"
 EOS
 chmod +x "$T/bin/"*
+# which phone: the device tree and the Holtek chip, as t48-model reads them
+ln -s "$HERE/buildroot/board/t48s/rootfs-overlay/usr/bin/t48-model" "$T/bin/t48-model"
+mkdir -p "$T/dt"; printf 'yealink,sip-t48s\0yealink,sip-t4xs\0brcm,bcm11188\0' > "$T/dt/compatible"; echo 65 > "$T/hwid"
+export T48_DT="$T/dt" T48_HWID="$T/hwid"
 export PATH="$T/bin:$PATH" T48_SLOTS="$HERE/buildroot/board/t48s/rootfs-overlay/usr/lib/t48/slots.sh"
 export T48_UBISYS="$T/sys" T48_DEV="$T/dev" T48_PROC="$T/proc" T48_RUN="$T/run" T48_TMP="$T/tmp" T48_LOCK="$T/lock"
 export T48_UPDATE_CONF="$T/data/config/update" T48_UPDATE_KEEP="$T/data/phone" T48_RELEASE="$T/release" T48_CA=/dev/null T48_NO_SV=1
@@ -44,11 +48,13 @@ UPD="sh $HERE/buildroot/board/t48s/rootfs-overlay/usr/bin/t48-update"
 info() { $UPD info | sed -n "s/^$1=//p"; }
 
 # images: a system image is anything that starts hsqs; a kernel is a U-Boot image
+# named for its model as kernel6/build.sh names it (t48s unless told)
 mksys() { { printf hsqs; echo "$1"; head -c 3000 /dev/zero; } > "$2"; }
 mkker() { python3 -c "
 import struct,sys
 body=sys.argv[1].encode()*500
-sys.stdout.buffer.write(struct.pack('>7I',0x27051956,0,0,len(body),0x408000,0x408000,0)+bytes(36)+body)" "$1" > "$2"; }
+name=('Linux-6.18.65-' + sys.argv[2]).encode() if sys.argv[2] != '-' else b''
+sys.stdout.buffer.write(struct.pack('>7I',0x27051956,0,0,len(body),0x408000,0x408000,0)+bytes(4)+name.ljust(32,b'\0')+body)" "$1" "${3:-t48s}" > "$2"; }
 publish() { # VERSION SYSTEM KERNEL
     echo "$1" > "$T/chan/VERSION"; cp "$2" "$T/chan/system.img"; cp "$3" "$T/chan/T48S-kernel.uimg"
     ( cd "$T/chan" && sha256sum system.img T48S-kernel.uimg > SHA256SUMS )
@@ -162,7 +168,10 @@ if $UPD kernel "$T/k2.uimg" 0000 2>/dev/null; then fail "a kernel with the wrong
 head -c 1000 "$T/k2.uimg" > "$T/short.uimg"
 if $UPD kernel "$T/short.uimg" "$(sum "$T/short.uimg")" 2>/dev/null; then fail "a kernel cut short was written"; fi
 if $UPD kernel "$T/sys2.img" "$(sum "$T/sys2.img")" 2>/dev/null; then fail "a system image was written as a kernel"; fi
-cmp -s "$T/dev/mtd7" "$T/k1.uimg" && pass "kernel: wrong checksum, cut short, not a kernel: all refused, partition untouched" || fail "kernel refusals"
+mkker k9 "$T/k46.uimg" t46s; mkker k9 "$T/knone.uimg" -
+if $UPD kernel "$T/k46.uimg" "$(sum "$T/k46.uimg")" 2>/dev/null; then fail "a T46S kernel was written on a T48S"; fi
+if $UPD kernel "$T/knone.uimg" "$(sum "$T/knone.uimg")" 2>/dev/null; then fail "a kernel named for no model was written"; fi
+cmp -s "$T/dev/mtd7" "$T/k1.uimg" && pass "kernel: wrong checksum, cut short, not a kernel, a T46S kernel, one named for no model: all refused, partition untouched" || fail "kernel refusals"
 $UPD kernel | sed 's/^/     /'
 cmp -s "$T/dev/mtd7" "$T/k2.uimg" && [ "$(cat "$T/lock")" = close-kernel ] && pass "kernel from the channel: downloaded, checked, written, read back, lock closed" || fail "kernel write"
 $UPD check >/dev/null; [ "$(info kernel)" = same ] && pass "check: kernel the same" || fail "kernel same"
@@ -247,4 +256,39 @@ rm "$T/data/phone/update-check"
 due $((D0 + 50000)) >/dev/null
 s=$(sed -n 's/^slot=//p' "$T/data/phone/update-check")
 [ "$s" -ge 0 ] && [ "$s" -lt 14400 ] && pass "this phone's time is chosen at random between 01:00 and 05:00, and kept: slot $s" || fail "slot $s"
+# ---- a T46S (issue 10): its own kernel, never the T48S's; the system image is shared ----
+printf 'yealink,sip-t46s\0yealink,sip-t4xs\0brcm,bcm11188\0' > "$T/dt/compatible"; echo 66 > "$T/hwid"
+mkker t46a "$T/k46a.uimg" t46s; mkker t46b "$T/k46b.uimg" t46s
+cp "$T/k46a.uimg" "$T/dev/mtd7"
+$UPD channel "$URL" >/dev/null
+printf '#!/bin/sh\n[ "$1" = check ] || exit 2\necho "Up to date"\n' > "$T/bin/t48-app"
+# a release from before the T46S: system image and T48S kernel only
+mksys six "$T/sys6.img"; publish v6 "$T/sys6.img" "$T/k2.uimg"
+if $UPD check 2>/dev/null; then fail "a T46S took a release without a T46S kernel"; fi
+[ "$(info message)" = "No release for this phone" ] && pass "T46S: a release without a T46S kernel is not for it: No release for this phone" || fail "T46S old release: $(info message)"
+if $UPD install 2>/dev/null; then fail "a T46S installed from a release without a T46S kernel"; fi
+[ "$(info state)" = failed ] && [ ! -e "$T/data/phone/update-pending" ] && pass "T46S: and install from it writes nothing" || fail "T46S install from an old release"
+[ "$($UPD daily now)" = "daily check: no firmware release for this phone, apps up to date" ] && pass "T46S: the daily check says so in its line" || fail "T46S daily: $($UPD daily now)"
+# both kernels published
+cp "$T/k46b.uimg" "$T/chan/T46S-kernel.uimg"
+( cd "$T/chan" && sha256sum system.img T48S-kernel.uimg T46S-kernel.uimg > SHA256SUMS )
+$UPD check >/dev/null
+[ "$(info latest)" = v6 ] && [ "$(info update)" = yes ] && [ "$(info kernel)" = differs ] && pass "T46S: both kernels published: update available, compared with the T46S kernel" || fail "T46S check"
+$UPD kernel >/dev/null
+cmp -s "$T/dev/mtd7" "$T/k46b.uimg" && pass "T46S: the kernel from the channel is the T46S's, never the T48S's" || fail "T46S kernel write"
+$UPD check >/dev/null; [ "$(info kernel)" = same ] && pass "T46S: check: kernel the same" || fail "T46S kernel same"
+# a release whose T46S kernel is really the T48S's
+cp "$T/k2.uimg" "$T/chan/T46S-kernel.uimg"
+( cd "$T/chan" && sha256sum system.img T48S-kernel.uimg T46S-kernel.uimg > SHA256SUMS )
+$UPD check >/dev/null
+if $UPD kernel 2>/dev/null; then fail "a T48S kernel published as the T46S's was written"; fi
+[ "$(info message)" = "Kernel is not for this phone" ] && cmp -s "$T/dev/mtd7" "$T/k46b.uimg" && pass "T46S: a T48S kernel under the T46S's name: Kernel is not for this phone, nothing written" || fail "T46S mislabelled kernel: $(info message)"
+if $UPD kernel "$T/k2.uimg" "$(sum "$T/k2.uimg")" 2>/dev/null; then fail "a T48S kernel was written on a T46S by hand"; fi
+cmp -s "$T/dev/mtd7" "$T/k46b.uimg" && pass "T46S: a T48S kernel by hand is refused too" || fail "T46S kernel by hand"
+# the chip says T48S, the device tree T46S: no model, nothing fetched
+echo 65 > "$T/hwid"
+if $UPD check 2>/dev/null; then fail "a check passed with the model in doubt"; fi
+[ "$(info message)" = "Phone model not known" ] && pass "the chip and the device tree disagree: Phone model not known" || fail "model in doubt: $(info message)"
+if $UPD kernel "$T/k46a.uimg" "$(sum "$T/k46a.uimg")" 2>/dev/null; then fail "a kernel was written with the model in doubt"; fi
+cmp -s "$T/dev/mtd7" "$T/k46b.uimg" && pass "and no kernel is written by hand either" || fail "kernel with the model in doubt"
 echo "all updater tests passed"

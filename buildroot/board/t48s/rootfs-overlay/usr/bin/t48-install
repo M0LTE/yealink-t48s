@@ -18,8 +18,14 @@
 # partition, and nothing else; the flash driver cannot write anything else
 # (kernel6/drivers/t48s_nand.c). Every step can be run again after a power cut.
 #
-# On the stick: the three files the phone started from, install/ (the kernel
-# file, the system image, SHA256SUMS) and, made here, t48s-backup/.
+# On the stick: the three files the phone started from (T48S.rom or T46S.rom
+# and the rest: U-Boot asks for its own model's), install/ (the model's kernel
+# file, the system image, SHA256SUMS) and, made here, t48s-backup/ (t46s-backup/).
+#
+# The model comes from t48-model. Nothing is written unless the flash driver
+# found the layout it knows (its parameter "layout" says "matches",
+# kernel6/drivers/t48s_nand_layout.h) and the kernel file is named for this
+# model.
 #
 # With --machine as the first word, progress goes out as lines for the shell:
 #   step PERCENT text      done text      error text
@@ -39,6 +45,9 @@ DEV=${T48_DEV:-/dev}
 SYSBLOCK=${T48_SYSBLOCK:-/sys/block}
 USBRUN=${T48_USBRUN:-/run/t48-usbmount}
 NEED_KB=160000           # room a backup needs on the stick
+# t48s or t46s, and the stick's file names after it: T48S.rom, T48S-kernel.uimg
+MODEL=$(t48-model 2>/dev/null)
+UP=$(echo "$MODEL" | tr a-z A-Z)
 # number:name:bytes of data, as the kernel lists them; together the whole chip
 PARTS="0:ubl:131072 1:uboot:1048576 2:env:1048576 3:userenv:1048576 4:logo:1048576
 5:smkern:2621440 6:smrfs:15728640 7:kernel:2621440 8:rfs:15728640 10:app:78512128
@@ -69,9 +78,11 @@ meter() { if command -v t48-meter >/dev/null 2>&1; then t48-meter; else cat; fi;
 
 # ---- the stick ----
 stick() {
-    [ -n "${T48_STICK:-}" ] && { S=$T48_STICK; return 0; }
+    [ -n "$MODEL" ] || return 1
+    # the rehearsal's stick is a folder; it too must be this model's stick
+    [ -n "${T48_STICK:-}" ] && { S=$T48_STICK; [ -f "$S/$UP.rom" ]; return; }
     S=$MNT
-    if grep -q " $MNT vfat rw" "$PROC/mounts" 2>/dev/null && [ -f "$MNT/T48S.rom" ]; then return 0; fi
+    if grep -q " $MNT vfat rw" "$PROC/mounts" 2>/dev/null && [ -f "$MNT/$UP.rom" ]; then return 0; fi
     mkdir -p "$MNT"
     # the look at the sticks under t48-usbmount's lock, so it does not mount one
     # while we try it; 5 seconds at most, since the Settings screen waits for status
@@ -88,12 +99,12 @@ probe() {
         # while an app has it open
         a=$(awk -v d="$d" -v m="$MNT" '$1 == d && $2 != m { print $2; exit }' "$PROC/mounts")
         if [ -n "$a" ]; then
-            [ -f "$a/T48S.rom" ] || continue
+            [ -f "$a/$UP.rom" ] || continue
             usbmount hold "${d##*/}" || continue
         fi
         umount "$MNT" 2>/dev/null
         if mount -t vfat -o rw,noatime,flush "$d" "$MNT" 2>/dev/null; then
-            [ -f "$MNT/T48S.rom" ] && return 0
+            [ -f "$MNT/$UP.rom" ] && return 0
             umount "$MNT" 2>/dev/null
         fi
         [ -n "$a" ] && usbmount free "${d##*/}"
@@ -113,7 +124,7 @@ usblock() {
     done
 }
 free_kb() { df -k "$S" | tail -n 1 | awk '{print $4}'; }
-B() { echo "$S/t48s-backup"; }
+B() { echo "$S/$MODEL-backup"; }
 
 # ---- the backup on the stick ----
 # 0 if the folder holds a finished, checked backup (its files are not read here)
@@ -157,6 +168,7 @@ dump_clean() {
 
 do_backup() {
     live || die "Not started from a stick"
+    [ -n "$MODEL" ] || die "Phone model not known"
     stick || die "No stick"
     if backup_marked; then
         backup_is_ours && finish "Backup already on the stick"
@@ -189,7 +201,7 @@ do_backup() {
         at=$((at + size / 2048 * 2112 / 1000))
     done
     {
-        echo "T48S flash backup, taken on the phone $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "$UP flash backup, taken on the phone $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "phone kernel: $(uname -r)"
         echo "MAC: $(cat /sys/class/net/eth0/address 2>/dev/null)"
         echo "format: per page 2048 data bytes then 64 spare bytes (nandread -o)"
@@ -225,6 +237,7 @@ do_backup() {
 
 # before any write: a checked backup of this phone, files intact
 need_backup() {
+    [ -n "$MODEL" ] || die "Phone model not known. Nothing written"
     stick || die "No stick"
     backup_marked || die "No checked backup on the stick"
     say "Checking the backup"
@@ -260,6 +273,10 @@ preflight() {
     live || die "Not started from a stick"
     K=$(mtd t48kernel); A=$(mtd t48app)
     [ -n "$K" ] && [ -n "$A" ] || die "This kernel cannot write the flash"
+    # the phone is the model this kernel is for, the chip says so too
+    [ "$(t48-model strict 2>/dev/null)" = "$MODEL" ] || die "Phone model not known. Nothing written"
+    # U-Boot's own environment names the layout the driver knows
+    [ "$(cat "$PARAM/layout" 2>/dev/null)" = matches ] || die "Flash layout not known. Nothing written"
     [ "$(cat "$PARAM/selftest" 2>/dev/null || echo 0)" -gt 0 ] || die "Flash driver self-test did not run"
     [ "$(cat "$PARAM/write_errors" 2>/dev/null || echo 1)" = 0 ] || die "Flash write errors this session. Restart first"
     bad=$( { nandread -b "$DEV/mtd7" 2>&1; nandread -b "$DEV/mtd10" 2>&1; } | grep -c "^bad block")
@@ -286,9 +303,16 @@ do_install() {
     need_backup
     preflight
     I="$S/install"
-    [ -f "$I/T48S-kernel.uimg" ] && [ -f "$I/system.img" ] && [ -f "$I/SHA256SUMS" ] || die "No install files on the stick"
+    KF=$I/$UP-kernel.uimg
+    [ -f "$KF" ] && [ -f "$I/system.img" ] && [ -f "$I/SHA256SUMS" ] || die "No install files on the stick"
     ( cd "$I" && sha256sum -c SHA256SUMS >/dev/null 2>&1 ) || die "Install files on the stick are damaged"
-    [ "$(wc -c < "$I/T48S-kernel.uimg")" -le 2621440 ] || die "Kernel file too large"
+    grep -q "  $UP-kernel.uimg\$" "$I/SHA256SUMS" || die "Install files on the stick are damaged"
+    [ "$(wc -c < "$KF")" -le 2621440 ] || die "Kernel file too large"
+    # named for this model by kernel6/build.sh: Linux-VERSION-t46s
+    case "$(head -c 64 "$KF" | tail -c 32 | tr -d '\000')" in
+    Linux-*-"$MODEL") ;;
+    *) die "Kernel file is not for this phone" ;;
+    esac
     [ "$(head -c 4 "$I/system.img")" = hsqs ] || die "Not a system image"
     note_moving
     R="${WORK:?}/run"
@@ -297,7 +321,7 @@ do_install() {
     [ "$(sum < "$R/system.img")" = "$(sum < "$I/system.img")" ] || die "Stick read error"
     PCT=15; say "Writing the kernel"
     lock open-kernel
-    nandrestore -b "$DEV/mtd$K" < "$I/T48S-kernel.uimg" > "$WORK/k" 2>&1; rc=$?
+    nandrestore -b "$DEV/mtd$K" < "$KF" > "$WORK/k" 2>&1; rc=$?
     lock close-kernel
     [ $rc = 0 ] || die "Kernel not written. Do not restart. Install again"
     PCT=25; say "Writing the system"
@@ -340,13 +364,16 @@ do_restore() {
 
 do_status() {
     echo "live=$(live && echo yes || echo no)"
+    echo "model=${MODEL:-unknown}"
+    # the flash driver's layout check: "matches", or why not
+    if [ "$(cat "$PARAM/layout" 2>/dev/null)" = matches ]; then echo "layout=matches"; else echo "layout=unknown"; fi
     if stick; then
         echo "stick=yes"
         echo "free_mb=$(( $(free_kb) / 1024 ))"
         if backup_marked; then echo "backup=checked"; echo "backup_date=$(sed -n 2p "$(B)/VERIFIED")"
         elif [ -d "$(B)" ]; then echo "backup=unfinished"
         else echo "backup=none"; fi
-        [ -f "$S/install/T48S-kernel.uimg" ] && echo "files=yes" || echo "files=no"
+        [ -f "$S/install/$UP-kernel.uimg" ] && echo "files=yes" || echo "files=no"
     else
         echo "stick=no"
     fi

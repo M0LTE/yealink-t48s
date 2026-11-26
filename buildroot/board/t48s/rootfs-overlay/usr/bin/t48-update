@@ -41,11 +41,16 @@
 #                                      a cable is in and there is no address;
 #                                      "last": then restart, which goes back
 #
-# A channel is a folder on a web server holding four files:
+# A channel is a folder on a web server holding these files:
 #   VERSION            one line, the release's name
 #   SHA256SUMS         sha256sum's output over the files below
-#   system.img         the system image
-#   T48S-kernel.uimg   the kernel with its first stage, as the kernel partition holds it
+#   system.img         the system image, one for every model
+#   T48S-kernel.uimg   the T48S's kernel with its first stage, as the kernel
+#                      partition holds it
+#   T46S-kernel.uimg   the same for the T46S
+# A phone takes the kernel named for its own model (t48-model), and only one
+# whose image name says that model (kernel6/build.sh). A T46S takes nothing
+# from a channel that has no T46S kernel: such a release predates its support.
 #
 # A slot is tried once. If the phone does not stay up for a minute on it, the
 # next start goes back to the slot that worked. The rules are in
@@ -66,6 +71,9 @@ LATEST=$KEEP/update-latest
 CHECKS=$KEEP/update-check
 
 die() { echo "$*" >&2; exit 1; }
+# this phone's kernel file in a channel: T48S-kernel.uimg or T46S-kernel.uimg
+kfile() { m=$(t48-model 2>/dev/null) && echo "$(echo "$m" | tr a-z A-Z)-kernel.uimg"; }
+CHECK_ERR="No release found"
 # a cable in the LAN jack (switch port 1 has a link, as the Ethernet driver
 # reads it: bit 1 of its link register; the bench phone's network cable reads
 # 0x0102) and no IPv4 address on eth0. The PC jack does not count. No
@@ -139,7 +147,10 @@ do_check() {
     latest=$(head -n 1 "$W/VERSION" | tr -cd 'A-Za-z0-9._+-' | head -c 60)
     sys=$(sum_of system.img)
     [ -n "$latest" ] && [ -n "$sys" ] || return 1
-    ker=$(sum_of T48S-kernel.uimg)
+    kf=$(kfile) || { CHECK_ERR="Phone model not known"; return 1; }
+    ker=$(sum_of "$kf")
+    # a release without this model's kernel is from before it was supported
+    [ -n "$ker" ] || [ "$kf" = T48S-kernel.uimg ] || { CHECK_ERR="No release for this phone"; return 1; }
     cur=$(booted)
     up=yes
     case "$cur" in a|b) [ "$(slot_sum "$cur")" != "$sys" ] || up=no ;; esac
@@ -157,9 +168,9 @@ do_check() {
 check_channel() {
     lock
     if ! do_check; then
-        [ -n "$QUIET" ] || state failed "No release found"
+        [ -n "$QUIET" ] || state failed "$CHECK_ERR"
         unlock
-        die "No release found"
+        die "$CHECK_ERR"
     fi
     [ -n "$QUIET" ] || state idle ""
     unlock
@@ -212,10 +223,14 @@ daily_check() {
     printf 'slot=%s\nlast=%s\n' "$slot" "$t" > "$CHECKS.new" && mv "$CHECKS.new" "$CHECKS"
     if ! installed; then
         fw="firmware not installed"
-    elif ( QUIET=1 check_channel ) 2>/dev/null; then
+    elif e=$( ( QUIET=1 check_channel ) 2>&1 >/dev/null ); then
         if [ "$(get "$LATEST" update)" = yes ]; then fw="firmware $(get "$LATEST" latest) available"; else fw="firmware up to date"; fi
     else
-        fw="firmware not reached"
+        case "$e" in
+        "No release for this phone") fw="no firmware release for this phone" ;;
+        "Phone model not known") fw="firmware not checked (phone model not known)" ;;
+        *) fw="firmware not reached" ;;
+        esac
     fi
     if a=$(${T48_APP:-t48-app} check 2>&1); then
         # "2 updates", "Up to date", with ", 1 feed not reached" when one of several feeds was not (issue 81)
@@ -262,6 +277,12 @@ write_kernel() {
     [ "$(sha256sum < "$1" | cut -d' ' -f1)" = "$2" ] || { ERR="Checksum mismatch"; return 1; }
     [ "$(head -c 4 "$1" | od -An -tx1 | tr -d ' ')" = 27051956 ] || { ERR="Not a kernel image"; return 1; }
     [ "$(wc -c < "$1")" -le $KERNEL_MAX ] || { ERR="Too large for the kernel partition"; return 1; }
+    # named for this model (kernel6/build.sh: Linux-VERSION-t46s); the flash driver checks it too
+    m=$(t48-model 2>/dev/null) || { ERR="Phone model not known"; return 1; }
+    case "$(head -c 64 "$1" | tail -c 32 | tr -d '\000')" in
+    Linux-*-"$m") ;;
+    *) ERR="Kernel is not for this phone"; return 1 ;;
+    esac
     # U-Boot reads as much as the header says: that must be the whole file
     [ $(( 0x$(head -c 16 "$1" | tail -c 4 | od -An -tx1 | tr -d ' ') + 64 )) = "$(wc -c < "$1")" ] || { ERR="Not a kernel image"; return 1; }
     L=${T48_LOCK:-/sys/module/t48s_nand/parameters/lock}
@@ -352,7 +373,7 @@ install)
     f=$2; want=$3; name=
     if [ -z "$f" ]; then
         # from the channel
-        do_check || stop "No release found"
+        do_check || stop "$CHECK_ERR"
         want=$(get "$LATEST" system); name=$(get "$LATEST" latest)
         [ "$(get "$LATEST" update)" = yes ] || { state idle ""; unlock; echo "Up to date"; exit 0; }
         f=$(base)/system.img
@@ -372,11 +393,11 @@ kernel)
     lock
     f=$2; want=$3
     if [ -z "$f" ]; then
-        do_check || stop "No release found"
+        do_check || stop "$CHECK_ERR"
         want=$(get "$LATEST" kernel_sum)
         [ -n "$want" ] || stop "No kernel in this release"
         [ "$(get "$LATEST" kernel)" != same ] || { state idle ""; unlock; echo "Kernel up to date"; exit 0; }
-        f=$(base)/T48S-kernel.uimg
+        f=$(base)/$(kfile)
     fi
     [ -n "$want" ] || { unlock; die "usage: t48-update kernel [FILE|URL SHA256]"; }
     case "$f" in

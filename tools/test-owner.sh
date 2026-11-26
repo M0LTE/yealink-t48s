@@ -17,7 +17,9 @@
 #       app partition full of somebody else's data, all 599 blocks erased, UBI
 #       made from nothing, slot a written, an empty /data.
 #
-# SET is an install set (tools/t48install.sh set); BACKUP a flash backup.
+# SET is an install set (tools/t48install.sh set); BACKUP a flash backup. With
+# T46S-kernel.uimg in SET too (kernel6/build.sh MODEL=t46s FLASH=1), "bytes"
+# also runs the install and the way back as a T46S does them, on the same flash.
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 MODE=$1; SET=$2
@@ -79,6 +81,11 @@ mtd15: 04ae0000 00020000 "t48app"
 EOS
     echo "console=tty0 t48boot=live loglevel=8" > "$T/proc/cmdline"
     echo 549 > "$T/param/selftest"; echo 0 > "$T/param/write_errors"; : > "$T/param/lock"
+    echo matches > "$T/param/layout"
+    # which phone, as t48-model reads it: the device tree and the Holtek chip
+    ln -s "$HERE/buildroot/board/t48s/rootfs-overlay/usr/bin/t48-model" "$T/bin/t48-model"
+    mkdir -p "$T/dt"; printf 'yealink,sip-t48s\0yealink,sip-t4xs\0' > "$T/dt/compatible"; echo 65 > "$T/hwid"
+    export T48_DT="$T/dt" T48_HWID="$T/hwid"
     echo usbmode > "$T/bm/mode"; : > "$T/dev/mtd15"
     : > "$T/stick/T48S.rom"
     cp "$SET/T48S-kernel.uimg" "$SET/system.img" "$T/stick/install/"
@@ -90,7 +97,8 @@ EOS
     last() { tail -n 1 "$T/out"; }
     refused() { if run "$1"; then cat "$T/out"; fail "$3"; fi; last | grep -q "^error $2" || { cat "$T/out"; fail "$3"; }; [ "$(sum "$T/chip")" = "$4" ] && pass "$3" || fail "$3: the flash changed"; }
 
-    run status; grep -qx "backup=none" "$T/out" && grep -qx "files=yes" "$T/out" && grep -qx "live=yes" "$T/out" && pass "status: live, stick, install files, no backup" || fail "status"
+    run status; grep -qx "backup=none" "$T/out" && grep -qx "files=yes" "$T/out" && grep -qx "live=yes" "$T/out" &&
+        grep -qx "model=t48s" "$T/out" && grep -qx "layout=matches" "$T/out" && pass "status: live, a T48S, layout known, stick, install files, no backup" || fail "status"
     refused install "No checked backup" "install without a backup is refused, nothing written" "$S0"
     refused restore "No checked backup" "restore without a backup is refused, nothing written" "$S0"
     run backup || { cat "$T/out"; fail "backup"; }
@@ -124,6 +132,26 @@ EOS
     cp "$T/stick/install/system.img" "$T/sys.keep"; printf 'X' >> "$T/stick/install/system.img"
     refused install "Install files on the stick are damaged" "install with damaged install files is refused" "$S0"
     cp "$T/sys.keep" "$T/stick/install/system.img"
+    # a flash whose layout the driver did not find (docs/models.md)
+    echo "mtdparts is not this layout" > "$T/param/layout"
+    run status; grep -qx "layout=unknown" "$T/out" || fail "status does not say the layout is unknown"
+    refused install "Flash layout not known" "install on a flash whose layout is not known is refused" "$S0"
+    refused restore "Flash layout not known" "restore on a flash whose layout is not known is refused" "$S0"
+    echo matches > "$T/param/layout"
+    # the chip has not answered: the model is not certain enough to write
+    echo 0 > "$T/hwid"
+    refused install "Phone model not known" "install with the phone's model in doubt is refused" "$S0"
+    echo 65 > "$T/hwid"
+    # a kernel file named for the other model
+    cp "$T/stick/install/T48S-kernel.uimg" "$T/k.keep"
+    python3 -I -c "
+import sys
+d = bytearray(open(sys.argv[1], 'rb').read()); d[32:64] = b'Linux-6.18.65-t46s'.ljust(32, b'\0')
+open(sys.argv[1], 'wb').write(d)" "$T/stick/install/T48S-kernel.uimg"
+    ( cd "$T/stick/install" && sha256sum T48S-kernel.uimg system.img > SHA256SUMS )
+    refused install "Kernel file is not for this phone" "a T46S kernel on a T48S is refused" "$S0"
+    cp "$T/k.keep" "$T/stick/install/T48S-kernel.uimg"
+    ( cd "$T/stick/install" && sha256sum T48S-kernel.uimg system.img > SHA256SUMS )
     # not a live start
     echo "console=tty0 t48boot=flash" > "$T/proc/cmdline"
     refused install "Not started from a stick" "install on a phone not started from a stick is refused" "$S0"
@@ -166,6 +194,46 @@ EOS
     wait
     grep -qx "step 100 Restarting" "$T/out" && grep -qx "watchdog reset stick=out" "$T/ends" && pass "eject: the restart waits for the stick to come out" || { cat "$T/out" "$T/ends"; fail "eject"; }
     last | grep -qx "error Not restarted. Unplug the power" && pass "a restart that does not happen says so" || fail "restart failure"
+
+    # ---- the same flash as a T46S (issue 10): its own stick names, its own kernel ----
+    if [ -f "$SET/T46S-kernel.uimg" ]; then
+        rm -f "$T/bin/sv" "$T/bin/t48-watchdog"; rm -rf "$T/stick"; mkdir -p "$T/stick/install"
+        cp "$T/chip.keep" "$T/chip"; [ "$(sum "$T/chip")" = "$S0" ] || fail "chip copy"
+        printf 'yealink,sip-t46s\0yealink,sip-t4xs\0' > "$T/dt/compatible"; echo 66 > "$T/hwid"; echo usbmode > "$T/bm/mode"
+        : > "$T/stick/T48S.rom"
+        run status; grep -qx "model=t46s" "$T/out" && grep -qx "stick=no" "$T/out" && pass "T46S: a T48S stick is not its stick" || fail "T46S status with a T48S stick"
+        rm "$T/stick/T48S.rom"; : > "$T/stick/T46S.rom"
+        cp "$SET/T48S-kernel.uimg" "$SET/system.img" "$T/stick/install/"
+        ( cd "$T/stick/install" && sha256sum T48S-kernel.uimg system.img > SHA256SUMS )
+        run status; grep -qx "stick=yes" "$T/out" && grep -qx "files=no" "$T/out" && pass "T46S: its stick, and the T48S's install files are not its install files" || fail "T46S status"
+        run backup && last | grep -qx "done Backup checked" && [ -f "$T/stick/t46s-backup/VERIFIED" ] && [ ! -e "$T/stick/t48s-backup" ] &&
+            grep -q "^T46S flash backup" "$T/stick/t46s-backup/MANIFEST" && pass "T46S: backup in t46s-backup" || { cat "$T/out"; fail "T46S backup"; }
+        refused install "No install files" "T46S: with only the T48S's kernel on the stick, install is refused" "$S0"
+        # the T46S file name holding the T48S's kernel
+        cp "$SET/T48S-kernel.uimg" "$T/stick/install/T46S-kernel.uimg"
+        ( cd "$T/stick/install" && sha256sum T46S-kernel.uimg system.img > SHA256SUMS )
+        refused install "Kernel file is not for this phone" "T46S: the T48S's kernel under the T46S's name is refused" "$S0"
+        rm "$T/stick/install/T48S-kernel.uimg"
+        cp "$SET/T46S-kernel.uimg" "$T/stick/install/"
+        ( cd "$T/stick/install" && sha256sum T46S-kernel.uimg system.img > SHA256SUMS )
+        echo "no environment (CRC wrong)" > "$T/param/layout"
+        refused install "Flash layout not known" "T46S: install where the layout is not known is refused" "$S0"
+        echo matches > "$T/param/layout"
+        run install || { cat "$T/out"; fail "T46S install"; }
+        last | grep -qx "done Installed" && pass "T46S: install finished" || fail "T46S install end"
+        python3 "$HERE/tools/t48flash.py" kernelimage "$SET/T46S-kernel.uimg" "$T/k46.want" >/dev/null
+        part 22675456 2621440 > "$T/k46"
+        cmp "$T/k46" "$T/k46.want" && pass "T46S: kernel partition is exactly the T46S image, ECC bytes included" || fail "T46S kernel bytes"
+        python3 "$HERE/tools/t48flash.py" nboot "$T/k46" "$SET/T46S-kernel.uimg" | tail -n 1 | sed 's/^/     /'
+        for p in "0 22675456" "25296896 15728640" "119537664 14680064"; do
+            set -- $p; [ "$(part $1 $2 | sha256sum)" = "$(dd if="$T/chip.keep" bs=2112 skip=$(($1 / 2048)) count=$(($2 / 2048)) 2>/dev/null | sha256sum)" ] || fail "T46S: something outside kernel and app changed"
+        done
+        pass "T46S: nothing outside the kernel and app partitions changed"
+        echo none > "$T/bm/mode"
+        run restore && last | grep -qx "done Restored" && [ "$(sum "$T/chip")" = "$S0" ] && pass "T46S: restore gives the backup back, byte for byte" || { cat "$T/out"; fail "T46S restore"; }
+    else
+        echo "skip T46S: no T46S-kernel.uimg in $SET"
+    fi
     echo "ALL PASSED (bytes)" ;;
 
 ubi)

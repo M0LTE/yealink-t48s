@@ -485,6 +485,7 @@ static int fw_live(void)
 #define FW_CHECK_MS 3000
 static struct {
     int loaded, stick, files, ours, backup, free_mb;   /* backup: 0 none, 1 unfinished, 2 checked */
+    int unknown;                  /* the flash is not laid out as the driver knows: nothing can be installed */
     char date[12];
     char again[12];               /* a job that stopped part way: it is offered again */
     long long asked;
@@ -493,7 +494,7 @@ static struct {
 static int fw_status(void)
 {
     char cmd[300], line[120], date[12] = "";
-    int stick = 0, files = 0, ours = 0, backup = 0, free_mb = 0;
+    int stick = 0, files = 0, ours = 0, backup = 0, free_mb = 0, unknown = 0;
     FILE *f;
     snprintf(cmd, sizeof cmd, "%s status 2>/dev/null", fw_tool());
     if ((f = popen(cmd, "r"))) {
@@ -502,6 +503,7 @@ static int fw_status(void)
             if (!strcmp(line, "stick=yes")) stick = 1;
             else if (!strcmp(line, "files=yes")) files = 1;
             else if (!strcmp(line, "flash=ours")) ours = 1;
+            else if (!strcmp(line, "layout=unknown")) unknown = 1;
             else if (!strcmp(line, "backup=checked")) backup = 2;
             else if (!strcmp(line, "backup=unfinished")) backup = 1;
             else if (!strncmp(line, "free_mb=", 8)) free_mb = atoi(line + 8);
@@ -510,8 +512,9 @@ static int fw_status(void)
         pclose(f);
     }
     int changed = !fw.loaded || stick != fw.stick || files != fw.files || ours != fw.ours || backup != fw.backup ||
-                  free_mb != fw.free_mb || strcmp(date, fw.date);
+                  free_mb != fw.free_mb || unknown != fw.unknown || strcmp(date, fw.date);
     fw.loaded = 1;
+    fw.unknown = unknown;
     fw.stick = stick; fw.files = files; fw.ours = ours; fw.backup = backup; fw.free_mb = free_mb;
     snprintf(fw.date, sizeof fw.date, "%s", date);
     fw.asked = t48_now_ms();
@@ -1208,7 +1211,14 @@ static void build_about(void)
     int up;
     snprintf(title, sizeof title, "About");
     add_action("Key test", A_KEYTEST, "");   /* first: a phone whose keys are in doubt gets there on Down and OK alone */
-    add_info("Phone", "Yealink SIP-T48S, open firmware");
+    /* the device tree names the model (docs/models.md); the simulator has none */
+    snprintf(v, sizeof v, "%s", SMALL ? "Yealink SIP-T46S" : "Yealink SIP-T48S");
+    if ((f = fopen("/proc/device-tree/model", "r"))) {
+        if (!fgets(v, sizeof v, f) || !v[0]) snprintf(v, sizeof v, "%s", SMALL ? "Yealink SIP-T46S" : "Yealink SIP-T48S");
+        fclose(f);
+    }
+    strncat(v, ", open firmware", sizeof v - strlen(v) - 1);
+    add_info("Phone", v);
     firmware_version(v, sizeof v);
     add_info("Firmware", v);
     add_info("Shell", T48_VERSION ", built " __DATE__);
@@ -1491,6 +1501,12 @@ static void build_install(void)
     if (fw.stick) snprintf(v, sizeof v, "%d MB free", fw.free_mb); else snprintf(v, sizeof v, "Not found");
     add_info("Stick", v);
     if (!fw.stick) return;
+    if (fw.unknown && !restore) {
+        /* t48-install would refuse: the flash driver did not find the layout it knows */
+        add_info("Flash", "Not recognised");
+        snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "Nothing can be installed on this phone");
+        return;
+    }
     if (fw.backup == 2) snprintf(v, sizeof v, "Checked, %s", fw.date); else snprintf(v, sizeof v, "%s", fw.backup ? "Unfinished" : "None");
     add_info("Backup", v);
     if (restore) {

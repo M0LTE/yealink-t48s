@@ -1,0 +1,38 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# t48-model: which phone this is (docs/models.md). One system image serves both
+# models; the installer and the updater ask here which kernel is this phone's.
+#
+#   t48-model           t48s or t46s. The device tree says which model the running
+#                       kernel was built for; the Holtek chip, which phone it is
+#                       running on. When the chip answers, the two must agree
+#   t48-model strict    the same, and the chip must have answered: for the
+#                       installer, before anything is written
+#
+# Prints nothing and fails when the model is not known or the two disagree.
+# T48_DT and T48_HWID are for the tests on a PC (tools/test-update.sh).
+DT=${T48_DT:-/proc/device-tree}
+HWID=${T48_HWID:-/sys/module/t48s_holtek/parameters/hwid}
+
+dt=
+for c in $(tr '\0' ' ' < "$DT/compatible" 2>/dev/null); do
+    case "$c" in
+    yealink,sip-t48s) dt=t48s ;;
+    yealink,sip-t46s) dt=t46s ;;
+    esac
+done
+case "$(cat "$HWID" 2>/dev/null)" in
+65) hw=t48s ;;
+66) hw=t46s ;;
+0|'') hw= ;;
+*) hw=other ;;
+esac
+# no device tree at all: Linux 3.6, which only ever ran on a T48S
+[ -n "$dt" ] || [ -e "$DT" ] || [ "$1" = strict ] || dt=t48s
+[ -n "$dt" ] || exit 1
+if [ -n "$hw" ]; then
+    [ "$hw" = "$dt" ] || { echo "t48-model: the kernel is for a $(echo "$dt" | tr a-z A-Z), the phone is not one" >&2; exit 1; }
+elif [ "$1" = strict ]; then
+    exit 1
+fi
+echo "$dt"
