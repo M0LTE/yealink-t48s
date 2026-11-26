@@ -377,6 +377,60 @@ static int update_reaped(pid_t pid, int status)
     return 0;
 }
 
+/* ---------- the home screen's notices of updates (issue #80) ---------- */
+
+/* The daily check (t48-update daily) leaves what it found in update-latest in the
+ * state folder. When that file changes, what the updater says is asked for again;
+ * every two seconds while it works, and once a minute while an update is waiting,
+ * to see it installed from the web setup page or over SSH. */
+#define UPDATE_WATCH_MS 60000
+#define UPDATE_WORK_MS 2000
+void settings_update_watch(long long now)
+{
+    static char seen[64] = "?";
+    static long long last;
+    char path[400], sig[64] = "-";
+    struct stat st;
+    snprintf(path, sizeof path, "%s/update-latest", opt.state);
+    if (stat(path, &st) == 0) snprintf(sig, sizeof sig, "%ld.%ld.%ld", (long)st.st_mtim.tv_sec, (long)st.st_mtim.tv_nsec, (long)st.st_size);
+    long long every = update_working(upd.state) ? UPDATE_WORK_MS : !strcmp(upd.update, "yes") ? UPDATE_WATCH_MS : 0;
+    if (!strcmp(sig, seen) && (!every || now < last + every)) return;
+    snprintf(seen, sizeof seen, "%s", sig);
+    last = now;
+    if (upd.cmd_pid <= 0) update_info();
+}
+
+/* "Update available", with the channel when it is not the usual one; "" when there is none */
+const char *settings_update_notice(void)
+{
+    if (!upd.loaded || !upd.installed || strcmp(upd.update, "yes") || !strcmp(upd.state, "restart")) return "";
+    return !strcmp(upd.channel, "stable") ? "Update available" : !strcmp(upd.channel, "testing") ? "Testing: update available"
+                                                                                                 : "Custom: update available";
+}
+
+static const char *feed_now(void);
+
+/* installed apps the feed has newer, as t48-app last found. Asked for every second by
+ * the home screen, so counted again only when the offers file, the feed or the list of
+ * installed apps has changed */
+int settings_app_updates(void)
+{
+    static char seen[600];
+    static int count;
+    char path[400], sig[600];
+    struct stat st;
+    const char *feed = feed_now();
+    if (!feed[0]) feed = pkg_default_feed();
+    snprintf(path, sizeof path, "%s/" T48_OFFERS, opt.state);
+    if (stat(path, &st) < 0) return 0;
+    snprintf(sig, sizeof sig, "%ld.%ld.%ld.%d.%s", (long)st.st_mtim.tv_sec, (long)st.st_mtim.tv_nsec, (long)st.st_size, manifest_scans, feed);
+    if (strcmp(sig, seen)) {
+        snprintf(seen, sizeof seen, "%s", sig);
+        count = manifest_updates(opt.state, feed);
+    }
+    return count;
+}
+
 /* ---------- the app manager's child process ---------- */
 
 struct store_app {
@@ -467,7 +521,7 @@ static int job_start(int kind, const char *cmd, const char *arg)
         signal(SIGPIPE, SIG_DFL);
         if (kind == J_FIRMWARE) execl(fw_tool(), "t48-install", "--machine", cmd, (char *)NULL);
         else execl("/proc/self/exe", "t48-app", "--machine", "--apps", opt.apps, "--config", opt.config, "--data", opt.data,
-                   cmd, arg, (char *)NULL);
+                   "--state", opt.state, cmd, arg, (char *)NULL);
         _exit(127);
     }
     close(p[1]);
@@ -730,10 +784,12 @@ static void build_root(void)
     add_menu("Screen", P_SCREEN, "");
     access_read();
     add_menu("Access", P_ACCESS, acc.dev || !strcmp(cfg_str("access", "ssh", "off"), "on") ? "SSH on" : "SSH off");
-    snprintf(v, sizeof v, "%d installed", napps);
+    int ups = settings_app_updates();
+    if (ups) snprintf(v, sizeof v, "%d installed, %d update%s", napps, ups, ups == 1 ? "" : "s");
+    else snprintf(v, sizeof v, "%d installed", napps);
     add_menu("Apps", P_STORE, v);
     add_menu("App settings", P_APPSETTINGS, "");
-    add_menu("Update", P_UPDATE, "");
+    add_menu("Update", P_UPDATE, settings_update_notice()[0] ? "Update available" : "");
     add_menu("About", P_ABOUT, "");
     if (fw_live()) add_menu("Install", P_INSTALL, "");
 }
@@ -1137,7 +1193,9 @@ static void build_update(void)
     if (upd.installed && upd.slot[0]) snprintf(v, sizeof v, "%s, slot %s", upd.version, upd.slot);
     else snprintf(v, sizeof v, "%s", upd.version);
     add_info("Version", v);
-    if (!upd.installed) { add_info("Status", "Not installed"); return; }
+    /* firmware and apps, once a night (issue #80): it finds, and never installs. On a phone
+     * that is not installed it asks the app feed only, and can be stopped here too */
+    if (!upd.installed) { add_info("Status", "Not installed"); add_stored(R_TOGGLE, "Daily check", "update", "daily", "on", 0); return; }
     int busy = update_busy(), restart = !strcmp(upd.state, "restart");
     if (!strcmp(upd.channel, "stable") || !strcmp(upd.channel, "testing")) {
         r = add(R_CHOICE, "Channel");
@@ -1150,6 +1208,7 @@ static void build_update(void)
         add_info("Channel", "Custom");
         snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%s", upd.channel);
     }
+    add_stored(R_TOGGLE, "Daily check", "update", "daily", "on", 0);
     add_info("Latest", upd.latest[0] ? upd.latest : "Not checked");
     const char *st = !strcmp(upd.state, "checking") ? "Checking" : !strcmp(upd.state, "downloading") ? "Downloading" :
                      !strcmp(upd.state, "writing") ? "Writing" : restart ? "Restart to finish" :
@@ -1430,6 +1489,18 @@ void settings_open(int app_manager)
     came_from_launcher = app_manager;
     if (app_manager) { store_state = ST_NONE; nstore = 0; }   /* a fresh look at the feed each time */
     push(app_manager ? P_STORE : P_ROOT, NULL);
+    /* with an update noticed on the home screen, OK opens it */
+    enum page want = app_manager ? P_ROOT : settings_update_notice()[0] ? P_UPDATE : settings_app_updates() ? P_STORE : P_ROOT;
+    for (int i = 0; want != P_ROOT && i < nrows; i++)
+        if (rows[i].kind == R_MENU && rows[i].target == (int)want) { stack[depth].sel = i; rebuild(); break; }
+}
+
+/* a touch on a notice: Settings, Update or Settings, Apps, with the list behind it */
+void settings_open_page(const char *name)
+{
+    settings_open(0);
+    if (!strcmp(name, "apps")) { store_state = ST_NONE; nstore = 0; push(P_STORE, NULL); }
+    else push(P_UPDATE, NULL);
 }
 
 /* leave at once, for the shell to show something else */

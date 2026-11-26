@@ -3,7 +3,9 @@
 # t48-update: updates for an installed phone (issue 31, docs/install.md).
 #
 # From a release channel:
-#   t48-update check                   ask the channel what its newest release is
+#   t48-update check [--quiet]         ask the channel what its newest release is.
+#                                      --quiet: a failure is not shown as a status
+#                                      and keeps what the last check found
 #   t48-update install                 download the channel's system image, check
 #                                      its SHA-256, write it to the slot that is
 #                                      not in use, mark it for one try
@@ -21,6 +23,15 @@
 #   t48-update install FILE|URL [SHA256]
 #   t48-update kernel FILE|URL SHA256
 #   t48-update switch                  try the other slot at the next start
+# The daily check (issue 80), the runit service update-check:
+#   t48-update daily                   check the channel and the apps' feed once a
+#                                      night, at this phone's own time between
+#                                      01:00 and 05:00, and soon after a start when
+#                                      the last check is over a day old. One line
+#                                      to the log each time. Never installs
+#   t48-update daily now               that check, now
+#   t48-update daily due               yes if a check is due now
+#   "daily=off" in the update settings file turns it off.
 # Run by rcS:
 #   t48-update boot                    note an update that did not start
 #   t48-update confirm                 a minute after start: a slot on trial that
@@ -47,6 +58,10 @@ CA=${T48_CA:-/etc/ssl/certs/ca-certificates.crt}
 GITHUB=${T48_UPDATE_GITHUB:-https://github.com/M0LTE/yealink-t48s/releases}
 W=$RUN/t48-update
 KERNEL_MAX=2621440
+# what the last check found, kept across restarts for the screen's notice; and
+# when the daily check last ran and this phone's time in the night for it
+LATEST=$KEEP/update-latest
+CHECKS=$KEEP/update-check
 
 die() { echo "$*" >&2; exit 1; }
 booted() { sed -n 's/^slot=//p' "$RUN/t48-slot" 2>/dev/null; }
@@ -82,7 +97,8 @@ base() {
     *) channel | sed 's|/*$||' ;;
     esac
 }
-fetch() { curl -fsL --connect-timeout 20 --max-time 900 --cacert "$CA" -o "$2" "$1"; }
+# fetch URL FILE [SECONDS]: 15 minutes unless told; VERSION and SHA256SUMS get a minute
+fetch() { curl -fsL --connect-timeout 20 --max-time "${3:-900}" --cacert "$CA" -o "$2" "$1"; }
 # sum_of FILE: its line in the channel's SHA256SUMS
 sum_of() { sed -n "s/^\([0-9a-f]\{64\}\)  *\*\{0,1\}$1\$/\1/p" "$W/SHA256SUMS" | head -n 1; }
 
@@ -100,9 +116,12 @@ kernel_sum() {
 # do_check: fetch the channel's VERSION and SHA256SUMS and write down what they say
 do_check() {
     b=$(base)
-    state checking ""
-    rm -f "$W/latest"
-    fetch "$b/VERSION" "$W/VERSION.new" && fetch "$b/SHA256SUMS" "$W/SHA256SUMS.new" || { rm -f "$W"/*.new; return 1; }
+    # A quiet check (the daily one) leaves the state alone: a kernel written and
+    # waiting for its restart, or the words of a failed install, stay on the
+    # screens, and nothing there looks busy. One that fails keeps what the last
+    # check found.
+    [ -n "$QUIET" ] || { state checking ""; rm -f "$LATEST"; }
+    fetch "$b/VERSION" "$W/VERSION.new" 60 && fetch "$b/SHA256SUMS" "$W/SHA256SUMS.new" 60 || { rm -f "$W"/*.new; return 1; }
     mv "$W/VERSION.new" "$W/VERSION"; mv "$W/SHA256SUMS.new" "$W/SHA256SUMS"
     latest=$(head -n 1 "$W/VERSION" | tr -cd 'A-Za-z0-9._+-' | head -c 60)
     sys=$(sum_of system.img)
@@ -115,8 +134,82 @@ do_check() {
     if [ -n "$ker" ] && ksum=$(kernel_sum); then
         if [ "$ksum" = "$ker" ]; then k=same; else k=differs; fi
     fi
-    printf 'latest=%s\nsystem=%s\nkernel_sum=%s\nupdate=%s\nkernel=%s\nchecked=%s\nbase=%s\n' \
-        "$latest" "$sys" "$ker" "$up" "$k" "$(now)" "$b" > "$W/latest"
+    # with what it was compared against: it holds only while both are still so
+    mkdir -p "$KEEP" 2>/dev/null
+    printf 'latest=%s\nsystem=%s\nkernel_sum=%s\nupdate=%s\nkernel=%s\nchecked=%s\nbase=%s\nrunning=%s\n' \
+        "$latest" "$sys" "$ker" "$up" "$k" "$(now)" "$b" "$(version)" > "$LATEST.new" && mv "$LATEST.new" "$LATEST"
+}
+
+# check_channel: the check with the lock, for "check" and the daily check
+check_channel() {
+    lock
+    if ! do_check; then
+        [ -n "$QUIET" ] || state failed "No release found"
+        unlock
+        die "No release found"
+    fi
+    [ -n "$QUIET" ] || state idle ""
+    unlock
+}
+
+# ---- the daily check (issue 80): it finds and tells, and never installs ----
+SANE=1767225600       # 2026-01-01: before this the clock has not been set yet
+DAY=86400
+NIGHT=3600            # this phone's time is 01:00 plus up to 4 hours ...
+SPAN=14400
+NIGHT_END=21600       # ... and a check missed then is not made after 06:00
+START=${T48_CHECK_START:-180}   # seconds after the phone starts: the network and the clock are up
+
+daily_on() { [ "$(get "$CONF" daily)" != off ]; }
+uptime_s() { cut -d. -f1 "${T48_PROC:-/proc}/uptime" 2>/dev/null || echo 0; }
+# this phone's time in the night, chosen once at random and kept, to spread phones out
+night_slot() {
+    s=$(get "$CHECKS" slot)
+    case "$s" in ''|*[!0-9]*)
+        r=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ')
+        s=$(( ${r:-$$} % SPAN ))
+        mkdir -p "$KEEP" 2>/dev/null
+        printf 'slot=%s\nlast=%s\n' "$s" "$(get "$CHECKS" last)" > "$CHECKS" ;;
+    esac
+    echo "$s"
+}
+# due NOW UPTIME: a check is due
+due() {
+    daily_on && [ "$1" -ge $SANE ] && [ "$2" -ge "$START" ] || return 1
+    at=$(( NIGHT + $(night_slot) ))
+    last=$(get "$CHECKS" last)
+    case "$last" in ''|*[!0-9]*) last=0 ;; esac
+    # A last check in the future means the clock was wrong then or is now (a
+    # start before NTP is kept out by SANE above, but a clock set wrongly by hand
+    # or by a bad server is not): count it as never, so one check puts it right
+    # rather than none happening until the clock catches up.
+    [ "$last" -le "$1" ] || last=0
+    # over a day since the last one: after a start, or a night it was off
+    [ $(( $1 - last )) -lt $DAY ] || return 0
+    # this phone's time in the night, and none since then
+    set -- "$1" $(date -d "@$1" '+%H %M %S')
+    secs=$(( ${2#0} * 3600 + ${3#0} * 60 + ${4#0} ))
+    [ "$secs" -ge "$at" ] && [ "$secs" -lt $NIGHT_END ] && [ "$last" -lt $(( $1 - secs + at )) ]
+}
+# the check itself: the channel (on an installed phone) and the apps' feed, one line to the log
+daily_check() {
+    t=$(now)
+    slot=$(night_slot)
+    mkdir -p "$KEEP" 2>/dev/null
+    printf 'slot=%s\nlast=%s\n' "$slot" "$t" > "$CHECKS.new" && mv "$CHECKS.new" "$CHECKS"
+    if ! installed; then
+        fw="firmware not installed"
+    elif ( QUIET=1 check_channel ) 2>/dev/null; then
+        if [ "$(get "$LATEST" update)" = yes ]; then fw="firmware $(get "$LATEST" latest) available"; else fw="firmware up to date"; fi
+    else
+        fw="firmware not reached"
+    fi
+    if a=$(${T48_APP:-t48-app} check 2>&1); then
+        case "$a" in "Up to date") a="apps up to date" ;; *) a=$(echo "$a" | sed 's/update/app update/') ;; esac
+    else
+        a="apps not reached ($(echo "$a" | tail -n 1 | sed 's/^t48-app: //'))"
+    fi
+    echo "daily check: $fw, $a"
 }
 
 # write_system FILE [SHA256] [NAME]: into the slot that is not in use
@@ -189,9 +282,9 @@ info)
     echo "version=$(version)"
     echo "channel=$(channel)"
     echo "url=$(base)"
-    # what the last check found, if it was this channel
-    if [ "$(get "$W/latest" base)" = "$(base)" ]; then
-        grep -E '^(latest|update|kernel|checked)=' "$W/latest"
+    # what the last check found, if it was this channel and this version
+    if [ "$(get "$LATEST" base)" = "$(base)" ] && [ "$(get "$LATEST" running)" = "$(version)" ]; then
+        grep -E '^(latest|update|kernel|checked)=' "$LATEST"
     else
         printf 'latest=\nupdate=unknown\nkernel=unknown\nchecked=\n'
     fi
@@ -215,17 +308,30 @@ channel)
     esac
     mkdir -p "${CONF%/*}"
     { grep -v '^channel=' "$CONF" 2>/dev/null; echo "channel=$2"; } > "$CONF.new" && mv "$CONF.new" "$CONF" || die "Not saved"
-    rm -f "$W/latest"
+    rm -f "$LATEST"
     echo "Channel: $2" ;;
 check)
-    lock
+    [ "$2" != --quiet ] || QUIET=1
     # a check that fails is not a result: the last install's stays
-    do_check || { state failed "No release found"; unlock; die "No release found"; }
-    state idle ""
-    unlock
-    echo "Latest: $(get "$W/latest" latest)"
-    case "$(get "$W/latest" update)" in yes) echo "Update available" ;; *) echo "Up to date" ;; esac
-    [ "$(get "$W/latest" kernel)" != differs ] || echo "Kernel differs: t48-update kernel" ;;
+    check_channel
+    echo "Latest: $(get "$LATEST" latest)"
+    case "$(get "$LATEST" update)" in yes) echo "Update available" ;; *) echo "Up to date" ;; esac
+    [ "$(get "$LATEST" kernel)" != differs ] || echo "Kernel differs: t48-update kernel" ;;
+daily)
+    case "$2" in
+    now) daily_check ;;
+    due) if due "${T48_NOW:-$(now)}" "$(uptime_s)"; then echo yes; else echo no; fi ;;
+    '')
+        n=0
+        while :; do
+            # the owner's time zone, for the night: read again every hour
+            if [ $((n % 60)) = 0 ]; then z=$(t48-config tz 2>/dev/null) && export TZ="$z"; fi
+            n=$((n + 1))
+            ! due "$(now)" "$(uptime_s)" || daily_check
+            sleep 60
+        done ;;
+    *) die "usage: t48-update daily [now|due]" ;;
+    esac ;;
 install)
     installed || die "Not installed: no system slots"
     lock
@@ -233,8 +339,8 @@ install)
     if [ -z "$f" ]; then
         # from the channel
         do_check || stop "No release found"
-        want=$(get "$W/latest" system); name=$(get "$W/latest" latest)
-        [ "$(get "$W/latest" update)" = yes ] || { state idle ""; unlock; echo "Up to date"; exit 0; }
+        want=$(get "$LATEST" system); name=$(get "$LATEST" latest)
+        [ "$(get "$LATEST" update)" = yes ] || { state idle ""; unlock; echo "Up to date"; exit 0; }
         f=$(base)/system.img
     fi
     case "$f" in
@@ -253,9 +359,9 @@ kernel)
     f=$2; want=$3
     if [ -z "$f" ]; then
         do_check || stop "No release found"
-        want=$(get "$W/latest" kernel_sum)
+        want=$(get "$LATEST" kernel_sum)
         [ -n "$want" ] || stop "No kernel in this release"
-        [ "$(get "$W/latest" kernel)" != same ] || { state idle ""; unlock; echo "Kernel up to date"; exit 0; }
+        [ "$(get "$LATEST" kernel)" != same ] || { state idle ""; unlock; echo "Kernel up to date"; exit 0; }
         f=$(base)/T48S-kernel.uimg
     fi
     [ -n "$want" ] || { unlock; die "usage: t48-update kernel [FILE|URL SHA256]"; }
@@ -267,7 +373,7 @@ kernel)
     esac
     [ -f "$f" ] || stop "No such file: $f"
     write_kernel "$f" "$want" || { rm -f "$TMP/t48-update.kernel"; stop "$ERR"; }
-    rm -f "$TMP/t48-update.kernel" "$W/latest"
+    rm -f "$TMP/t48-update.kernel" "$LATEST"
     result "Kernel written"
     state restart ""
     unlock
@@ -315,5 +421,5 @@ switch)
     [ -n "$(slot_sum "$o")" ] || die "Slot $o is empty or unreadable"
     state_write "$S_ACTIVE" "$o" 1 || die "Flash write failed"
     echo "Slot $o will be tried at the next start" ;;
-*)  echo "usage: t48-update status | info | check | install [FILE|URL [SHA256]] | kernel [FILE|URL SHA256] | channel [stable|testing|URL] | switch" >&2; exit 2 ;;
+*)  echo "usage: t48-update status | info | check [--quiet] | daily [now|due] | install [FILE|URL [SHA256]] | kernel [FILE|URL SHA256] | channel [stable|testing|URL] | switch" >&2; exit 2 ;;
 esac

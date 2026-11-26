@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-/* t48-shell: find installed apps and read their manifest.json files. */
+/* t48-shell: find installed apps and read their manifest.json files, and count
+ * the ones the feed has newer (issue 80). */
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +11,7 @@
 
 struct manifest apps[MAX_APPS];
 int napps;
+int manifest_scans;   /* how many times the list has been read: a count made from it is stale when this moves */
 
 int manifest_id_ok(const char *id)
 {
@@ -148,6 +150,7 @@ void manifests_scan(const char *dirs)
 {
     for (int i = 0; i < napps; i++) manifest_free(&apps[i]);
     napps = 0;
+    manifest_scans++;
 
     char *list = strdup(dirs), *save = NULL;
     for (char *d = strtok_r(list, ":", &save); d; d = strtok_r(NULL, ":", &save)) {
@@ -165,4 +168,43 @@ void manifests_scan(const char *dirs)
     free(list);
     qsort(apps, (size_t)napps, sizeof apps[0], by_name);
     logmsg("%d app%s installed", napps, napps == 1 ? "" : "s");
+}
+
+/* compare versions number by number: 0.10.0 is newer than 0.9.1 */
+int manifest_version_cmp(const char *a, const char *b)
+{
+    while (*a || *b) {
+        char *ea, *eb;
+        long x = strtol(a, &ea, 10), y = strtol(b, &eb, 10);
+        if (ea == a || eb == b) return strcmp(a, b);
+        if (x != y) return x < y ? -1 : 1;
+        a = *ea ? ea + 1 : ea;
+        b = *eb ? eb + 1 : eb;
+        if ((*ea && *ea != '.') || (*eb && *eb != '.')) return strcmp(ea, eb);
+    }
+    return 0;
+}
+
+/* How many of the installed apps the feed has a newer version of, that this shell can
+ * run, from what t48-app last read of it (T48_OFFERS in the state folder). Counted
+ * against what is installed now, so an update or a removal counts at once. Nothing
+ * if that was another feed. */
+int manifest_updates(const char *state, const char *feed)
+{
+    char path[400], line[600];
+    int n = 0, same = 0;
+    snprintf(path, sizeof path, "%s/" T48_OFFERS, state);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    while (fgets(line, sizeof line, f)) {
+        char id[64], version[64];
+        int api;
+        line[strcspn(line, "\n")] = 0;
+        if (!strncmp(line, "feed=", 5)) same = !strcmp(line + 5, feed);
+        if (!same || sscanf(line, "app %63s %63s %d", id, version, &api) != 3 || api > T48_API_LEVEL) continue;
+        for (int i = 0; i < napps; i++)
+            if (!strcmp(apps[i].id, id) && manifest_version_cmp(version, apps[i].version) > 0) n++;
+    }
+    fclose(f);
+    return n;
 }

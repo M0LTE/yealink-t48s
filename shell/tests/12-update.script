@@ -21,11 +21,14 @@ key ok
 expectstate settings.page update
 waitstate update.state idle 3000
 run test ! -f simdata/update/asked
-expectstate settings.rows 4
+expectstate settings.rows 5
 expectstate settings.row Check_now
 key up
 expectstate settings.row Latest
 expectstate settings.value Not_checked
+key up
+expectstate settings.row Daily_check
+expectstate settings.value on
 key up
 expectstate settings.row Channel
 expectstate settings.value stable
@@ -33,6 +36,7 @@ key up
 expectstate settings.row Version
 expectstate settings.value 20261124-ac7a8f4,_slot_a
 shot shots/update.png
+key down
 key down
 key down
 key down
@@ -54,7 +58,7 @@ key down
 key down
 key down
 expectstate settings.row Install
-expectstate settings.rows 6
+expectstate settings.rows 7
 shot shots/update-available.png
 
 # ---- install: asks first, then downloads and writes with nobody waiting ----
@@ -86,7 +90,7 @@ expectstate settings.value Restart_to_finish
 key down
 key down
 expectstate settings.row Restart
-expectstate settings.rows 6
+expectstate settings.rows 7
 shot shots/update-restart.png
 key ok
 expectstate overlay confirm
@@ -104,7 +108,7 @@ key x
 expectstate settings.page root
 
 # ---- a check that fails: the updater's own words ----
-run rm -f simdata/update/offer simdata/update/state simdata/update/latest
+run rm -f simdata/update/offer simdata/update/state simdata/state/update-latest
 key ok
 waitstate update.state idle 3000
 expectstate settings.row Check_now
@@ -121,7 +125,7 @@ run printf 'result=v0.3.0 installed\nresult_time=1795451100\n' > simdata/update/
 run rm -f simdata/update/state
 key ok
 waitstate update.state idle 3000
-expectstate settings.rows 5
+expectstate settings.rows 6
 key down
 expectstate settings.row Last_result
 expectstate settings.value v0.3.0_installed,_23_Nov_16:25
@@ -159,6 +163,7 @@ waitstate update.state idle 3000
 key up
 key up
 key up
+key up
 expectstate settings.row Channel
 expectstate settings.value stable
 key ok
@@ -166,11 +171,13 @@ waitstate settings.value testing 3000
 run grep -qx testing simdata/update/channel
 # another channel: what the last check found no longer counts
 key down
+key down
 expectstate settings.value Not_checked
 key x
 run echo https://builds.example.org/t48 > simdata/update/channel
 key ok
 waitstate update.state idle 3000
+key up
 key up
 key up
 expectstate settings.value https://builds.example.org/t48
@@ -182,17 +189,39 @@ expectstate settings.value Custom
 shot shots/update-custom.png
 key x
 
+# ---- the daily check (issue 80): on, unless turned off here ----
+key ok
+waitstate update.state idle 3000
+key up
+key up
+expectstate settings.row Daily_check
+expectstate settings.value on
+key ok
+expectstate settings.value off
+expectstate cfg.update.daily off
+run grep -qx daily=off simdata/config/update
+key ok
+expectstate settings.value on
+expectstate cfg.update.daily on
+key x
+
 # ---- not installed (a start from a USB stick): the version and nothing to do ----
 run echo no > simdata/update/installed
 key ok
 waitstate update.state notinstalled 3000
-expectstate settings.rows 2
+expectstate settings.rows 3
 expectstate settings.row Version
 expectstate settings.value 20261124-ac7a8f4
 key down
 expectstate settings.row Status
 expectstate settings.value Not_installed
 shot shots/update-not-installed.png
+# the daily check still asks the app feed there, and can be stopped
+key down
+key ok
+expectstate cfg.update.daily off
+key ok
+expectstate cfg.update.daily on
 key x
 key x
 expect idle

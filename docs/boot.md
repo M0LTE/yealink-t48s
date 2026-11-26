@@ -44,7 +44,7 @@ On an installed phone it is also where a start ends when neither slot starts, or
 
 ## Services
 
-`runsvdir` (busybox runit) keeps five programs running and starts any of them again if it stops:
+`runsvdir` (busybox runit) keeps these programs running and starts any of them again if it stops:
 
 | Service | Runs | Waits for |
 |---|---|---|
@@ -53,6 +53,7 @@ On an installed phone it is also where a start ends when neither slot starts, or
 | `sip` | `t48-sip` (baresip) | an account in `/data/config/sip`, the audio service, an address |
 | `watchdog` | `t48-watchdog` | nothing |
 | `usbmount` | `t48-usbmount watch`: USB sticks read-only on `/run/media` for apps ([app-protocol.md](app-protocol.md#what-an-app-is-given)) | nothing |
+| `update-check` | `t48-update daily`: the daily check for firmware and app updates, which installs nothing ([install.md](install.md#the-daily-check)) | the clock, and three minutes after the start |
 
 ```
 sv status /run/service/*

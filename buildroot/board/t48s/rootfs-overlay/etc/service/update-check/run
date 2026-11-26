@@ -1,0 +1,8 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The daily check for firmware and app updates (issue 80, docs/install.md): once
+# a night at this phone's own time, and soon after a start when the last check is
+# over a day old. It finds and tells, through the home screen and the web setup
+# page; it never installs. Off with "daily=off" in /data/config/update.
+exec 2>&1 </dev/null
+exec t48-update daily

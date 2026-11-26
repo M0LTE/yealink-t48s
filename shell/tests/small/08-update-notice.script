@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The T46S's home screen with updates noticed (issue 80): the same notices as the
+# T48S, in the row above the soft keys. Nothing to touch: Settings (soft key 4)
+# opens with the Update or Apps row chosen, and OK opens it.
+wait 2500
+expect idle
+expectstate notes -
+run mkdir -p simdata/update
+run echo v0.3.0 > simdata/update/offer
+run sh ../tests/update/update.sh check
+waitstate notes Update_available 3000
+expectstate soft4 Settings
+shot shots/t46s-update-notice.png
+key soft4
+expect settings
+expectstate settings.row Update
+expectstate settings.value Update_available
+key ok
+expectstate settings.page update
+waitstate update.state idle 3000
+shot shots/t46s-update-page.png
+key x
+key x
+expect idle
+# testing, and an app update beside it
+run sh ../tests/update/update.sh channel testing
+run sh ../tests/update/update.sh check
+waitstate notes Testing:_update_available 3000
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/1/index.json
+run ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state install demo
+run ./t48-config --config simdata/config set feed url file://$PWD/feeds/2/index.json
+run ./t48-app --apps simdata/installed:apps --config simdata/config --data simdata/appdata --state simdata/state check
+waitstate notes Testing:_update_available|1_app_update 3000
+shot shots/t46s-update-notice-both.png
+# apps alone: Settings opens on Apps
+run rm -f simdata/state/update-latest
+waitstate notes 1_app_update 3000
+key soft4
+expectstate settings.row Apps
+expectstate settings.value 3_installed,_1_update
+key ok
+expectstate settings.page store
+key x
+key x
+expect idle
