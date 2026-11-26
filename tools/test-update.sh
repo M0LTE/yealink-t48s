@@ -1,12 +1,12 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# test-update.sh: the updater's network side on any PC, no root (issue 31,
-# docs/install.md). The phone's own t48-update and slots.sh run against files
+# test-update.sh: the updater's network side on any PC, no root (issues 31 and
+# 80, docs/install.md). The phone's own t48-update and slots.sh run against files
 # standing in for the UBI volumes and the kernel partition, and a web server on
 # this machine standing in for a release channel. What it shows: check, install
 # and kernel from a channel, the checksums, what the Settings screen is told,
-# and every refusal. The flash itself and the start after an update are
-# tools/test-install.sh's business.
+# every refusal, and the daily check on both channels. The flash itself and
+# the start after an update are tools/test-install.sh's business.
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 T=$(mktemp -d)
@@ -106,6 +106,7 @@ cmp -s "$T/dev/mtd7" "$T/k1.uimg" && pass "install leaves the kernel alone" || f
 rm -rf "$T/run/t48-update"; state_write a b 0; printf 'slot=b\nnote=trial\n' > "$T/run/t48-slot"; echo v2 > "$T/release"
 $UPD boot; $UPD confirm >/dev/null
 state_read; [ "$S_ACTIVE $S_TRIAL" = "b -" ] && [ "$(info result)" = "v2 installed" ] && pass "after the restart and a minute: slot b active, last result v2 installed" || fail "confirm"
+[ "$(info update)" = unknown ] && [ -z "$(info latest)" ] && pass "what the check before the update found no longer counts once it runs" || fail "latest kept past the update: $(info update)"
 
 # the next one does not start: back on b with the note
 mksys three "$T/sys3.img"; publish v3 "$T/sys3.img" "$T/k2.uimg"
@@ -148,4 +149,58 @@ if $UPD check 2>/dev/null; then fail "two updates ran at once"; fi
 pass "a second run while one is going is refused"
 echo 999999 > "$T/run/t48-update/lock/pid"
 $UPD check >/dev/null && pass "a lock left by a run that died is taken over" || fail "stale lock"
+
+# ---- the daily check (issue 80) ----
+# the two channels, laid out as GitHub serves them: stable v4, testing v5
+mksys four "$T/sys4.img"; mksys five "$T/sys5.img"
+mkdir -p "$T/gh/latest/download" "$T/gh/download/system-latest"
+publish v4 "$T/sys4.img" "$T/k2.uimg"; cp "$T/chan/"* "$T/gh/latest/download/"
+publish v5 "$T/sys5.img" "$T/k2.uimg"; cp "$T/chan/"* "$T/gh/download/system-latest/"
+export T48_UPDATE_GITHUB="http://127.0.0.1:$PORT/gh" T48_APP="$T/bin/t48-app" TZ=UTC0
+printf '#!/bin/sh\n[ "$1" = check ] || exit 2\necho "2 updates"\n' > "$T/bin/t48-app"; chmod +x "$T/bin/t48-app"
+before_a=$(sum "$T/dev/ubi0_0"); before_b=$(sum "$T/dev/ubi0_1")
+$UPD channel stable >/dev/null
+line=$($UPD daily now)
+[ "$line" = "daily check: firmware v4 available, 2 app updates" ] && pass "daily check, stable: the newest release and the apps, one line: $line" || fail "daily stable: $line"
+[ "$(info latest)" = v4 ] && [ "$(info update)" = yes ] && [ "$(info state)" = idle ] && pass "and the screen is told: v4, update available" || fail "daily stable info"
+[ "$(sed -n 's/^last=//p' "$T/data/phone/update-check")" -gt 0 ] && pass "the time of the check is kept" || fail "last not kept"
+$UPD channel testing >/dev/null
+[ "$($UPD daily now)" = "daily check: firmware v5 available, 2 app updates" ] && [ "$(info latest)" = v5 ] && pass "daily check, testing: the rolling build" || fail "daily testing"
+[ "$(sum "$T/dev/ubi0_0")" = "$before_a" ] && [ "$(sum "$T/dev/ubi0_1")" = "$before_b" ] && cmp -s "$T/dev/mtd7" "$T/k2.uimg" && [ ! -e "$T/data/phone/update-pending" ] && pass "it installs nothing: both slots and the kernel as they were" || fail "the daily check wrote something"
+grep -q '^running=v2$' "$T/data/phone/update-latest" && pass "what it found is kept in /data, with the version it was compared with" || fail "update-latest"
+rm -rf "$T/run/t48-update"
+[ "$(info latest)" = v5 ] && [ "$(info update)" = yes ] && pass "after a restart on the same version it still counts" || fail "latest lost at restart"
+# quiet when it fails: no status, no result, what was found stays
+printf '#!/bin/sh\necho "t48-app: cannot reach the server" >&2\nexit 1\n' > "$T/bin/t48-app"
+mv "$T/gh" "$T/gh.away"
+was=$(info result)
+line=$($UPD daily now)
+[ "$line" = "daily check: firmware not reached, apps not reached (cannot reach the server)" ] && pass "nothing reached: one line, $line" || fail "daily failure: $line"
+[ "$(info state)" = idle ] && [ "$(info latest)" = v5 ] && [ "$(info result)" = "$was" ] && pass "and quiet: no failure shown, the last find and the last result kept" || fail "daily failure is not quiet: $(info state) $(info latest)"
+if $UPD check --quiet 2>/dev/null; then fail "a quiet check against nothing passed"; fi
+[ "$(info state)" = idle ] && [ "$(info latest)" = v5 ] && pass "check --quiet: the same" || fail "check --quiet"
+mv "$T/gh.away" "$T/gh"
+
+# when it is due: soon after a start when the last check is over a day old, and at this phone's time in the night
+due() { echo "${3:-200}.5 1.0" > "$T/proc/uptime"; T48_NOW=$1 $UPD daily due; }
+D0=1795392000                             # 2026-11-23 00:00 UTC
+printf 'slot=1800\nlast=\n' > "$T/data/phone/update-check"      # 01:30
+[ "$(due $((D0 + 50000)))" = yes ] && pass "never checked: due once started" || fail "never checked"
+[ "$(due $((D0 + 50000)) x 100)" = no ] && pass "not in the first 3 minutes after a start" || fail "start delay"
+[ "$(due 1000)" = no ] && pass "not before the clock is set" || fail "clock not set"
+printf 'slot=1800\nlast=%s\n' $((D0 - 86400 + 50000)) > "$T/data/phone/update-check"
+[ "$(due $((D0 + 50000)))" = yes ] && pass "last check over a day ago: due" || fail "over a day"
+printf 'slot=1800\nlast=%s\n' $((D0 - 3 * 3600)) > "$T/data/phone/update-check"      # 21:00 the day before
+[ "$(due $((D0 + 5000)))" = no ] && [ "$(due $((D0 + 5500)))" = yes ] && pass "due at its time in the night, 01:30, not before" || fail "night slot"
+printf 'slot=1800\nlast=%s\n' $((D0 + 5500)) > "$T/data/phone/update-check"
+[ "$(due $((D0 + 6000)))" = no ] && pass "and once a night" || fail "twice a night"
+printf 'slot=1800\nlast=%s\n' $((D0 - 3 * 3600)) > "$T/data/phone/update-check"
+[ "$(due $((D0 + 7 * 3600)))" = no ] && pass "a night missed is not made up after 06:00 until a day has passed" || fail "after the night"
+printf 'channel=testing\ndaily=off\n' > "$T/data/config/update"
+[ "$(due $((D0 + 50000)) x 100000)" = no ] && pass "daily=off: never due" || fail "daily off"
+printf 'channel=testing\n' > "$T/data/config/update"
+rm "$T/data/phone/update-check"
+due $((D0 + 50000)) >/dev/null
+s=$(sed -n 's/^slot=//p' "$T/data/phone/update-check")
+[ "$s" -ge 0 ] && [ "$s" -lt 14400 ] && pass "this phone's time is chosen at random between 01:00 and 05:00, and kept: slot $s" || fail "slot $s"
 echo "all updater tests passed"
