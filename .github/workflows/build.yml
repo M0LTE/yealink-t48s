@@ -60,6 +60,9 @@ jobs:
       - name: USB stick tests (t48-usbmount, on folders)
         run: sh tools/test-usbmount.sh
 
+      - name: Link and DHCP tests (t48-link, the udhcpc script, on files)
+        run: sh tools/test-link.sh
+
       - name: SDK packer tests (t48-pack)
         run: sh tools/test-pack.sh
 

@@ -1,0 +1,37 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# t48-link: when the Ethernet cable comes back (carrier up), ask DHCP for a new
+# lease at once, so a phone moved to another network takes its address there
+# (issue #77, docs/sip.md#registration-back-off). If the address is a new one
+# the DHCP script starts baresip again; if not, nothing changes, as the
+# address is kept while udhcpc asks. Registering again on the same address
+# is t48keepalive's part, in baresip.
+#   t48-link        the service: looks once a second
+#   t48-link once   one look, for tools/test-link.sh
+# T48_ROOT moves /sys and /run, T48_LINK_IF the link (eth0), for the test.
+R=${T48_ROOT:-}
+IF=${T48_LINK_IF:-eth0}
+
+look() {
+    now=$(cat "$R/sys/class/net/$IF/carrier" 2>/dev/null) || now=0
+    [ "$now" = 1 ] || now=0
+    # the first look has nothing to compare with
+    if [ -f "$R/run/t48-link" ]; then was=$(cat "$R/run/t48-link"); else was=$now; fi
+    echo "$now" > "$R/run/t48-link"
+    [ "$now" = "$was" ] && return
+    [ "$now" = 1 ] || return
+    echo "link: $IF up, applying the network settings again"
+    # with DHCP: udhcpc's first step on starting is deconfig, and this keeps
+    # the address while it asks (a fixed address removes it)
+    : > "$R/run/t48-dhcp-kick"
+    t48-apply network
+}
+
+if [ "$1" = once ]; then
+    look
+    exit 0
+fi
+while :; do
+    look
+    sleep 1
+done

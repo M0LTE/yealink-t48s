@@ -125,7 +125,7 @@ Over UDP a single REGISTER with no answer is sent 11 times in 32 s (0.5, 1, 2, t
 
 `sip/test/regbackoff-test.sh` checks this on libre itself with a fake clock, in about a second: the retransmissions, every wait to the cap at the lowest and the highest jitter, a REGISTER that cannot be sent, a new registration going at once with one failure carried over as baresip does, and an unregister that cannot be sent returning its error. `sip/test/link-test.sh` (in the build container with `--cap-add NET_ADMIN`, a few seconds) takes a dummy link's carrier down and up: a registered account and one in back-off both register at once, and an MTU change registers no one.
 
-DHCP: `udhcpc` stays running and renews the lease (until 26 Nov 2026 it ran with `-q`, exited after the first lease and never renewed it, so the phone kept the address after the lease ran out). It does not watch the link itself, so a phone moved to another network keeps its old address until the lease is renewed.
+DHCP: `udhcpc` stays running and renews the lease (until 26 Nov 2026 it ran with `-q`, exited after the first lease and never renewed it, so the phone kept the address after the lease ran out). When the cable comes back, the `link` service (`t48-link`) starts udhcpc again, asking for the address the phone has: on the same network it keeps it and nothing else changes (the address stays while udhcpc asks); on another network it takes the new one there, and the DHCP script starts baresip again on it. `tools/test-link.sh` checks this on files, with stand-ins for the network commands.
 
 ### Block direct calls
 

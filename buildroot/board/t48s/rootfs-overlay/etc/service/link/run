@@ -1,0 +1,5 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The Ethernet cable put back: a new DHCP lease at once (t48-link, docs/sip.md).
+exec 2>&1 </dev/null
+exec t48-link
