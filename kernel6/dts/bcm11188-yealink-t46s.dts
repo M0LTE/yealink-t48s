@@ -3,10 +3,11 @@
  * Yealink SIP-T46S desk phone (hardware id 66): the T48S's smaller sibling,
  * with a 480x272 screen, no touch, ten line keys and four soft keys.
  *
- * NOT YET RUN ON A T46S. Everything here was read out of Yealink's and
- * U-Boot's code for hardware id 66 (docs/models.md says what from where, and
- * how sure each item is). Until someone has started it, treat it as a guess
- * that is safe to try: this tree has no flash at all.
+ * Read out of Yealink's and U-Boot's code for hardware id 66 and confirmed on
+ * a T46S from 25 November 2026: screen, keys, backlight, network, sound
+ * (docs/models.md says what from where). The flash is the T48S's driver with
+ * the same table; it writes nothing until U-Boot's own environment on this
+ * phone names that table (drivers/t48s_nand_layout.h).
  */
 /dts-v1/;
 
@@ -35,7 +36,7 @@
 	 * The panel is mounted upside down (Yealink's software turns its
 	 * picture by 180 degrees on this model, and so does U-Boot when the
 	 * hardware version says so); "rotation" tells our userspace to do the
-	 * same. The colour order is a guess until someone has seen it.
+	 * same. Red in the top bits, as seen on a T46S.
 	 */
 	framebuffer@3f80000 {
 		compatible = "simple-framebuffer";
@@ -49,9 +50,10 @@
 
 	/*
 	 * The keys, as <Yealink's code for the matrix position (row * 8 +
-	 * column + 1), Linux key code>, from Yealink's T46.qmap. Soft keys are
-	 * numbered left to right and line keys 1 to 5 down the left of the
-	 * screen, 6 to 10 down the right; that order is a guess.
+	 * column + 1), Linux key code>, from Yealink's T46.qmap and pressed
+	 * one by one on a T46S (25 November 2026). Soft keys are numbered left
+	 * to right and line keys 1 to 5 down the left of the screen, 6 to 10
+	 * down the right.
 	 */
 	keypad {
 		compatible = "yealink,t4xs-keypad";
@@ -90,7 +92,18 @@
 	};
 };
 
+/* The flash: read-only until its layout is checked at start-up (above) */
+&nand {
+	status = "okay";
+};
+
 /*
- * No &nand here: the flash stays out of reach until the phone's layout has
- * been read on a real T46S. No touchscreen: the model has none.
+ * The USB socket: the same controller as the T48S's. After a start from a
+ * stick U-Boot leaves it running and the driver touches nothing; from flash or
+ * TFTP it is started as U-Boot starts it (drivers/t48s_usb.c).
  */
+&usbh {
+	status = "okay";
+};
+
+/* No touchscreen: the model has none. */

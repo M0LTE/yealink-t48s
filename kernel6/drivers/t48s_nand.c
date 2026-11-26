@@ -195,8 +195,16 @@ static const struct { loff_t offset, size; } t48s_nand_reusable[] = {
 	{ 0x02720000, 0x04ae0000 },	/* app */
 };
 
-/* which locks are open; T48S_LOCK_NONE is the range that has none */
+/* which locks are open; T48S_LOCK_NONE is the range that has none. All three
+ * stay shut, whatever the lock is asked, until the flash is known to be laid out
+ * as this file says (t48s_nand_layout.h): checked once at start-up */
 static bool t48s_nand_open[T48S_LOCKS] = { true, false, false };
+#include "t48s_nand_layout.h"
+static bool t48s_nand_layout_ok;
+static char layout[96] = "not checked";	/* "matches", or why not */
+module_param_string(layout, layout, sizeof(layout), 0444);
+/* "t46s" or "t48s", from the device tree; NULL for anything else */
+static const char *t48s_nand_model;
 
 /* the allow-list and its locks, alone */
 static bool t48s_nand_list_ok(loff_t ofs, loff_t len)
@@ -232,6 +240,10 @@ static bool t48s_nand_range_ok(loff_t ofs, loff_t len)
  */
 static int t48s_nand_lock_set(const char *val, const struct kernel_param *kp)
 {
+	if ((sysfs_streq(val, "open-kernel") || sysfs_streq(val, "open-app")) && !t48s_nand_layout_ok) {
+		pr_warn("t48s_nand: lock: not opened, the flash layout is not known (%s)\n", layout);
+		return -EPERM;
+	}
 	if (sysfs_streq(val, "open-kernel")) {
 		t48s_nand_open[T48S_LOCK_KERNEL] = true;
 		pr_warn("t48s_nand: lock: the kernel partition is OPEN for writing\n");
@@ -555,6 +567,13 @@ static int t48s_nand_write_page(struct nand_chip *chip, const uint8_t *buf,
 
 	if (!t48s_nand_page_ok(page)) {
 		t48s_nand_refuse("page write", (long long)page << T48S_PAGE_SHIFT);
+		return -EROFS;
+	}
+	/* never one of our kernels for the other model (t48s_nand_layout.h) */
+	if (page == (T48S_KERNEL_OFS >> T48S_PAGE_SHIFT) && !t48s_layout_kernel_ok(buf, t48s_nand_model)) {
+		refused++;
+		pr_err("t48s_nand: a kernel named \"%.32s\" is not for this phone (%s); not written\n",
+		       (const char *)buf + 32, t48s_nand_model ? t48s_nand_model : "model not known");
 		return -EROFS;
 	}
 	/* never program a page that holds anything */
@@ -1221,6 +1240,55 @@ static const struct mtd_partition t48s_nand_parts[] = {
 	 * as t48data (mtd13), t48kernel (mtd14) and t48app (mtd15) */
 };
 
+/*
+ * Is the flash laid out as this file says? U-Boot's environment names its
+ * layout and its boot command (t48s_nand_layout.h). Run once, after the flash
+ * is registered and before anything can use it; until it passes, every range
+ * is shut. A phone started from its own flash was installed after this check
+ * passed, so there app stays open whatever it says now.
+ */
+static void t48s_nand_layout(struct mtd_info *mtd)
+{
+	static u8 env[T48S_ENV_LEN];
+	const char *why, *v;
+	unsigned long n;
+	size_t got = 0;
+	int err;
+
+	if (mtd_block_isbad(mtd, T48S_ENV_OFS))
+		why = "the first block of env is bad";
+	else if ((err = mtd_read(mtd, T48S_ENV_OFS, sizeof(env), &got, env)) && !mtd_is_bitflip(err))
+		why = "env does not read";
+	else if (got != sizeof(env))
+		why = "env does not read";
+	else
+		why = t48s_layout_check(env, sizeof(env));
+	if (!why) {
+		t48s_nand_layout_ok = true;
+		t48s_nand_open[T48S_LOCK_NONE] = true;
+		snprintf(layout, sizeof(layout), "matches");
+		pr_info("t48s_nand: layout: U-Boot's environment names this layout and boots from 0x%08llx (%s)\n",
+			T48S_KERNEL_OFS, t48s_nand_model ? t48s_nand_model : "model not known");
+		return;
+	}
+	snprintf(layout, sizeof(layout), "%s", why);
+	pr_warn("t48s_nand: layout: NOT KNOWN, %s. Nothing can be written\n", why);
+	/* what this phone's U-Boot says instead, for the report (none of it is secret) */
+	if (got == sizeof(env) && (env[0] | env[1] << 8 | env[2] << 16 | (u32)env[3] << 24) ==
+	    t48s_layout_crc32(env + 4, sizeof(env) - 4)) {
+		static const char *const names[] = { "mtdparts", "bootcmd", "bootnand" };
+		int i;
+
+		for (i = 0; i < ARRAY_SIZE(names); i++) {
+			v = t48s_layout_var(env, sizeof(env), names[i], &n);
+			if (v)
+				pr_warn("t48s_nand: layout: env %s=%.*s\n", names[i], (int)min(n, 600UL), v);
+			else
+				pr_warn("t48s_nand: layout: env has no %s\n", names[i]);
+		}
+	}
+}
+
 static int t48s_nand_probe(struct platform_device *pdev)
 {
 	static struct mtd_partition parts[ARRAY_SIZE(t48s_nand_parts) + ARRAY_SIZE(t48s_nand_ours)];
@@ -1332,8 +1400,15 @@ static int t48s_nand_probe(struct platform_device *pdev)
 	selftest = err;
 	pr_info("t48s_nand: self-test: %d attempts to erase or program what is not ours, at all three layers (%d with the lock closed, %d with it open or around the userenv window): every one refused, nothing sent to the chip\n",
 		selftest, closed_n, selftest - closed_n);
+	/* Nothing may be written until the layout is known: not even t48data */
+	t48s_nand_open[T48S_LOCK_NONE] = false;
+	if (of_machine_is_compatible("yealink,sip-t46s"))
+		t48s_nand_model = "t46s";
+	else if (of_machine_is_compatible("yealink,sip-t48s"))
+		t48s_nand_model = "t48s";
 	/* Started from the flash of an installed phone: app is ours and in use. Only
-	 * the kernel image the installer writes says this (its device tree). */
+	 * the kernel image the installer writes says this (its device tree), and the
+	 * installer writes only where the layout was checked. */
 	if (strstr(saved_command_line, "t48boot=flash")) {
 		t48s_nand_open[T48S_LOCK_APP] = true;
 		pr_info("t48s_nand: lock: started from flash, the app partition is open\n");
@@ -1362,6 +1437,7 @@ static int t48s_nand_probe(struct platform_device *pdev)
 			bad++;
 	pr_info("t48s_nand: %d bad blocks, %u chip commands blocked while scanning\n",
 		bad, blocked);
+	t48s_nand_layout(mtd);
 	for (i = 0; i < ARRAY_SIZE(t48s_nand_ours); i++)
 		pr_info("t48s_nand: ours: %s, 0x%08llx to 0x%08llx, %s\n",
 			t48s_nand_ours[i].name, (unsigned long long)t48s_nand_ours[i].offset,
@@ -1414,6 +1490,10 @@ int t48s_nand_userenv_rewrite(loff_t block_ofs, const u8 *data, size_t len)
 
 	if (!t48s_nand_ready)
 		return -ENODEV;
+	if (!t48s_nand_layout_ok) {
+		t48s_nand_refuse("userenv rewrite on a flash whose layout is not known", block_ofs);
+		return -EPERM;
+	}
 	if (!t48s_nand_cmdline_has("t48boot=live")) {
 		t48s_nand_refuse("userenv rewrite on a phone not started through recovery mode", block_ofs);
 		return -EPERM;

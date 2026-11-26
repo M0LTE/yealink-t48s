@@ -85,6 +85,14 @@ def check_kernel(data):
         return False, msg + ["the command line does not say t48boot=flash: \"%s\"" % args]
     if "linux,initrd-start" in chosen or "initrd=" in args or "mem=" in args:
         return False, msg + ["a flash kernel has no ramdisk, and its memory comes from the device tree"]
+    # the model in the header's name is the model the device tree describes
+    name = data[32:64].rstrip(b"\0").decode("ascii", "replace")
+    model = name[-4:] if len(name) > 5 and name[-5] == "-" and name[-4:] in ("t46s", "t48s") else None
+    compat = dt.get("/", {}).get("compatible", b"").split(b"\0")
+    if model is None or ("yealink,sip-" + model).encode() not in compat:
+        return False, msg + ["the image name \"%s\" and the device tree (%s) do not name the same model"
+                             % (name, b", ".join(c for c in compat if c).decode("ascii", "replace"))]
+    msg.append("model %s" % model)
     mem = [v for v in dt.values() if v.get("device_type") == b"memory\0"]
     if len(mem) != 1 or len(mem[0].get("reg", b"")) != 8:
         return False, msg + ["the device tree must declare one block of RAM"]

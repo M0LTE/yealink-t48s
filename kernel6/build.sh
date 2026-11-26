@@ -17,10 +17,12 @@
 #   DEBUG=0          leave out the early debug output (kernel6/debug.config)
 #   NAND=0           leave out the flash driver, UBI and UBIFS (kernel6/nand.config)
 #   MODEL            t48s (default) or t46s: which phone. It picks the device tree
-#                    (bcm11188-yealink-MODEL), the name of the live file (T46S.bin)
-#                    and one more config fragment if kernel6/MODEL.config exists.
-#                    MODEL=t46s is a live build only, with no flash driver at all
-#                    (NAND=0): docs/models.md
+#                    (bcm11188-yealink-MODEL), the names of the live and flash
+#                    files (T46S.bin, T46S-kernel.uimg), the image's name in its
+#                    header (Linux-VERSION-t46s: the flash driver and the
+#                    installer refuse one model's kernel on the other) and one
+#                    more config fragment if kernel6/MODEL.config exists
+#                    (docs/models.md)
 #   DTS              board device tree (default bcm11188-yealink-MODEL)
 #   USB=0            leave out USB sticks (kernel6/usb.config)
 #   EXTRA_CONFIG     one more config fragment
@@ -32,7 +34,7 @@
 #                    stage; the system image is not in it (it comes in T48S.rfs,
 #                    which tools/mkliveimage.py makes); keys go in only if
 #                    AUTHORIZED_KEYS names a file. See "Started by U-Boot" below.
-#   FLASH=1          build T48S-kernel.uimg, the file the installer writes into the
+#   FLASH=1          build T48S-kernel.uimg (T46S-kernel.uimg), the file the installer writes into the
 #                    phone's kernel partition (issues 8 and 29, docs/install.md):
 #                    the same U-Boot image as LIVE=1, with the device tree that
 #                    says t48boot=flash and names no ramdisk. ROOTFS is the first
@@ -47,13 +49,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 WORK=$(mkdir -p "${1:-.}" && cd "${1:-.}" && pwd)
 MODEL=${MODEL:-t48s}
 case $MODEL in
-t48s) ;;
-t46s)
-    # not yet run on a T46S: it may be tried from RAM and nothing else, and its
-    # kernel has no way to the flash
-    [ "${FLASH:-0}" != 1 ] && [ "${SLOT:-0}" != 1 ] || { echo "MODEL=t46s: live builds only (LIVE=1)" >&2; exit 2; }
-    [ "${NAND:-0}" = 0 ] || { echo "MODEL=t46s: no flash driver (NAND=0)" >&2; exit 2; }
-    NAND=0 ;;
+t48s|t46s) ;;
 *) echo "MODEL must be t48s or t46s" >&2; exit 2 ;;
 esac
 BIN=$(echo "$MODEL" | tr a-z A-Z)
@@ -71,8 +67,8 @@ FLASH=${FLASH:-0}
 if [ "$FLASH" = 1 ]; then
     [ "$LIVE" != 1 ] || { echo "FLASH=1 and LIVE=1 are two different files" >&2; exit 2; }
     [ -z "$SYSTEM" ] || { echo "FLASH=1: the system image goes in a flash slot, not in the kernel" >&2; exit 2; }
-    DTS=${DTS:-bcm11188-yealink-t48s-flash}
-    OUT=${OUT:-T48S-kernel.uimg}
+    DTS=${DTS:-bcm11188-yealink-$MODEL-flash}
+    OUT=${OUT:-$BIN-kernel.uimg}
     KEYS=${AUTHORIZED_KEYS:-}
     LOADADDR=${LOADADDR:-0x00408000}
 fi

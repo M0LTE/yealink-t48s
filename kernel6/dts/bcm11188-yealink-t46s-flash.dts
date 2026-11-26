@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Yealink SIP-T46S started by U-Boot from the phone's own flash: the kernel
+ * image the installer writes into the "kernel" partition (kernel6/build.sh
+ * with MODEL=t46s FLASH=1; docs/install.md, docs/models.md). As the T48S's
+ * (bcm11188-yealink-t48s-flash.dts), with the text console turned like the
+ * panel.
+ */
+#include "bcm11188-yealink-t46s.dts"
+
+/ {
+	chosen {
+		bootargs = "console=tty0 console=ttyAMA0,115200 earlycon t48boot=flash fbcon=rotate:2 loglevel=8";
+	};
+};
