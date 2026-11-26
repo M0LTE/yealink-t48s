@@ -1,8 +1,8 @@
 # Guide
 
-Open firmware for the Yealink SIP-T48S. Try it from a USB stick, install it from the phone's own screen, go back to Yealink's firmware from the same screen.
+Open firmware for the Yealink SIP-T48S and SIP-T46S. Try it from a USB stick, install it from the phone's own screen, go back to Yealink's firmware from the same screen.
 
-**Status, 2026-11-24.** Trying, Back up, Install and Restore have run end to end on one phone, the author's. Yours would be the second: install only a phone you could do without.
+**Status, 2026-11-26.** On a T48S, trying, Back up, Install and Restore have run end to end on one phone, the author's. Yours would be the second: install only a phone you could do without. On a T46S, trying it has run on one phone; nobody has installed one yet ([models.md](models.md#test-plan-for-a-t46s-owner)).
 
 Not affiliated with or endorsed by Yealink; Yealink is a trademark of its owner. Use at your own risk. Installing replaces the phone's firmware; the way back is [Restore](#go-back-to-yealink), from the stick, with the backup the installer made.
 
@@ -10,19 +10,19 @@ Not affiliated with or endorsed by Yealink; Yealink is a trademark of its owner.
 
 ## You need
 
-- A T48S on any Yealink firmware.
+- A T48S or T46S on any Yealink firmware.
 - **A 5 V power supply of 1.5 A or more.** Yealink's own adapter is 0.6 A, and the phone draws up to 0.9 A. On it the phone freezes at "Start Updating", sticks are not read, and a busy phone can freeze later.
 - A USB 2.0 stick, 1 to 32 GB, with 200 MB free.
 - A computer, once, to fill the stick.
 
 ## Make the stick
 
-1. Download `t48s-stick.zip` from the [latest release](https://github.com/M0LTE/yealink-t48s/releases/latest).
+1. Download the stick for your phone: `t48s-stick.zip` or `t46s-stick.zip` from the [latest release](https://github.com/M0LTE/yealink-t48s/releases/latest). Until a release carries the T46S's, it is in the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release.
 2. Format the stick: one partition, MBR partition table, FAT32. This erases it.
    - **Windows**, Command Prompt as administrator: `diskpart`, `list disk`, `select disk N`, `clean`, `convert mbr`, `create partition primary`, `format fs=fat32 quick label=T48S`, `assign`, `exit`.
    - **macOS**: `diskutil list`, then `diskutil eraseDisk FAT32 T48S MBRFormat /dev/diskN`.
    - **Linux**: `sudo tools/mkusbstick.sh /dev/sdX FOLDER` does this step and the next, and checks the result. `FOLDER` is the unpacked zip.
-3. Unpack the zip onto the stick: `T48S.rom`, `T48S.bin`, `T48S.rfs`, `README.txt` and the `install` folder at the top. Eject it properly.
+3. Unpack the zip onto the stick: `T48S.rom`, `T48S.bin`, `T48S.rfs` (`T46S.*` on a T46S), `README.txt` and the `install` folder at the top. Eject it properly.
 
 ## Try it
 
@@ -47,11 +47,11 @@ Yealink's firmware is replaced. The backup is the way back, so it comes first: t
 
 1. Start from the stick, as above.
 2. **Settings** (Down on the idle screen), **Install**.
-3. **Back up.** The phone's whole flash is copied to the stick, 138 MB in the folder `t48s-backup`, and checked three ways. About 3 minutes.
+3. **Back up.** The phone's whole flash is copied to the stick, 138 MB in the folder `t48s-backup` (`t46s-backup` on a T46S), and checked three ways. About 3 minutes.
 4. **Install**, and answer the question. About 3 minutes. Do not unplug.
 5. `Installed`. **Take the stick out.** The phone restarts by itself, into the open firmware from now on.
 
-Copy `t48s-backup` from the stick to a computer and keep it. It is the only copy of this phone's Yealink firmware, and it holds Yealink's settings, passwords included, and the phone's private keys. Keep it private.
+Copy the backup folder from the stick to a computer and keep it. It is the only copy of this phone's Yealink firmware, and it holds Yealink's settings, passwords included, and the phone's private keys. Keep it private.
 
 If the power fails during Install: start from the stick again and choose Install again. The steps are made to be repeated.
 
@@ -66,6 +66,8 @@ If the power fails during Install: start from the stick again and choose Install
 | Right | do not disturb |
 | Down | Settings |
 | X, or any key above, held 5 s | key test ([shell.md](shell.md#the-key-test)) |
+
+On a T46S the four soft keys under the screen do what the labels above them say, on every screen; on the idle screen Apps, Calls, Contacts and Settings.
 
 - **Accounts.** Settings, Accounts: up to 16 SIP accounts. User, Password and Server host are enough for most; `host:port` gives a port. Calls go out from the default account; Left and Right in the dialler pick another. [phone.md](phone.md).
 - **Calls.** Lift the handset or press Speaker. Hold, mute, transfer, a second call, voicemail on the Message key. On Speaker one side is heard at a time. The headset socket is untried.
@@ -87,6 +89,7 @@ On an installed phone: **Settings, Update**, **Check now**, then **Install** and
 - **Channel.** `stable` is the newest release. `testing` is the newest build of `main`, a few times a day and untried.
 - An update goes into the system slot not in use and gets one try. If the phone is not up a minute after the restart, the next start goes back to the slot that worked.
 - **Install kernel** shows when the channel's kernel differs from the phone's. There is one kernel, with no fallback: a kernel that does not start needs the stick.
+- Each phone takes its own model's kernel; the system is the same for both. A T46S finds `No release for this phone` on a release from before its support: choose `testing` until the next release.
 
 More: [install.md](install.md#updates-and-fallback).
 
@@ -120,7 +123,7 @@ The same menu shows by itself when no system starts, with Rescue, Restart and Re
 
 The phone's flash is then byte for byte what the backup holds. The open firmware's settings are gone.
 
-Restore needs this phone's own backup. Without the `t48s-backup` folder there is no way back from the screen.
+Restore needs this phone's own backup. Without the `t48s-backup` folder (`t46s-backup`) there is no way back from the screen.
 
 ## Troubleshooting
 
@@ -139,6 +142,9 @@ Restore needs this phone's own backup. Without the `t48s-backup` folder there is
 | `Stick needs 160 MB free` | Make room, or use another stick |
 | `The stick holds another phone's backup` | Move that `t48s-backup` folder off the stick first |
 | `Backup on the stick is damaged` | The stick has lost data. If the phone is still on Yealink's firmware, rename the folder and Back up again |
+| Install page: Flash `Not recognised` | This phone's loader does not name the flash layout the firmware knows. Nothing is written. Report it on issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10) with the lines [models.md](models.md#test-plan-for-a-t46s-owner) asks for |
+| `Phone model not known` | The phone did not say which model it is, or a kernel for the other model was started. Use the stick for this model |
+| `Kernel file is not for this phone` | The `install` folder is from the other model's zip. Unpack this model's zip again |
 | `Bad block in kernel or app. Not supported yet` | This phone's flash has a worn block where the firmware goes. It cannot be installed yet |
 | `Kernel not written. Do not restart` | Choose Install (or Restore) again before anything else. A phone restarted now stops at the logo; the stick start still works and repeats the step |
 | The logo, and nothing more, after an install | Start from the stick and Install again, or Restore |

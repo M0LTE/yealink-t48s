@@ -1,8 +1,8 @@
 # Other models: the T46S
 
-Issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10). The T48S is the only phone this firmware has run on. This page is what we know of its sibling the SIP-T46S, how the firmware was made to tell the two apart, and how an owner can try it on a T46S without writing anything to the phone.
+Issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10). This page is what we know of the SIP-T46S, the T48S's smaller sibling, how the firmware tells the two apart, and what is still to be seen on one.
 
-**Where this stands (2026-11-25): try-only; it starts, and its keys are right.** Nobody here has a T46S; a tester started the live set on one on 25 November: U-Boot took it from a USB stick, the picture came up the right way round in the right colours, and DHCP worked. His photos of the key test confirm the whole key table below. The shell now draws for the T46S's own 480x272 ([shell.md](shell.md#small-screens)); that layout has been seen in the simulator only. Sound and the rest are still to be tried. Everything below was worked out from Yealink's and U-Boot's code, which is shared between the models and branches on a hardware id, and from Yealink's datasheet. A T46S live set is built with every build of `main` and passes the same file checks as the T48S one: download `t46s-live.zip` from the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release. The test plan is at the end. The installer and the release's `t48s-stick.zip` are for the T48S only.
+**Where this stands (2026-11-26): in the standard build and installer; not yet installed on one.** A tester started the live set on a T46S on 25 November and confirmed the picture, every key, the small-screen layout, DND, the network, and calls both ways. Since 2026-11-26 the T46S has the T48S's path: its own stick, `t46s-stick.zip`, with Back up, Install and Restore on the phone's screen, A/B system slots, updates on the stable and testing channels, and its own kernel updates ([guide.md](guide.md)). What has not been seen is a write: nobody has backed up, installed or restored a T46S. So the installer writes only when the phone's own U-Boot names the flash layout the driver knows ([below](#the-flash)), and the first install is the [test plan](#test-plan-for-a-t46s-owner) at the end. Until a `v*` release carries it, the stick is in the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release, rebuilt from `main`.
 
 ## What the T46S is
 
@@ -13,7 +13,7 @@ Issue [#10](https://github.com/M0LTE/yealink-t48s/issues/10). The T48S is the on
 | Hardware id | 66 | 65 | Yealink's scripts, U-Boot | high |
 | SoC | Broadcom BCM11188 family, ARM1176 | the same | same firmware, same kernel, same modules | high |
 | RAM | 64 MB | 128 MB | U-Boot puts id 66's frame buffers at 0x03f00000 and 0x03f80000, the top megabyte of 64 MB, as it puts the T48S's at the top of 128 MB. A teardown of a T4xS phone shows U-Boot reporting "DRAM: 60 MiB" | medium to high |
-| Flash | 128 MB NAND, the same thirteen partitions | the same | U-Boot's one partition table for every id | medium |
+| Flash | 128 MB NAND, the same thirteen partitions | the same | U-Boot's one partition table for every id. Checked on each phone before anything is written ([below](#the-flash)) | medium; not yet seen on a T46S |
 | Screen | 4.3 inch, 480x272, 16 bits per pixel, backlit | 7 inch, 800x480, 32 bits | datasheet; U-Boot's screen set-up for id 66 | high |
 | Screen mounting | upside down: the picture is turned by 180 degrees in software | upright | Yealink's `TalkLogic.sh` turns Qt's picture for the T46S whatever the phone says; U-Boot turns its own when bit 7 of the fourth hardware version number is set | medium to high |
 | Colour order in the 16 bits | red in the top 5 bits (assumed) | n/a | not read; a guess | low |
@@ -87,91 +87,80 @@ One system image serves both phones. The kernel is built once per model, with th
 | Backlight | `yealink,enable-pin` and `yealink,pwm-fields` in the `backlight` node | `t48s_backlight.c` |
 | Touch | the driver starts on a T48S only | `t48s_touch.c` (unchanged) |
 | Key lamps | `gpio-leds` in the T48S's tree; none in the T46S's | |
-| Flash | the T46S kernel has no flash driver at all, and its device tree no flash | `kernel6/build.sh` with `MODEL=t46s` |
+| Flash | the same driver and table; nothing is written unless U-Boot's environment names that table ([below](#the-flash)) | `kernel6/drivers/t48s_nand_layout.h` |
+| Kernel files | `T46S.bin`, `T46S-kernel.uimg`, named `Linux-6.18.65-t46s` in their header. The driver refuses one model's kernel as page 0 of the other's kernel partition; the installer and the updater check the name too | `kernel6/build.sh` with `MODEL=t46s` |
+| Userspace | `t48-model` says `t46s` or `t48s` from the device tree, and the Holtek chip must agree. The installer looks for `T46S.rom` and `install/T46S-kernel.uimg` and keeps its backup in `t46s-backup`; the updater fetches `T46S-kernel.uimg` | `t48-model`, `t48-install`, `t48-update` |
+| USB | the same controller, on in the device tree; the driver starts it only when U-Boot has not | `t48s_usb.c` |
 | Text console | turned with `fbcon=rotate:2` on the T46S | `kernel6/t46s.config`, the live `.dts` |
 | The shell's picture | the shell draws at the screen's own size, 480x272, in a layout for small screens ([shell.md](shell.md#small-screens)). Each row is packed to 16 bits and turned on its way to the panel if the device tree says so. An app gets 800x480 fitted to the screen (each screen pixel the average of the picture's pixels under it) unless its manifest says `"screen": "any"` | `shell/be_fb.c`, `shell/fit.c` |
 | No touch | every screen says what the four soft keys do along the bottom edge, each label over its key, and they take the place of the buttons a finger would press: the home screen's are Apps, Calls, Contacts and Settings. The keyboard shows what the keypad types | `shell/main.c` and each screen's file; `shell/tests/small/` |
 
 The T48S's device tree now carries its key table and backlight values too, the same numbers as before; the built-in ones remain for a tree without them. Nothing else about the T48S changed.
 
-**Left for later**, none of it in the way of a first start:
+**Left for later:**
 
-- The layout for 480x272 has been seen in the simulator only. Its pictures are in [img/t46s/](img/t46s); a photo of the home screen on a phone is the first thing to ask for.
 - The line keys do nothing yet, and their lamps and the three key lamps are dark (above). The home screen keeps room beside them for labels.
 - 19 punctuation marks cannot be typed from the keypad (`; ( ) & ' "` and the brackets among them): on the T48S they are on the touch keyboard, on the T46S nowhere yet.
 - In a call, X does not hang up: End is soft key 4, or put the handset down.
 - Screen shots (`tools/shot.py`, `tools/phone-input.sh shot`) assume the T48S's screen.
 
-## Building the T46S live set
+## The flash
+
+The driver's table and its writeable ranges were read from one T48S. A T46S carries its own build of U-Boot, which we have not seen, so its layout is not taken on trust. At every start the flash driver reads the first 4 KB of the `env` partition, U-Boot's own environment, which is also where Yealink's kernel gets its partition table (`mtdparts`) and U-Boot its boot command. Nothing at all can be written unless the block's CRC is right and:
+
+- `mtdparts` is exactly the driver's table, all thirteen entries;
+- `bootcmd` is `run bootnand`;
+- `bootnand` ends with `setenv autostart yes; nboot 0x02680000 0 0x015A0000`: U-Boot starts the image at the start of `kernel`, the place the installer writes.
+
+Otherwise the lock does not open, the `/data` blocks are shut and the `userenv` window refuses: the phone's flash is read-only, the Install page says `Flash: Not recognised`, and the boot log has what the phone's environment says instead. On Tom's T48S the environment matches. The rest of an install's checks are the T48S's: a backup of the whole chip, checked three ways including every error-correction byte against our code, so a T46S whose chip or error correction differs gets no further than its backup; no bad block in `kernel` or `app`; the chip's size and page geometry; the Holtek chip's hardware id must be 66 and agree with the kernel's device tree.
+
+## Building
 
 ```
 buildroot/build.sh WORKDIR                                             # the same system image as for the T48S
 ROOTFS=firststage.cpio MODEL=t46s LIVE=1 sh kernel6/build.sh W         # in the kernel6 container: W/T46S.bin
-tools/mkliveimage.py build OUT bin=W/T46S.bin system=system.img model=T46S kernel=6.18
+ROOTFS=firststage.cpio MODEL=t46s FLASH=1 sh kernel6/build.sh W        # W/T46S-kernel.uimg, for the kernel partition
+tools/mkliveimage.py usb STICK bin=W/T46S.bin system=system.img model=T46S kernel=6.18
+mkdir STICK/install; cp W/T46S-kernel.uimg system.img STICK/install/   # and SHA256SUMS over the two
 ```
 
-`MODEL=t46s` refuses anything but a live build. The set is `T46S.rom` (our 4 KB label, which already listed id 66), `T46S.bin` and `T46S.rfs`. CI builds it the same way on every build of `main` and publishes it as `t46s-live.zip` in the rolling pre-release [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest): the three files, `SHA256SUMS` and a `README.txt` with the owner's steps (`tools/t46s-live-readme.txt`). A `v*` release carries the same zip.
+CI does the same on every build ([build.yml](../.github/workflows/build.yml)): `t46s-stick.zip` (`T46S.rom`, `T46S.bin`, `T46S.rfs`, `README.txt`, `install/`), `t46s-live.tar.gz` for TFTP, and `T46S-kernel.uimg` beside the T48S's in `system-latest` and in every `v*` release. Builds of `main` also put the stick in the rolling [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release.
+
+**Updates.** One system image serves both phones; each takes the kernel named for its own model from the channel. A T46S takes nothing from a release without `T46S-kernel.uimg` (`No release for this phone`): those predate its support. So until the next `v*` release, a T46S on the stable channel finds nothing; Settings, Update, Channel `testing` follows `main`.
 
 ## Test plan for a T46S owner
 
-**What this is.** A start of the open firmware from RAM, through the phone's own recovery mode, over the network or from a USB stick. Nothing of ours is written to the phone: this kernel has no flash driver. Unplugging the power ends it.
+**What this is.** The first backup, install and restore on a T46S, from its own screen. It replaces Yealink's firmware; the backup the installer makes is the way back. Use a phone you could do without, and a 5 V supply of 1.5 A or more.
 
-**What it costs.** One thing, and it is Yealink's doing, not ours: after a recovery start over the network, Yealink's firmware resets its own settings (account, passwords, language) the next time it starts. Use a phone whose settings you can lose, or export them first (Yealink's web page: Settings, Configuration, Export). The phone itself is not at risk: recovery mode lives in U-Boot, which nothing here touches.
+**What could go wrong.** The layout check and the backup's checks run before anything is written, so the likely failure is a refusal with nothing written. After the install the one step never seen on a T46S is U-Boot starting our kernel from flash. If it does not, the phone stops at the logo; recovery mode (Speakerphone at power-on) is in U-Boot, which is never written, and the stick then starts as before and offers Restore.
 
-Do not use the T48S's stick or its Install page on a T46S: the kernel it writes is the T48S's. This page's try-only start comes first.
+**A. Start the new stick, nothing written** (Yealink's firmware still installed)
 
-**You need**
+1. Unpack `t46s-stick.zip` from [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) onto the stick ([guide.md](guide.md#make-the-stick)). Speakerphone at power-on, 2.
+2. Settings, Install. Photograph it. Expected: `Back up`, `Step 1 of 2`. `Flash: Not recognised` means the layout check refused: stop here and send step 3.
+3. If you can, Settings, Access, SSH, then send `dmesg | grep -E 't48s_(nand|holtek|usb)'`, `t48-install status` and `t48-live status`. The lines that matter: `layout: U-Boot's environment names this layout` (or `NOT KNOWN` and the three `env` lines after it), `bad blocks`, `self-test: 549 attempts`, `controller as found`, and the hardware id.
 
-- The three files `T46S.rom`, `T46S.bin`, `T46S.rfs` in one folder: unpack `t46s-live.zip` from the [`t46s-latest`](https://github.com/M0LTE/yealink-t48s/releases/tag/t46s-latest) pre-release.
-- A PC on the same network as the phone, with a TFTP server serving that folder. On Linux or macOS: `sudo python3 tools/tftpd.py FOLDER 69 --rom-once` from this repository (it prints every file the phone asks for, which we want to see). On Windows, Tftpd64 pointed at the folder.
-- The PC's address, a free address for the phone, the netmask and the gateway.
-- A camera. If you have a 3.3 V USB serial adapter and are happy to open the phone, even better: see "Serial" below, but it is not needed.
+**B. Back up, install, use**
 
-**Steps**
+4. Back up. About 3 minutes. Copy `t46s-backup` off the stick to a PC and keep it private: it holds the phone's keys and Yealink's settings. Do not send it to anyone.
+5. Install. About 3 minutes. `Installed`: take the stick out. Expected: the phone restarts by itself, the Yealink logo, then our home screen within half a minute, with `/data` empty (no account).
+6. Settings, About: photograph it (version, memory). Settings, Update: Channel `testing`, Check now, then Install and the restart; the last result should be the new version `installed`.
+7. Optional: hold X from power-on until the rescue menu shows, photograph it, choose Start.
+8. Optional: push a stick in while it runs: Settings, Apps can see it (the USB socket started from cold).
 
-1. Photograph the label under the phone, and in Yealink's menu the Status page (firmware and hardware version).
-2. Unplug the power (or the network cable, if it powers the phone).
-3. Hold **Speakerphone**, plug the power in, and keep holding until the screen shows a menu with "1. TFTP" (about 5 seconds). Let go. Do not press OK at this menu. Photograph it.
-4. Press **1**. Enter the phone's address, the netmask, the gateway and the PC's address, as it asks. Photograph what it shows next.
-5. The PC's TFTP server shows the phone fetching a `.rom`, a `.bin` and a `.rfs`. Keep that log.
-6. Within a minute the screen should show text scrolling, then the home screen. Photograph the screen at each stage, whatever it shows, especially if it is upside down, has wrong colours, is shifted, or stays as it was.
+**C. Back to Yealink**
 
-**From a USB stick instead.** The zip's `README.txt` has these steps. Copy the three files to the top folder of a FAT32 stick (one partition, MBR), put it in the phone, do steps 1 to 3, press **2** instead of 1, and carry on at step 6. Use a 5 V supply of 1.5 A or more ([live-image.md](live-image.md#the-stick)). There is no TFTP log this way, but Yealink's settings survive if the stick is out of the phone before its next start: with the stick left in, Yealink's firmware tries to update from it and resets them. All of that is known from the T48S; a T46S's U-Boot has not been seen reading a stick.
+9. Start from the stick again (Speakerphone, 2). Settings, Install, Restore Yealink firmware. `Restored`: take the stick out. Expected: Yealink's firmware, its settings as they were before step 4.
 
-**Checks, in this order; stop at the first that fails and tell us what you saw**
+**Report** on issue #10: the photos, the `dmesg` lines, how long each step took, and the exact text of anything unexpected. Never the backup.
 
-| # | Do | Expect |
-|---|---|---|
-| 1 | look | the home screen, the right way up and sharp: a large clock, and four labels along the bottom edge, one over each soft key: Apps, Calls, Contacts, Settings. Top left: a green square and the phone's address. Top right: a red square and "No service" (if that square is blue, the colours are swapped: tell us). A note says it was started in recovery mode and that nothing is installed, clear of the labels |
-| 2 | press each soft key, and X to come back; then the arrows and OK | each opens what its label says. Up: Calls. Left: Contacts. Down: Settings. OK: Apps. Right: do not disturb. A digit opens the dialler; X rubs out. If any is wrong: hold X for 5 seconds at the home screen, press every key in the key test and photograph the screen |
-| 3 | lift the handset, put it back | the call screen appears and goes |
-| 4 | soft key 3 (Contacts), then soft key 2 (Add) | type a name on the dial keys (the screen shows what each key types), Done on soft key 4, a number, Done |
-| 5 | Down (Settings), Screen, change the brightness with Left and Right | the screen gets dimmer and brighter, no flicker |
-| 6 | X back to the home screen | the address at the top left is one from your DHCP server. Ping it from the PC |
-| 7 | Volume up and down | a level shows |
-| 8 | if you have a SIP account: Settings, Accounts, enter it; call a number with the handset, then with Speakerphone | sound both ways. Start quiet |
-| 9 | Settings, Access: turn SSH on with your public key if you want to send us logs (`dmesg`, `/var/log/t48/shell/current`, `cat /sys/module/t48s_holtek/parameters/hwversion`) | |
+## Questions for a T46S, and what answers them
 
-The line keys do nothing, and no key lamps light: that is expected in this set.
-
-**Going back.** From a stick: unplug the power, take the stick out, plug the power in. Over the network: stop the TFTP server first (Yealink's firmware asks it for the `.rom` on its next start; with `--rom-once` ours already refuses). Unplug the power, plug it in, hold nothing. Yealink starts, with its settings reset as said above. If it sits at the logo for more than two minutes, unplug and plug in once more.
-
-**If it goes wrong**
-
-- No menu: Speakerphone was let go too early. Unplug and try again.
-- "Update failed" or it stops before fetching the `.bin`: nothing has changed in the phone. Photograph the message, unplug, start normally. The TFTP log shows what it asked for.
-- The screen goes blank or freezes after the files are fetched: our kernel did not come up. Unplug, start normally. A photo of the last thing on the screen is the most useful thing you can send.
-
-**Serial, for those who can.** On the T48S the console is a 3-pin header marked CON4 on the main board: ground, the board's transmit, the board's receive, 3.3 V levels, 115200 8N1. We do not know where it is on a T46S. If you open the phone, photograph both sides of the board first; look for an unpopulated 3 or 4-pin header near the SoC, find ground with a meter, and the pin that idles at 3.3 V and flickers at power-on is the board's transmit. Never connect an adapter's 5 V or 3.3 V supply pin. A capture from power-on to the home screen (U-Boot's banner, then our kernel's log) would answer most of the open questions at once.
-
-**What to send back**, on issue #10: the photos, the TFTP log, which checks passed, and anything odd.
-
-## Open questions a first start answers
-
-1. Does a T46S's U-Boot accept our label and ask for `T46S.*`? (The TFTP log.)
-2. Is RAM 64 MB, and does U-Boot leave the screen running at 0x03f80000 in 16 bits? (A picture at all.)
-3. Upside down or not, and red and blue the right way round? (The photos.)
-4. Is the key table right? (Check 2 and 4.)
-5. Backlight pin and curve. (Check 5.)
-6. Do Ethernet and sound start as on the T48S? (Checks 6 and 8.)
-7. U-Boot's version and the hardware version string. (Serial, or SSH.)
+1. Does its U-Boot environment name the T48S's layout and boot command? (A2, A3: the Install page and the `layout` line.)
+2. Any bad blocks in `kernel` or `app`? (A3: `bad blocks`; the backup stops at any.)
+3. Does its U-Boot leave the error-correction engine at n=4152 k=4100 t=4, as the T48S's does? (A3: `controller as found`; the backup checks every page either way.)
+4. Does the Holtek chip answer with hardware id 66? (A3; without it the installer refuses.)
+5. Does its U-Boot start our kernel from flash? (B5.)
+6. Is the BOOTMODE flag cleared, so Yealink's settings survive? (A3: `t48-live status`; C9.)
+7. Does the USB socket start from cold, after a start from flash? (B8.)
+8. Its U-Boot version and the full hardware version string. (Serial; `cat /sys/module/t48s_holtek/parameters/hwversion` over SSH.)

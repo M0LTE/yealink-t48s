@@ -88,13 +88,13 @@ Issue [#80](https://github.com/M0LTE/yealink-t48s/issues/80). The runit service 
 - **On a phone started from a USB stick** it asks the app feed only.
 - **Off** under Settings, Update, Daily check, on the web setup page's Update page (both also on a phone that is not installed, and while an update runs), or `daily=off` in `/data/config/update`. The only traffic is two small files from the channel and the feed's index.
 
-**Channels.** A channel is a folder on a web server with four files: `VERSION` (one line), `SHA256SUMS`, `system.img` and `T48S-kernel.uimg`.
+**Channels.** A channel is a folder on a web server with `VERSION` (one line), `SHA256SUMS`, `system.img`, and a kernel per model: `T48S-kernel.uimg`, `T46S-kernel.uimg`. The system image is the same for both; each phone fetches the kernel named for its model (`t48-model`) and writes it only if the image's own name says that model. A T46S takes nothing from a channel without `T46S-kernel.uimg` (`No release for this phone`): such a release predates its support ([models.md](models.md)).
 
 | Channel | What | Where |
 |---|---|---|
 | `stable` | the newest `v*` release | `github.com/M0LTE/yealink-t48s/releases/latest/download` |
 | `testing` | the newest build of `main`, the rolling pre-release `system-latest` | `.../releases/download/system-latest` |
-| a URL | the owner's own builds | any `http://` or `https://` folder with the four files |
+| a URL | the owner's own builds | any `http://` or `https://` folder with these files |
 
 Downloads use HTTPS with the image's own certificate list, and each file is compared with its SHA-256 in `SHA256SUMS` before anything is written. Releases are not signed yet: the check proves the download is whole, and HTTPS that it came from GitHub.
 
@@ -130,7 +130,7 @@ Recovery mode and safe mode are Yealink's and are untouched.
 
 ## The lock
 
-The driver ([kernel6/README.md](../kernel6/README.md#flash)) can write `kernel` and `app` and nothing else, and both start every boot locked. `app` opens by itself only when the kernel was started from flash on an installed phone. Otherwise the installer opens what it needs and closes `kernel` again when it has finished. At every start the driver tries the writes it must refuse (549 attempts and questions), with the lock closed, with it open, and around the one `userenv` block of [installer.md](installer.md#the-bootmode-flag-the-one-write-outside-kernel-and-app), and gives no flash at all if one gets through.
+The driver ([kernel6/README.md](../kernel6/README.md#flash)) can write `kernel` and `app` and nothing else, and both start every boot locked. Neither opens, and nothing else can be written either, unless U-Boot's own environment names the layout the driver knows ([models.md](models.md#the-flash)). `app` opens by itself only when the kernel was started from flash on an installed phone. Otherwise the installer opens what it needs and closes `kernel` again when it has finished. At every start the driver tries the writes it must refuse (549 attempts and questions), with the lock closed, with it open, and around the one `userenv` block of [installer.md](installer.md#the-bootmode-flag-the-one-write-outside-kernel-and-app), and gives no flash at all if one gets through.
 
 ## What was shown before writing
 
@@ -157,7 +157,7 @@ tools/test-install.sh bytes SET BACKUP      # no phone
 sudo tools/test-install.sh ubi SET          # no phone
 ```
 
-`T48S-kernel.uimg` is `kernel6/build.sh` with `FLASH=1`. A phone with a bad block in `kernel` or `app` is refused for now.
+`T48S-kernel.uimg` is `kernel6/build.sh` with `FLASH=1`; `T46S-kernel.uimg` the same with `MODEL=t46s`. This PC route is the T48S's; a T46S installs from its own screen. A phone with a bad block in `kernel` or `app` is refused for now.
 
 ## The set of the first install
 

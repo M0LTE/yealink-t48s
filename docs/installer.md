@@ -32,7 +32,8 @@ When Install or Restore ends, the page runs `t48-install eject`: the stick is un
 | The page | `shell/settings.c`, Install | rows from `t48-install status`; its jobs run as a child with a progress bar |
 | The app step | [`tools/phone/t48-flash.sh`](../tools/phone/t48-flash.sh), in the image as `/usr/lib/t48/t48-flash.sh` | the same script `tools/t48install.sh` copies over |
 | The BOOTMODE flag | `t48s_nand_userenv_rewrite()` in [`kernel6/drivers/t48s_nand.c`](../kernel6/drivers/t48s_nand.c) | the one block of `userenv` |
-| The stick | `t48s-stick.zip` from CI | the live set, and `install/` |
+| The stick | `t48s-stick.zip`, `t46s-stick.zip` from CI | the live set, and `install/` |
+| The model | [`t48-model`](../buildroot/board/t48s/rootfs-overlay/usr/bin/t48-model) | `t48s` or `t46s`: the device tree, and the Holtek chip must agree |
 
 ## The stick
 
@@ -44,7 +45,9 @@ install/SHA256SUMS
 t48s-backup/                                  made on the phone
 ```
 
-`t48-install` takes the first FAT partition of a USB disk that holds `T48S.rom` and mounts it on `/run/t48-stick`.
+On a T46S the stick holds `T46S.rom`, `T46S.bin`, `T46S.rfs` and `install/T46S-kernel.uimg`, and the backup goes in `t46s-backup/`. Each phone's U-Boot asks for its own model's files, and the installer looks only for its own: a T48S stick is no stick to a T46S.
+
+`t48-install` takes the first FAT partition of a USB disk that holds this model's `.rom` (`T48S.rom`) and mounts it on `/run/t48-stick`.
 
 The phone mounts every stick read-only for apps (`t48-usbmount`, on `/run/media`). The installer takes over only a stick holding `T48S.rom`: `t48-usbmount hold` unmounts it and leaves it alone until it is taken out, so the read-write mount can be made. If an app still has a file open on it after 5 seconds, it is left mounted and the stick counts as not there until the next look. Other sticks are not touched. The look at the sticks takes `t48-usbmount`'s lock, so the two never try a stick at once; if the lock is not free within 5 seconds, `status` says `stick=no` rather than keep the Settings screen waiting.
 
@@ -75,9 +78,11 @@ Both begin the same way and stop at the first thing that is not right:
 - the phone was started through recovery mode (`t48boot=live`), so nothing of the flash is in use;
 - `VERIFIED` matches, and every backup file matches `SHA256SUMS`;
 - ubl, uboot, env, logo, smkern, smrfs and rfs on the phone are identical to the backup, all 2112 bytes of every page: it is this phone's backup. `cfg` and `data` may differ (Yealink ran since) and are then compared with how they were when the step began;
-- the flash driver's self-test ran, it has counted no write errors, and `kernel` and `app` have no bad block.
+- the flash driver's self-test ran, it has counted no write errors, and `kernel` and `app` have no bad block;
+- the phone is the model the running kernel is for, and the Holtek chip says so (`t48-model strict`);
+- the flash driver found the layout it knows in U-Boot's environment (its `layout` parameter says `matches`, [models.md](models.md#the-flash)). Otherwise the page shows `Flash: Not recognised` and offers nothing.
 
-**Install**: the install files match their `SHA256SUMS`. The kernel lock is opened, `T48S-kernel.uimg` written and compared page by page with its error-correction bytes (`nandrestore -b`), and the lock closed. Then the app step: all 599 blocks of `app` are erased (539 on a phone whose last 60 already hold our `/data`), UBI is made, slot A written and read back, an empty `/data` made. Then every partition that is never written is compared again.
+**Install**: the install files match their `SHA256SUMS`, and the kernel file is this model's, by its name and by the name in its header (`Linux-6.18.65-t46s`). The kernel lock is opened, `T48S-kernel.uimg` written and compared page by page with its error-correction bytes (`nandrestore -b`), and the lock closed. Then the app step: all 599 blocks of `app` are erased (539 on a phone whose last 60 already hold our `/data`), UBI is made, slot A written and read back, an empty `/data` made. Then every partition that is never written is compared again.
 
 **Restore**: `app` from the backup, then `kernel`, each page with its spare bytes, compared afterwards. `kernel` goes last: a restore cut short leaves a phone that still starts our kernel and shows rescue.
 
@@ -115,7 +120,9 @@ make -C shell check                       # 11-install, 13-restore, 14-install-s
 | | How |
 |---|---|
 | Backup: twelve files byte for byte the flash; checksums; a second backup keeps the first | `bytes`: the phone's own `t48-install` against a flash in a file made from Tom's backup |
-| Refused, with nothing written: no backup, an unfinished one, a damaged one, another phone's, damaged install files, a phone not started from a stick | `bytes` |
+| Refused, with nothing written: no backup, an unfinished one, a damaged one, another phone's, damaged install files, a phone not started from a stick, a flash whose layout is not known, a model in doubt, the other model's kernel | `bytes` |
+| The same flash as a T46S: its own stick, a T48S stick not taken for it, `t46s-backup`, the T48S's kernel refused under either name, the T46S's kernel written exactly, and Restore back to the byte | `bytes`, with `T46S-kernel.uimg` in the set |
+| The layout check itself, on made-up environments and on Tom's phone's own | `tools/test-layout.sh` |
 | Install: the kernel partition is exactly what `tools/t48flash.py` works out, U-Boot's read of it gives the file back, 599 blocks of app erased, nothing else changed | `bytes` |
 | Restore: the whole flash is the backup again, byte for byte | `bytes` |
 | The app step on a phone that never had our `/data`: 599 blocks of somebody else's data, UBI from nothing, slot A, an empty `/data` that mounts, a second run changes nothing, the first start loads slot A | `ubi`, on studybox |
@@ -149,7 +156,7 @@ Serial log running throughout (`ssh root@proxmox0 tail -f /root/t48s/session4.lo
 
 **C. Another phone** (the T46S tester's, or a T48S on newer Yealink firmware):
 
-12. Does its U-Boot show the same menu and take the same `T48S.rom`?
+12. Does its U-Boot show the same menu and take the same `T48S.rom`? For a T46S: [models.md](models.md#test-plan-for-a-t46s-owner).
 13. Bad blocks: `nandread -b` on every partition. A phone with one anywhere stops the backup today.
 14. The last 60 blocks of `app`: erased, as on Tom's, or in use? (Install erases them either way.)
 15. A stick other than the SanDisk Ultra Fit.

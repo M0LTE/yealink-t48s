@@ -21,7 +21,7 @@ A replacement for Yealink's firmware: Linux 6.18, a SIP phone, apps, a web setup
 ## Known limits
 
 - It has been installed on one phone, the author's. Yours would be the second. Install only a phone you could do without.
-- T48S only. A T46S build exists to try, `t46s-live.zip`, and nobody has started it.
+- The SIP-T46S has the same path: `t46s-stick.zip`, Back up, Install, Restore and updates. It has been tried on one phone; nobody has installed one yet, and the installer writes only where the phone's loader names the flash layout it knows.
 - A phone with a bad flash block where the firmware goes cannot be installed yet. The installer says so and writes nothing.
 - On the speaker, one side is heard at a time.
 - The headset socket is untried.
@@ -33,11 +33,11 @@ Use a 5 V supply of 1.5 A or more. Yealink's own adapter is 0.6 A and the phone 
 
 ## Install
 
-1. Unpack `t48s-stick.zip` onto a FAT32 USB stick (MBR, one partition).
+1. Unpack `t48s-stick.zip` (`t46s-stick.zip` on a T46S) onto a FAT32 USB stick (MBR, one partition).
 2. Stick in the phone. Hold **Speakerphone** while plugging the power in, until the menu shows. Press **2**. The firmware now runs from the stick; nothing is written.
 3. **Settings, Install, Back up.** The phone's whole flash is copied to the stick and checked. About 3 minutes.
 4. **Install.** About 3 minutes. Take the stick out when the screen says so; the phone restarts.
-5. Copy the `t48s-backup` folder from the stick to a computer and keep it.
+5. Copy the `t48s-backup` folder (`t46s-backup`) from the stick to a computer and keep it.
 
 Every step: [docs/guide.md](https://github.com/M0LTE/yealink-t48s/blob/main/docs/guide.md).
 
