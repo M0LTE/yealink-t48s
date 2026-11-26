@@ -845,13 +845,18 @@ class Paired(unittest.TestCase):
         self.ok("/accounts/save", {"n": "7", "user": "Xq7rT2mLp9", "domain": "edge2-tls.prod.example.net", "transport": "tls", "enabled": "on"}, "/accounts")
         self.ok("/accounts/save", {"n": "8", "user": "Bv3kW8nQz1", "domain": "sip.example.net", "transport": "tls", "enabled": "on"}, "/accounts")
         home, page = b.get("/").body, b.get("/accounts").body
-        for name in ("example.net (Xq7r)", "example.net (Bv3k)"):
+        for name in ("example.net (mLp9)", "example.net (nQz1)"):
             self.assertIn("<p>" + name, home)
             self.assertIn("<span class='sum'>" + name + "</span>", page)
             self.assertRegex(page, "<option value='[78]'>[78]: " + re.escape(name) + "</option>")
         self.assertNotIn("edge2-tls", home)
         # the Account name wins, and the other no longer needs its user
         p.set("sip8", "label", "Home")
+        # the call list names the account as it is now, read for that page
+        with open(os.path.join(p.state, "history"), "w") as f:
+            f.write("%d|o|5|1002||8\n" % int(time.time()))
+        self.assertIn("<td>Home</td>", b.get("/history").body)
+        os.remove(os.path.join(p.state, "history"))
         home = b.get("/").body
         self.assertIn("<p>Home", home)
         self.assertIn("<p>example.net<", home)

@@ -392,7 +392,8 @@ static void ctl_read(int i)
 			break;
 		case T48AC_KEY:
 			engine_key(&eng, p[0]);
-			if (linger < KEY_LINGER_TICKS)
+			/* only where the key's sound alone runs the hardware: not in a call, or off hook */
+			if (!eng.route && call.fd < 0 && linger < KEY_LINGER_TICKS)
 				linger = KEY_LINGER_TICKS;
 			break;
 		case T48AC_APP:

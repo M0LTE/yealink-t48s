@@ -243,7 +243,6 @@ static int history_count(void)
     char path[300];
     int n = 0;
     snprintf(path, sizeof path, "%s/history", opt.state);
-    names_load();
     char *t = load_file(path, 64 * 1024);
     for (char *p = t; p && *p; p = strchr(p, '\n'), p = p ? p + 1 : NULL)
         if (strncmp(p, "seen ", 5) && strchr(p, '|')) n++;
@@ -1269,6 +1268,7 @@ static void page_history(struct req *r)
     char *lines[64];
     int n = 0;
     snprintf(path, sizeof path, "%s/history", opt.state);
+    names_load();
     char *t = load_file(path, 64 * 1024);
     for (char *p = t; p && *p;) {
         char *nl = strchr(p, '\n');

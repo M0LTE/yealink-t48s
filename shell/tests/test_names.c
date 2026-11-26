@@ -81,22 +81,29 @@ int main(void)
     shorter("192.168.1.20", "192.168.1.20");
     shorter("192.168.1.20:5060", "192.168.1.20");
     shorter("fe80::1", "fe80::1");
-    shorter("[2001:db8::1]:5061", "[2001:db8::1]:5061");
+    shorter("[2001:db8::1]:5061", "[2001:db8::1]");
+    shorter("[2001:db8::1]", "[2001:db8::1]");
+    shorter("SIP.Example.NET", "example.net");
     shorter("", "");
 
     /* the Account name wins; no name: the domain; two the same: the start of each user */
     names("Xq7rT2mLp9", "edge2-tls.prod.example.net", "", "1001", "pbx.example.org", "", "", "", "",
           "example.net", "example.org", "");
     names("Xq7rT2mLp9", "sip.example.net", "", "Bv3kW8nQz1", "sip2.example.net", "", "", "", "",
-          "example.net (Xq7r)", "example.net (Bv3k)", "");
+          "example.net (mLp9)", "example.net (nQz1)", "");
     names("Xq7rT2mLp9", "sip.example.net", "Home", "Bv3kW8nQz1", "sip2.example.net", "", "", "", "",
           "Home", "example.net", "");
     names("Xq7rT2mLp9", "sip.example.net", "example.net", "Bv3kW8nQz1", "sip2.example.net", "", "1001", "pbx.example.org", "Work",
-          "example.net", "example.net (Bv3k)", "Work");
+          "example.net", "example.net (nQz1)", "Work");
     names("100", "10.0.0.5", "", "101", "10.0.0.5", "", "", "", "",
           "100", "101", "");
+    /* numbers that differ only at the end, and users whose ends are the same too */
+    names("441234567890", "sip.example.net", "", "441234567891", "SIP.example.net", "", "", "", "",
+          "example.net (7890)", "example.net (7891)", "");
+    names("Ab12Zz99", "x", "", "Xq7rT2mLp9", "sip.example.net", "", "Yw4kT2mLp9", "edge.example.net", "",
+          "x", "example.net (Xq7rT2mLp9)", "example.net (Yw4kT2mLp9)");
     names("1001", "pbx.example.org", "", "Xq7rT2mLp9", "sip.example.org", "", "12345678", "pbx.example.org", "",
-          "1001", "example.org (Xq7r)", "12345678");
+          "1001", "example.org (mLp9)", "12345678");
 
     printf("%s names test: %d checks, %d failed\n", fails ? "FAIL" : "PASS", checks, fails);
     return fails != 0;

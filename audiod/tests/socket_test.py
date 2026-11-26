@@ -372,6 +372,8 @@ def main():
     # baresip late: three ticks with no answer, then carry on
     c.run(3, skip=3)
     c.run(50)
+    d.ctl("key", "5")      # a tone sent in the call: no keeping the hardware up for more keys after it
+    c.run(3)
     d.ctl("route", "none")
     c.run(25)
     c.close()

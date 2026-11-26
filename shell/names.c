@@ -90,7 +90,8 @@ void host_short(const char *host, char *out, size_t n)
 {
     char h[256];
     snprintf(h, sizeof h, "%s", host ? host : "");
-    if (h[0] == '[') { snprintf(out, n, "%s", h); return; }
+    for (char *p = h; *p; p++) *p = (char)tolower((unsigned char)*p);   /* names are the same in any case */
+    if (h[0] == '[') { h[strcspn(h, "]") + (strchr(h, ']') ? 1 : 0)] = 0; snprintf(out, n, "%s", h); return; }   /* [IPv6]:port */
     if (strchr(h, ':') == strrchr(h, ':')) h[strcspn(h, ":")] = 0;   /* one colon: a port, not IPv6 */
     size_t k = strlen(h);
     while (k && h[k - 1] == '.') h[--k] = 0;
@@ -116,17 +117,25 @@ void acct_names(int n, const char *const user[], const char *const host[], const
         if (label[i] && label[i][0]) snprintf(out[i], ACCT_NAME_MAX, "%s", label[i]);
         else host_short(host[i], out[i], ACCT_NAME_MAX);
     }
-    /* the same twice: an account named after its host is its user if that is short (an extension,
-     * "103"), otherwise the host's name and the start of the user */
+    /* The same twice: an account named after its host is its user if that is short (an extension,
+     * "103"), otherwise the host's name and the end of the user (numbers differ at the end), and the
+     * whole user if that still reads the same as another. */
     char base[n > 0 ? n : 1][ACCT_NAME_MAX];
-    for (int i = 0; i < n; i++) memcpy(base[i], out[i], ACCT_NAME_MAX);
+    int tagged[n > 0 ? n : 1];
+    for (int i = 0; i < n; i++) { memcpy(base[i], out[i], ACCT_NAME_MAX); tagged[i] = 0; }
     for (int i = 0; i < n; i++) {
         if (!base[i][0] || (label[i] && label[i][0])) continue;
         for (int j = 0; j < n; j++) {
             if (j == i || strcmp(base[i], base[j])) continue;
-            if (strlen(user[i]) <= 8) snprintf(out[i], ACCT_NAME_MAX, "%s", user[i]);
-            else snprintf(out[i], ACCT_NAME_MAX, "%.30s (%.4s)", base[i], user[i]);
+            size_t k = strlen(user[i]);
+            if (k <= 8) snprintf(out[i], ACCT_NAME_MAX, "%s", user[i]);
+            else { snprintf(out[i], ACCT_NAME_MAX, "%.30s (%s)", base[i], user[i] + k - 4); tagged[i] = 1; }
             break;
         }
     }
+    for (int i = 0; i < n; i++)
+        for (int j = 0; tagged[i] && j < n; j++)
+            if (j != i && !strcmp(out[i], out[j])) tagged[i] = 2;   /* all marked before any changes */
+    for (int i = 0; i < n; i++)
+        if (tagged[i] == 2) snprintf(out[i], ACCT_NAME_MAX, "%.20s (%s)", base[i], user[i]);
 }

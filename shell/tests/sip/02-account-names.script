@@ -21,10 +21,10 @@ run sh -c "echo register sip:1001@voip.example.co.uk > simdata/sip.sock.cmd"
 waitstate reg.3 ok 3000
 waitstate reg.2 ok 3000
 waitstate reg.1 ok 3000
-expectstate acct.name.1 example.net_(Xq7r)
-expectstate acct.name.2 example.net_(Bv3k)
+expectstate acct.name.1 example.net_(mLp9)
+expectstate acct.name.2 example.net_(nQz1)
 expectstate acct.name.3 example.co.uk
-expectstate acct.line example.net_(Xq7r)
+expectstate acct.line example.net_(mLp9)
 wait 200
 shot shots/idle-account-names.png
 # the dialler's From line
@@ -39,11 +39,11 @@ waitstate phone idle 3000
 key down
 expect settings
 expectstate settings.row Accounts
-expectstate settings.value example.net_(Xq7r)_+2
+expectstate settings.value example.net_(mLp9)_+2
 key ok
-expectstate settings.value example.net_(Xq7r)
+expectstate settings.value example.net_(mLp9)
 key down
-expectstate settings.value example.net_(Bv3k)
+expectstate settings.value example.net_(nQz1)
 key down
 expectstate settings.value example.co.uk
 key x

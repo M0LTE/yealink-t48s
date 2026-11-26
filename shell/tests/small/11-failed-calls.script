@@ -61,8 +61,8 @@ wait 300
 run sh -c "echo register sip:Bv3kW8nQz1@sip.example.net > simdata/sip.sock.cmd"
 waitstate reg.2 ok 3000
 waitstate reg.1 ok 3000
-expectstate acct.name.1 example.net_(Xq7r)
-expectstate acct.name.2 example.net_(Bv3k)
+expectstate acct.name.1 example.net_(mLp9)
+expectstate acct.name.2 example.net_(nQz1)
 wait 200
 shot shots/t46s-idle-account-names.png
 quit

@@ -21,7 +21,7 @@ void host_short(const char *host, char *out, size_t n);
 
 /* What each of n accounts is called: its Account name, or the short form of its server host,
  * except where two would read the same: then its user if 8 characters or fewer, else the short
- * host with the first 4 characters of its user.
+ * host with the last 4 characters of its user, or the whole user if that is still not enough.
  * user[i] empty: the account is not set up, and out[i] is "". */
 void acct_names(int n, const char *const user[], const char *const host[], const char *const label[],
                 char out[][ACCT_NAME_MAX]);

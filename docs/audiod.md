@@ -30,7 +30,7 @@ Each 20 ms tick, driven by the hardware's own sample clock:
 4. microphone = DC removed, echo control on the speakerphone, silence if muted or on hook;
 5. play the loudspeaker frame, send the microphone frame to baresip.
 
-When nothing is wanted (on hook, no call audio, no tone, no app writing sound) the hardware is closed and the process sleeps. It uses no CPU at all while the phone is idle. After a key's sound it stays running for 2 s, for the next key: closing and opening it between keys made the tones late ([phone.md](phone.md#speed)).
+When nothing is wanted (on hook, no call audio, no tone, no app writing sound) the hardware is closed and the process sleeps. It uses no CPU at all while the phone is idle. After a key's sound on the hook, with no call, it stays running for 2 s, for the next key: closing and opening it between keys made the tones late ([phone.md](phone.md#speed)).
 
 Rules worth knowing:
 
