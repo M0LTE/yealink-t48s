@@ -42,6 +42,14 @@ export PATH="$T/bin:$PATH" T48_ROOT="$T" interface=eth0
 # a descriptor of the caller's that the daemons must not keep (as udhcpc's
 # own sockets are, when it runs the DHCP script)
 exec 7>"$T/caller-fd"
+# the stand-ins must be what the scripts run: a busybox built with its
+# standalone shell runs its own ifconfig and udhcpc first (Ubuntu's does),
+# which as root would change this machine's network. The image's busybox has
+# it off (Buildroot's busybox.config, and nothing in board/t48s/busybox.fragment).
+for c in ifconfig udhcpc route; do
+    [ "$($SH -c "command -v $c")" = "$T/bin/$c" ] ||
+        { echo "test-link: $SH runs its own $c, not the stand-in; use a shell without busybox's standalone mode" >&2; exit 2; }
+done
 
 # under a time limit: a script that hangs is a failure, not a hung test
 dhcp() { timeout 10 $SH "$O/usr/share/udhcpc/default.script" "$@" || fail "the DHCP script failed or hung"; }

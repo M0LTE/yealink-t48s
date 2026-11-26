@@ -66,12 +66,14 @@ LATEST=$KEEP/update-latest
 CHECKS=$KEEP/update-check
 
 die() { echo "$*" >&2; exit 1; }
-# a cable in (an external switch port with a link, as the Ethernet driver
-# reads it) and no IPv4 address on eth0. No driver to ask, or no cable: no
-# verdict, as a phone may be updated with no network at all
+# a cable in the LAN jack (switch port 1 has a link, as the Ethernet driver
+# reads it: bit 1 of its link register; the bench phone's network cable reads
+# 0x0102) and no IPv4 address on eth0. The PC jack does not count. No
+# driver to ask, or no cable: no verdict, as a phone may be updated with no
+# network at all
 network_missing() {
     l=$(sed -n 's/.*, link 0x\([0-9a-fA-F]*\).*/\1/p' "${T48_ETH_DIAG:-/sys/module/t48s_eth/parameters/diag}" 2>/dev/null | head -n 1)
-    [ -n "$l" ] && [ $((0x$l & 3)) -ne 0 ] || return 1
+    [ -n "$l" ] && [ $((0x$l & 2)) -ne 0 ] || return 1
     ! ifconfig eth0 2>/dev/null | grep -q 'inet addr:'
 }
 
@@ -405,7 +407,11 @@ boot)
     case "$note" in
     failed=*)
         v=$(get "$KEEP/update-pending" version)
-        result "${v:-Update} did not start, went back"
+        if [ "$(get "$KEEP/update-pending" why)" = "no network" ]; then
+            result "${v:-Update} had no network, went back"
+        else
+            result "${v:-Update} did not start, went back"
+        fi
         rm -f "$KEEP/update-pending" ;;
     esac ;;
 confirm)
@@ -419,13 +425,18 @@ confirm)
     [ "$cur" = "$S_TRIAL" ] || { [ "$S_TRIAL" = - ] && [ "$cur" != "$S_ACTIVE" ]; } || { [ "$S_VALID" = 0 ] && [ "$cur" = "$S_ACTIVE" ]; } || exit 0
     # well enough: the shell is up
     [ -n "$T48_NO_SV" ] || sv status /run/service/shell 2>/dev/null | grep -q '^run:' || exit 1
-    # and the network, where there is one to have: a cable in and still no
-    # address is a system that cannot reach anything (issue #77: one such
-    # build left the phone off the network). Not confirmed; the last try
-    # restarts, and the start goes back to the slot that worked.
-    if network_missing; then
+    # and, for a slot on trial, the network where there is one to have: a
+    # cable in and still no address is a system that cannot reach anything
+    # (issue #77: one such build left the phone off the network). Not
+    # confirmed; the last try restarts, and the start goes back to the slot
+    # that worked. Only on trial: a slot standing in for one that did not
+    # start has nowhere better to go, and would restart for ever while the
+    # DHCP server is down.
+    if [ "$cur" = "$S_TRIAL" ] && network_missing; then
         echo "No network with a cable in: not confirmed" >&2
         if [ "$2" = last ]; then
+            # for the next start's note: why it went back
+            echo "why=no network" >> "$KEEP/update-pending" 2>/dev/null
             echo "update: $(version) has no network, restarting into the slot that worked" > "${T48_CONSOLE:-/dev/console}" 2>/dev/null
             ${T48_REBOOT:-reboot}
         fi

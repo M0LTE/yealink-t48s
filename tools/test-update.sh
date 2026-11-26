@@ -114,8 +114,23 @@ echo "eth0      Link encap:Ethernet  HWaddr 80:5E:C0:03:1C:05" > "$T/ifconfig"
 export T48_ETH_DIAG="$T/diag" T48_REBOOT=fake-reboot T48_CONSOLE=/dev/null
 ! $UPD confirm 2>/dev/null && state_read && [ "$S_TRIAL" = b ] && [ ! -e "$T/reboots" ] && pass "a cable in and no address: not confirmed" || fail "confirmed with no network"
 ! $UPD confirm last 2>/dev/null && state_read && [ "$S_TRIAL" = b ] && [ "$(cat "$T/reboots")" = reboot ] && pass "the last try restarts, so the start goes back" || fail "no restart on the last try"
-echo "link 0x0100" | sed 's/^/imp ctrl 0x0c, /' > "$T/diag"; rm -f "$T/reboots"
-$UPD confirm >/dev/null 2>&1; state_read; [ "$S_TRIAL" = - ] && pass "no cable in: no verdict, confirmed as before" || fail "no cable: not confirmed"
+# the start after that restart: the first stage went back to a
+cp "$T/data/phone/update-pending" "$T/pending.keep"
+state_write a - 0; printf 'slot=a\nnote=failed=b\n' > "$T/run/t48-slot"
+$UPD boot
+[ "$(info result)" = "v2 had no network, went back" ] && pass "and that start says why: v2 had no network, went back" || fail "result after no network: $(info result)"
+# back to slot b on trial for what follows
+cp "$T/pending.keep" "$T/data/phone/update-pending"; sed -i '/^why=/d' "$T/data/phone/update-pending"
+state_write a b 0; printf 'slot=b\nnote=trial\n' > "$T/run/t48-slot"; rm -f "$T/reboots"
+# a slot standing in for one that did not start (not on trial): no verdict,
+# or it would restart for ever while the DHCP server is down
+state_write b - 0; printf 'slot=a\nnote=\n' > "$T/run/t48-slot"
+$UPD confirm last >/dev/null 2>&1; state_read
+[ "$S_ACTIVE $S_TRIAL" = "a -" ] && [ ! -e "$T/reboots" ] && pass "a slot standing in, no address: confirmed, no restart" || fail "standing-in slot restarted or not confirmed"
+state_write a b 0; printf 'slot=b\nnote=trial\n' > "$T/run/t48-slot"
+# a cable in the PC jack only (port 0) is no cable for this
+echo "imp ctrl 0x0c, gblmgmt 0x80, link 0x0101" > "$T/diag"
+$UPD confirm >/dev/null 2>&1; state_read; [ "$S_TRIAL" = - ] && [ ! -e "$T/reboots" ] && pass "no cable in the LAN jack (PC jack only): no verdict, confirmed as before" || fail "PC jack only: not confirmed"
 state_write a b 0
 echo "imp ctrl 0x0c, gblmgmt 0x80, link 0x0102" > "$T/diag"; echo "          inet addr:10.0.0.5  Bcast:10.0.0.255" >> "$T/ifconfig"
 $UPD confirm >/dev/null
