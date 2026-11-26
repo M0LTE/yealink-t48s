@@ -97,7 +97,8 @@ base() {
     *) channel | sed 's|/*$||' ;;
     esac
 }
-fetch() { curl -fsL --connect-timeout 20 --max-time 900 --cacert "$CA" -o "$2" "$1"; }
+# fetch URL FILE [SECONDS]: 15 minutes unless told; VERSION and SHA256SUMS get a minute
+fetch() { curl -fsL --connect-timeout 20 --max-time "${3:-900}" --cacert "$CA" -o "$2" "$1"; }
 # sum_of FILE: its line in the channel's SHA256SUMS
 sum_of() { sed -n "s/^\([0-9a-f]\{64\}\)  *\*\{0,1\}$1\$/\1/p" "$W/SHA256SUMS" | head -n 1; }
 
@@ -115,10 +116,12 @@ kernel_sum() {
 # do_check: fetch the channel's VERSION and SHA256SUMS and write down what they say
 do_check() {
     b=$(base)
-    state checking ""
-    # a quiet check that fails keeps what the last one found
-    [ -n "$QUIET" ] || rm -f "$LATEST"
-    fetch "$b/VERSION" "$W/VERSION.new" && fetch "$b/SHA256SUMS" "$W/SHA256SUMS.new" || { rm -f "$W"/*.new; return 1; }
+    # A quiet check (the daily one) leaves the state alone: a kernel written and
+    # waiting for its restart, or the words of a failed install, stay on the
+    # screens, and nothing there looks busy. One that fails keeps what the last
+    # check found.
+    [ -n "$QUIET" ] || { state checking ""; rm -f "$LATEST"; }
+    fetch "$b/VERSION" "$W/VERSION.new" 60 && fetch "$b/SHA256SUMS" "$W/SHA256SUMS.new" 60 || { rm -f "$W"/*.new; return 1; }
     mv "$W/VERSION.new" "$W/VERSION"; mv "$W/SHA256SUMS.new" "$W/SHA256SUMS"
     latest=$(head -n 1 "$W/VERSION" | tr -cd 'A-Za-z0-9._+-' | head -c 60)
     sys=$(sum_of system.img)
@@ -141,11 +144,11 @@ do_check() {
 check_channel() {
     lock
     if ! do_check; then
-        if [ -n "$QUIET" ]; then state idle ""; else state failed "No release found"; fi
+        [ -n "$QUIET" ] || state failed "No release found"
         unlock
         die "No release found"
     fi
-    state idle ""
+    [ -n "$QUIET" ] || state idle ""
     unlock
 }
 
@@ -176,7 +179,11 @@ due() {
     at=$(( NIGHT + $(night_slot) ))
     last=$(get "$CHECKS" last)
     case "$last" in ''|*[!0-9]*) last=0 ;; esac
-    [ "$last" -le "$1" ] || last=0      # the clock went back
+    # A last check in the future means the clock was wrong then or is now (a
+    # start before NTP is kept out by SANE above, but a clock set wrongly by hand
+    # or by a bad server is not): count it as never, so one check puts it right
+    # rather than none happening until the clock catches up.
+    [ "$last" -le "$1" ] || last=0
     # over a day since the last one: after a start, or a night it was off
     [ $(( $1 - last )) -lt $DAY ] || return 0
     # this phone's time in the night, and none since then
@@ -315,9 +322,11 @@ daily)
     now) daily_check ;;
     due) if due "${T48_NOW:-$(now)}" "$(uptime_s)"; then echo yes; else echo no; fi ;;
     '')
+        n=0
         while :; do
-            # the owner's time zone, for the night
-            TZ=$(t48-config tz 2>/dev/null) && export TZ
+            # the owner's time zone, for the night: read again every hour
+            if [ $((n % 60)) = 0 ]; then z=$(t48-config tz 2>/dev/null) && export TZ="$z"; fi
+            n=$((n + 1))
             ! due "$(now)" "$(uptime_s)" || daily_check
             sleep 60
         done ;;

@@ -410,11 +410,25 @@ const char *settings_update_notice(void)
 
 static const char *feed_now(void);
 
-/* installed apps the feed has newer, as t48-app last found */
+/* installed apps the feed has newer, as t48-app last found. Asked for every second by
+ * the home screen, so counted again only when the offers file, the feed or the list of
+ * installed apps has changed */
 int settings_app_updates(void)
 {
+    static char seen[600];
+    static int count;
+    char path[400], sig[600];
+    struct stat st;
     const char *feed = feed_now();
-    return manifest_updates(opt.state, feed[0] ? feed : pkg_default_feed());
+    if (!feed[0]) feed = pkg_default_feed();
+    snprintf(path, sizeof path, "%s/" T48_OFFERS, opt.state);
+    if (stat(path, &st) < 0) return 0;
+    snprintf(sig, sizeof sig, "%ld.%ld.%ld.%d.%s", (long)st.st_mtim.tv_sec, (long)st.st_mtim.tv_nsec, (long)st.st_size, manifest_scans, feed);
+    if (strcmp(sig, seen)) {
+        snprintf(seen, sizeof seen, "%s", sig);
+        count = manifest_updates(opt.state, feed);
+    }
+    return count;
 }
 
 /* ---------- the app manager's child process ---------- */
@@ -1179,7 +1193,9 @@ static void build_update(void)
     if (upd.installed && upd.slot[0]) snprintf(v, sizeof v, "%s, slot %s", upd.version, upd.slot);
     else snprintf(v, sizeof v, "%s", upd.version);
     add_info("Version", v);
-    if (!upd.installed) { add_info("Status", "Not installed"); return; }
+    /* firmware and apps, once a night (issue #80): it finds, and never installs. On a phone
+     * that is not installed it asks the app feed only, and can be stopped here too */
+    if (!upd.installed) { add_info("Status", "Not installed"); add_stored(R_TOGGLE, "Daily check", "update", "daily", "on", 0); return; }
     int busy = update_busy(), restart = !strcmp(upd.state, "restart");
     if (!strcmp(upd.channel, "stable") || !strcmp(upd.channel, "testing")) {
         r = add(R_CHOICE, "Channel");
@@ -1192,7 +1208,6 @@ static void build_update(void)
         add_info("Channel", "Custom");
         snprintf(add(R_NOTE, "")->value, sizeof rows[0].value, "%s", upd.channel);
     }
-    /* firmware and apps, once a night (issue #80): it finds, and never installs */
     add_stored(R_TOGGLE, "Daily check", "update", "daily", "on", 0);
     add_info("Latest", upd.latest[0] ? upd.latest : "Not checked");
     const char *st = !strcmp(upd.state, "checking") ? "Checking" : !strcmp(upd.state, "downloading") ? "Downloading" :

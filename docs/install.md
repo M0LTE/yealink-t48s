@@ -84,8 +84,9 @@ Issue [#80](https://github.com/M0LTE/yealink-t48s/issues/80). The runit service 
 
 - **When.** Once a night at the phone's own time, chosen at random between 01:00 and 05:00 in its time zone and kept in `/data/phone/update-check`, so phones spread out. And three minutes after a start when the last check is over a day old, which also covers a night the phone was off. Not before the clock has been set.
 - **What it tells.** The home screen's notices (`Update available`, `2 app updates`: [settings.md](settings.md#update)) and the web setup page's overview. What it found is kept in `/data/phone/update-latest` with the version it was compared with, so it survives a restart and stops counting once that release runs.
-- **Failures are quiet.** No notice, no status on the Update page, and what the last check found stays. Each check is one line in `/var/log/t48/update-check/current`: `daily check: firmware 20261126-1a2b3c4 available, 2 app updates`, or `daily check: firmware not reached, apps not reached (cannot reach the server)`. The next try is the next night.
-- **Off** under Settings, Update, Daily check, on the web setup page's Update page, or `daily=off` in `/data/config/update`. The only traffic is two small files from the channel and the feed's index.
+- **Quiet.** It never touches the Update page's status: `Checking` is not shown, and `Restart to finish` or a failed install's words stay as they were. VERSION, SHA256SUMS and the feed's index each get a minute. **Failures** show nothing, and what the last check found stays. Each check is one line in `/var/log/t48/update-check/current`: `daily check: firmware 20261126-1a2b3c4 available, 2 app updates`, or `daily check: firmware not reached, apps not reached (cannot reach the server)`. The next try is the next night.
+- **On a phone started from a USB stick** it asks the app feed only.
+- **Off** under Settings, Update, Daily check, on the web setup page's Update page (both also on a phone that is not installed, and while an update runs), or `daily=off` in `/data/config/update`. The only traffic is two small files from the channel and the feed's index.
 
 **Channels.** A channel is a folder on a web server with four files: `VERSION` (one line), `SHA256SUMS`, `system.img` and `T48S-kernel.uimg`.
 

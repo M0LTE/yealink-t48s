@@ -180,7 +180,8 @@ static int fetch(const char *url, const char *dest, long max_bytes, long expect,
         /* the phone's curl is built without knowing where the CA bundle is */
         if (access(CA_BUNDLE, R_OK) == 0) setenv("CURL_CA_BUNDLE", CA_BUNDLE, 0);
         execlp("curl", "curl", "-fsSL", "--proto", "=https,http,file", "--proto-redir", https ? "=https" : "=https,http",
-               "--connect-timeout", "20", "--max-time", "600", "--max-filesize", maxs, "-o", dest, "--", url, (char *)NULL);
+               "--connect-timeout", "20", "--max-time", strcmp(what, "index") ? "600" : "60", "--max-filesize", maxs, "-o", dest, "--", url,
+               (char *)NULL);
         _exit(127);
     }
     int status, last = -1;

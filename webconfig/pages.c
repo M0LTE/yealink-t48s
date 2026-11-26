@@ -1924,6 +1924,17 @@ static const char *update_when(const char *epoch)
     return o + (o[0] == ' ');
 }
 
+/* firmware and apps, once a night (issue #80): it finds, and never installs. Its own
+ * form, on every phone and while an update runs, as on the phone's screen */
+static void daily_form(struct req *r)
+{
+    H("<div class='card'>");
+    form_begin(r, "/update/daily", NULL);
+    H("<label class='check'><input type='checkbox' name='daily' value='on'%r> Daily check</label>"
+      "<div class='actions'><button type='submit'>Save</button></div></form></div>",
+      strcmp(val("update", "daily", "on"), "off") ? " checked" : "");
+}
+
 static void page_update(struct req *r)
 {
     struct update_info u;
@@ -1937,6 +1948,7 @@ static void page_update(struct req *r)
     page_begin(r, "Update", "/update");
     if (!inst) {
         H("<div class='card'><dl class='facts'><dt>Version</dt><dd>%s</dd></dl><p class='dim'>Not installed</p></div>", u.version);
+        daily_form(r);
         page_end(r);
         return;
     }
@@ -1987,11 +1999,9 @@ static void page_update(struct req *r)
           "<option value='testing'%r>Testing</option><option value='custom'%r>Custom</option></select></label>",
           !strcmp(u.channel, "stable") ? " selected" : "", !strcmp(u.channel, "testing") ? " selected" : "", named ? "" : " selected");
         field("Custom URL", "url", named ? "" : u.channel, "type='url' autocapitalize='none' spellcheck='false' placeholder='https://'", NULL);
-        /* firmware and apps, once a night (issue #80): it finds, and never installs */
-        H("</div><label class='check'><input type='checkbox' name='daily' value='on'%r> Daily check</label>",
-          strcmp(val("update", "daily", "on"), "off") ? " checked" : "");
-        H("<div class='actions'><button type='submit'>Save</button></div></form></div>");
+        H("</div><div class='actions'><button type='submit'>Save</button></div></form></div>");
     }
+    daily_form(r);
     page_end(r);
 }
 
@@ -2029,11 +2039,6 @@ static void post_update_channel(struct req *r)
     }
     update_read(&u);
     if (update_busy(&u) || update_pending(&u)) { flash(r, 1, "Update already running."); redirect(r, "/update"); return; }
-    if (cfg_set("update", "daily", !strcmp(form(r, "daily"), "on") ? "on" : "off") < 0) {
-        flash(r, 1, "Not saved: %s.", strerror(errno));
-        redirect(r, "/update");
-        return;
-    }
     /* the same channel again: nothing for the updater, and what the last check found stays */
     if (!strcmp(to, u.channel)) flash(r, 0, "Saved.");
     /* the updater has the last word on what a channel may be, and says why not */
@@ -2041,6 +2046,13 @@ static void post_update_channel(struct req *r)
         out[strcspn(out, "\r\n")] = 0;
         flash(r, 1, "Not saved: %s.", out[0] ? out : "updater did not finish");
     } else flash(r, 0, "Channel saved.");
+    redirect(r, "/update");
+}
+
+static void post_update_daily(struct req *r)
+{
+    if (cfg_set("update", "daily", !strcmp(form(r, "daily"), "on") ? "on" : "off") < 0) flash(r, 1, "Not saved: %s.", strerror(errno));
+    else flash(r, 0, "Saved.");
     redirect(r, "/update");
 }
 
@@ -2111,6 +2123,7 @@ const struct route routes[] = {
     {"POST", "/update/install", post_update_start},
     {"POST", "/update/kernel", post_update_start},
     {"POST", "/update/channel", post_update_channel},
+    {"POST", "/update/daily", post_update_daily},
     {"POST", "/update/restart", post_update_restart},
     {NULL, NULL, NULL},
 };

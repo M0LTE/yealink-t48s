@@ -426,6 +426,7 @@ int manifest_version_cmp(const char *a, const char *b);   /* <0, 0, >0 as a is o
 /* what the feed offers, as t48-app last read it: a file in the state folder (docs/apps.md) */
 #define T48_OFFERS "app-offers"
 int manifest_updates(const char *state, const char *feed);   /* installed apps the feed has newer */
+extern int manifest_scans;
 
 /* ---------- the one running app ---------- */
 

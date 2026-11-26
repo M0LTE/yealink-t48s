@@ -86,7 +86,7 @@ Alice Example|1002
 
 A front end for `t48-update` ([install.md](install.md)), which does all of the work: the page runs `t48-update info` to draw itself and the other commands for its buttons.
 
-- **Nothing is installed by itself.** Opening the page asks the network nothing; Check now does, and so does the daily check ([install.md](install.md#the-daily-check)), whose finding the overview shows as `Update available` (with the channel when it is not Stable) and the Apps tile as a count. Daily check is a tick box beside the channel, on unless turned off.
+- **Nothing is installed by itself.** Opening the page asks the network nothing; Check now does, and so does the daily check ([install.md](install.md#the-daily-check)), whose finding the overview shows as `Update available` (with the channel when it is not Stable) and the Apps tile as a count. Daily check is a tick box with its own Save, on unless turned off, there on a phone that is not installed and while an update runs.
 - Install is offered once a check has found an update. It writes the slot that is not in use; Restart, offered when it is done, tries it.
 - Install kernel is offered only when the channel's kernel differs from the one in flash, with a Confirm box: there is one kernel slot.
 - Check, install and kernel are started and left to run; the page answers at once and asks for itself again every three seconds while one is going (a `Refresh` header, so no script is needed). One at a time.

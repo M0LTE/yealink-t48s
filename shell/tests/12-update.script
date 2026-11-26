@@ -209,13 +209,19 @@ key x
 run echo no > simdata/update/installed
 key ok
 waitstate update.state notinstalled 3000
-expectstate settings.rows 2
+expectstate settings.rows 3
 expectstate settings.row Version
 expectstate settings.value 20261124-ac7a8f4
 key down
 expectstate settings.row Status
 expectstate settings.value Not_installed
 shot shots/update-not-installed.png
+# the daily check still asks the app feed there, and can be stopped
+key down
+key ok
+expectstate cfg.update.daily off
+key ok
+expectstate cfg.update.daily on
 key x
 key x
 expect idle

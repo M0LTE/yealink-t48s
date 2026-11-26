@@ -110,7 +110,7 @@ Issue [#31](https://github.com/M0LTE/yealink-t48s/issues/31). The page is a fron
 | Install kernel | only when the channel's kernel differs. Asks first, with `A failed kernel needs recovery mode` |
 | Last result | the last result and when: `v0.3.0 installed, 23 Nov 16:25` |
 
-A phone that is not installed (started from a USB stick) shows its version and `Not installed`, and nothing to press.
+A phone that is not installed (started from a USB stick) shows its version, `Not installed` and Daily check, which there asks the app feed only.
 
 **On the home screen.** When the daily check (or Check now) has found a newer release, the home screen has a notice, `Update available`, or `Testing: update available` on the testing channel and `Custom: update available` on a URL; when the feed has newer versions of installed apps, `2 app updates`. They come after missed calls and messages in the notice row, and go when the update is installed (an installed release waiting for its restart is no longer offered) or the channel changes. A touch on one opens this page or Apps. With keys, on the T46S too, Settings opens with the Update or Apps row chosen, and those rows say `Update available` and `3 installed, 2 updates`, so OK opens it.
 

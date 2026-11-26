@@ -241,7 +241,7 @@ class Pairing(unittest.TestCase):
             self.assertEqual(r.status, 403, path)
         self.assertEqual(self.p.get("sip", "user"), "1001")
         self.assertIsNone(self.p.get("access", "ssh"))
-        for path in ("/update/check", "/update/install", "/update/kernel", "/update/restart", "/update/channel"):
+        for path in ("/update/check", "/update/install", "/update/kernel", "/update/restart", "/update/channel", "/update/daily"):
             r = b.post(path, {"sure": "yes", "channel": "testing"}, csrf=False)
             self.assertEqual(r.status, 403, path)
         self.assertFalse(os.path.exists(os.path.join(self.p.fake, "calls")))
@@ -1281,7 +1281,7 @@ class Update(unittest.TestCase):
         r = self.page(lambda r: self.fact(r.body, "Status") == "Checking")
         # it asks for itself again, and offers nothing meanwhile
         self.assertIsNotNone(r.getheader("Refresh"))
-        self.assertNotIn("<form method='post' action='/update/", r.body)
+        self.assertNotRegex(r.body, r"action='/update/(?!daily')")   # Daily check stays
         self.assertEqual(self.fact(r.body, "Channel"), "Stable")
         # a second run is refused while one is going
         self.post("/update/check")
@@ -1320,7 +1320,7 @@ class Update(unittest.TestCase):
         self.fake("hold-downloading")
         r = self.page(lambda r: self.fact(r.body, "Status") == "Writing")
         self.assertIsNotNone(r.getheader("Refresh"))
-        self.assertNotIn("<form method='post' action='/update/", r.body)
+        self.assertNotRegex(r.body, r"action='/update/(?!daily')")   # Daily check stays
         self.fake("hold-writing")
         r = self.page(lambda r: self.fact(r.body, "Status") == "Restart to finish")
         self.assertIn("action='/update/restart'", r.body)
@@ -1411,22 +1411,32 @@ class Update(unittest.TestCase):
         self.assertIn("<p>Check or install</p>", tile())
 
     def test_daily_check(self):
-        r = self.page()
-        self.assertIn("<input type='checkbox' name='daily' value='on' checked> Daily check", r.body)
-        # off: written to the settings the daily check reads; the channel is left alone
+        box = "<input type='checkbox' name='daily' value='on'%s> Daily check"
+        self.assertIn(box % " checked", self.page().body)
+        # off: written to the settings the daily check reads; nothing else changes
         self.fake("offer", "latest=v0.3.0\nupdate=yes\nkernel=same\n")
         self.post("/update/check")
         self.page(lambda r: self.fact(r.body, "Status") == "Update available")
-        self.post("/update/channel", {"channel": "stable", "url": ""})
+        self.post("/update/daily", {})
         r = self.page()
         self.assertEqual(self.flash(r), (False, "Saved."))
         self.assertEqual(self.p.get("update", "daily"), "off")
-        self.assertIn("<input type='checkbox' name='daily' value='on'> Daily check", r.body)
+        self.assertIn(box % "", r.body)
         self.assertEqual(self.fact(r.body, "Status"), "Update available")
-        self.assertEqual(self.calls(), ["check"])
-        self.post("/update/channel", {"channel": "stable", "url": "", "daily": "on"})
+        # while an update runs, as on the phone
+        self.fake("hold-downloading", "")
+        self.post("/update/install")
+        r = self.page(lambda r: self.fact(r.body, "Status") == "Downloading")
+        self.assertIn(box % "", r.body)
+        self.post("/update/daily", {"daily": "on"})
         self.assertEqual(self.p.get("update", "daily"), "on")
-        self.assertIn("value='on' checked> Daily check", self.page().body)
+        self.fake("hold-downloading")
+        self.assertIn(box % " checked", self.page().body)
+        # the same channel saved again: the updater is not asked, what was found stays
+        self.post("/update/channel", {"channel": "stable", "url": ""})
+        self.assertEqual(self.calls(), ["check", "install"])
+        self.assertEqual(self.b.post("/update/daily", {}, csrf=False).status, 403)
+        self.assertEqual(self.p.get("update", "daily"), "on")
 
     def test_kernel_differs(self):
         self.fake("offer", "latest=v0.3.0\nupdate=no\nkernel=differs\n")
@@ -1455,8 +1465,12 @@ class Update(unittest.TestCase):
         r = self.page()
         self.assertEqual(self.fact(r.body, "Version"), "v0.2.0")
         self.assertIn("Not installed", r.body)
-        self.assertNotIn("action='/update/", r.body)
+        self.assertNotRegex(r.body, r"action='/update/(?!daily')")
         self.assertIsNone(self.fact(r.body, "Latest"))
+        # the daily check still asks the app feed: it can be stopped here too
+        self.assertIn("<input type='checkbox' name='daily' value='on' checked> Daily check", r.body)
+        self.post("/update/daily", {})
+        self.assertEqual(self.p.get("update", "daily"), "off")
         for path in ("/update/check", "/update/install", "/update/kernel"):
             self.post(path, {"sure": "yes"})
             self.assertEqual(self.flash(self.page()), (True, "Not installed."), path)
@@ -1464,7 +1478,7 @@ class Update(unittest.TestCase):
 
     def test_forms_need_the_token(self):
         self.fake("offer", "latest=v0.3.0\nupdate=yes\nkernel=differs\n")
-        for path in ("/update/check", "/update/install", "/update/kernel", "/update/restart", "/update/channel"):
+        for path in ("/update/check", "/update/install", "/update/kernel", "/update/restart", "/update/channel", "/update/daily"):
             fields = {"sure": "yes", "channel": "testing"}
             self.assertEqual(self.b.post(path, fields, csrf=False).status, 403, path)
             self.assertEqual(self.b.post(path, fields, headers={"Origin": "http://evil.example"}).status, 403, path)

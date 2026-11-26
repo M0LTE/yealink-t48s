@@ -180,6 +180,14 @@ line=$($UPD daily now)
 if $UPD check --quiet 2>/dev/null; then fail "a quiet check against nothing passed"; fi
 [ "$(info state)" = idle ] && [ "$(info latest)" = v5 ] && pass "check --quiet: the same" || fail "check --quiet"
 mv "$T/gh.away" "$T/gh"
+# it leaves the state alone: a kernel written and waiting for its restart, the words of a failed install
+for st in 'state=restart\nmessage=' 'state=failed\nmessage=Checksum mismatch'; do
+    printf "$st\n" > "$T/run/t48-update/state"; cp "$T/run/t48-update/state" "$T/state.before"
+    $UPD daily now >/dev/null
+    cmp -s "$T/run/t48-update/state" "$T/state.before" || fail "the daily check changed the state: $(cat "$T/run/t48-update/state")"
+done
+[ "$(info state)" = failed ] && [ "$(info message)" = "Checksum mismatch" ] && pass "the daily check leaves Restart to finish and a failed install's words as they were" || fail "state after daily"
+printf 'state=idle\nmessage=\n' > "$T/run/t48-update/state"
 
 # when it is due: soon after a start when the last check is over a day old, and at this phone's time in the night
 due() { echo "${3:-200}.5 1.0" > "$T/proc/uptime"; T48_NOW=$1 $UPD daily due; }

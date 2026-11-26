@@ -11,6 +11,7 @@
 
 struct manifest apps[MAX_APPS];
 int napps;
+int manifest_scans;   /* how many times the list has been read: a count made from it is stale when this moves */
 
 int manifest_id_ok(const char *id)
 {
@@ -149,6 +150,7 @@ void manifests_scan(const char *dirs)
 {
     for (int i = 0; i < napps; i++) manifest_free(&apps[i]);
     napps = 0;
+    manifest_scans++;
 
     char *list = strdup(dirs), *save = NULL;
     for (char *d = strtok_r(list, ":", &save); d; d = strtok_r(NULL, ":", &save)) {
