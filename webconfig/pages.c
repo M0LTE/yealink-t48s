@@ -2079,7 +2079,7 @@ static void update_read(struct update_info *u)
 /* "Update available", as the phone's home screen says it; NULL for none */
 static const char *update_notice(const struct update_info *u)
 {
-    if (strcmp(u->installed, "yes") || strcmp(u->update, "yes") || !strcmp(u->state, "restart")) return NULL;
+    if (strcmp(u->installed, "yes") || (strcmp(u->update, "yes") && strcmp(u->kernel, "differs")) || !strcmp(u->state, "restart")) return NULL;
     return !strcmp(u->channel, "stable") ? "Update available" : !strcmp(u->channel, "testing") ? "Testing: update available"
                                                                                                : "Custom: update available";
 }

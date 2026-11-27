@@ -405,10 +405,10 @@ void settings_update_watch(long long now)
     if (upd.cmd_pid <= 0) update_info();
 }
 
-/* "Update available", with the channel when it is not the usual one; "" when there is none */
+/* "Update available" for a new system or kernel, with the channel when it is not the usual one; "" when there is none */
 const char *settings_update_notice(void)
 {
-    if (!upd.loaded || !upd.installed || strcmp(upd.update, "yes") || !strcmp(upd.state, "restart")) return "";
+    if (!upd.loaded || !upd.installed || (strcmp(upd.update, "yes") && strcmp(upd.kernel, "differs")) || !strcmp(upd.state, "restart")) return "";
     return !strcmp(upd.channel, "stable") ? "Update available" : !strcmp(upd.channel, "testing") ? "Testing: update available"
                                                                                                  : "Custom: update available";
 }
