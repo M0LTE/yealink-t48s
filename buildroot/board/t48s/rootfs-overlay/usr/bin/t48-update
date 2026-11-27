@@ -160,8 +160,8 @@ do_check() {
     fi
     # with what it was compared against: it holds only while both are still so
     mkdir -p "$KEEP" 2>/dev/null
-    printf 'latest=%s\nsystem=%s\nkernel_sum=%s\nupdate=%s\nkernel=%s\nchecked=%s\nbase=%s\nrunning=%s\n' \
-        "$latest" "$sys" "$ker" "$up" "$k" "$(now)" "$b" "$(version)" > "$LATEST.new" && mv "$LATEST.new" "$LATEST"
+    printf 'latest=%s\nsystem=%s\nkernel_sum=%s\nupdate=%s\nkernel=%s\nchecked=%s\nbase=%s\nrunning=%s\nslot=%s\n' \
+        "$latest" "$sys" "$ker" "$up" "$k" "$(now)" "$b" "$(version)" "$cur" > "$LATEST.new" && mv "$LATEST.new" "$LATEST"
 }
 
 # check_channel: the check with the lock, for "check" and the daily check
@@ -317,8 +317,8 @@ info)
     echo "version=$(version)"
     echo "channel=$(channel)"
     echo "url=$(base)"
-    # what the last check found, if it was this channel and this version
-    if [ "$(get "$LATEST" base)" = "$(base)" ] && [ "$(get "$LATEST" running)" = "$(version)" ]; then
+    # what the last check found, if it was this channel, this version and this slot
+    if [ "$(get "$LATEST" base)" = "$(base)" ] && [ "$(get "$LATEST" running)" = "$(version)" ] && [ "$(get "$LATEST" slot)" = "$(booted)" ]; then
         grep -E '^(latest|update|kernel|checked)=' "$LATEST"
     else
         printf 'latest=\nupdate=unknown\nkernel=unknown\nchecked=\n'
